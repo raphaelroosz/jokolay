@@ -229,7 +229,7 @@ impl LoadedPack {
         link: &MumbleLink,
         default_tex_id: &TextureHandle,
     ) {
-        trace!(
+        info!(
             self.current_map_data.map_id,
             link.map_id, "current map data is updated."
         );
@@ -326,7 +326,7 @@ impl LoadedPack {
                         }
                     }
                 } else {
-                    trace!("no texture attribute on this marker");
+                    info!("no texture attribute on this marker");
                 }
                 let th = attrs
                     .get_icon_file()
@@ -386,7 +386,7 @@ impl LoadedPack {
                         }
                     }
                 } else {
-                    trace!("no texture attribute on this marker");
+                    info!("no texture attribute on this marker");
                 }
                 let th = common_attributes
                     .get_texture()
@@ -396,13 +396,13 @@ impl LoadedPack {
                 let tbin_path = if let Some(tbin) = common_attributes.get_trail_data() {
                     tbin
                 } else {
-                    trace!(?trail, "missing tbin path");
+                    info!(?trail, "missing tbin path");
                     continue;
                 };
                 let tbin = if let Some(tbin) = self.core.tbins.get(tbin_path) {
                     tbin
                 } else {
-                    trace!(%tbin_path, "failed to find tbin");
+                    info!(%tbin_path, "failed to find tbin");
                     continue;
                 };
                 if let Some(active_trail) = ActiveTrail::get_vertices_and_texture(

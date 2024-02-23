@@ -98,9 +98,6 @@ impl RelativePath {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-    pub fn alternative(&self) -> Self {
-        return Self(self.0.clone().replace("/", "\\").into());
-    }
 }
 
 impl std::fmt::Display for RelativePath {

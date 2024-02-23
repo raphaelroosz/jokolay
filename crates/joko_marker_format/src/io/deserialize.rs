@@ -632,13 +632,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                     common_attributes.update_common_attributes_from_element(child, &names);
                     if let Some(icon_file) = common_attributes.get_icon_file() {
                         if !new_pack.textures.contains_key(icon_file) {
-                            let alternative_icon_file = icon_file.alternative();
-                            if new_pack.textures.contains_key(&alternative_icon_file) {
-                                info!(%alternative_icon_file, "renamed texture to alternative");
-                                common_attributes.set_icon_file(Some(alternative_icon_file));
-                            } else {
-                                info!(%icon_file, "failed to find this texture in this pack");
-                            }
+                            info!(%icon_file, "failed to find this texture in this pack");
                         }
                     } else if let Some(icf) = child.get_attribute(names.icon_file) {
                         info!(icf, "marker's icon file attribute failed to parse");
@@ -670,15 +664,8 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
 
                     if let Some(tex) = common_attributes.get_texture() {
                         if !new_pack.textures.contains_key(tex) {
-                            let alternative_tex_file = tex.alternative();
-                            if new_pack.textures.contains_key(&alternative_tex_file) {
-                                info!(%alternative_tex_file, "renamed texture to alternative");
-                                common_attributes.set_texture(Some(alternative_tex_file));
-                            } else {
-                                info!(%tex, "failed to find this texture in this pack");
-                            }
+                            info!(%tex, "failed to find this texture in this pack");
                         }
-
                     }
 
                     let trail = Trail {
