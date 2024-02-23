@@ -105,7 +105,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
             .wrap_err("failed to get file type")?
             .is_file()
         {
-            if path.ends_with("png") || path.ends_with("trl") {
+            if path.ends_with(".png") || path.ends_with(".trl") {
                 let mut bytes = vec![];
                 entry
                     .open()
@@ -114,14 +114,14 @@ fn recursive_walk_dir_and_read_images_and_tbins(
                     .read_to_end(&mut bytes)
                     .into_diagnostic()
                     .wrap_err("failed to read file contents")?;
-                if name.ends_with("png") {
+                if name.ends_with(".png") {
                     images.insert(path.clone(), Texture{ //it is the presence in the directory that defines the source of information
                         path: path.clone(),
                         original: parent_path.to_string(),
                         source: parent_path.to_string(),
                         bytes
                     });
-                } else if name.ends_with("trl") {
+                } else if name.ends_with(".trl") {
                     if let Some(tbin) = parse_tbin_from_slice(&bytes) {
                         tbins.insert(path, tbin);
                     } else {
@@ -477,11 +477,11 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
     // So, we can't iterate AND read the file at the same time
     for name in zip_archive.file_names() {
         let name_as_string = name.to_string();
-        if name_as_string.ends_with("png") {
+        if name_as_string.ends_with(".png") {
             images.push(name_as_string);
-        } else if name_as_string.ends_with("trl") {
+        } else if name_as_string.ends_with(".trl") {
             tbins.push(name_as_string);
-        } else if name_as_string.ends_with("xml") {
+        } else if name_as_string.ends_with(".xml") {
             xmls.push(name_as_string);
         } else if name_as_string.replace("\\", "/").ends_with('/') {
             // directory. so, we can silently ignore this.
