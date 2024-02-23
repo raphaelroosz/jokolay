@@ -75,7 +75,7 @@ pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
                         }
                     }
                 }
-            } 
+            }
         } else {
             trace!("file ignored: {name}")
         }
