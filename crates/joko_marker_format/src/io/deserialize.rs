@@ -567,7 +567,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
         };
 
         // parse_categories
-        recursive_marker_category_parser(&tree, tree.children(od), &mut new_pack.categories, &names);
+        recursive_marker_category_parser(&tree, tree.children(od), &mut pack.categories, &names);
 
         let pois = match tree.children(od).find(|node| {
             tree.element(*node)
@@ -677,7 +677,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                     if !pack.maps.contains_key(&map_id) {
                         pack.maps.insert(map_id, MapData::default());
                     }
-                    new_pack.maps.get_mut(&map_id).unwrap().trails.push(trail);
+                    pack.maps.get_mut(&map_id).unwrap().trails.push(trail);
                 } else {
                     let td = child.get_attribute(names.trail_data);
                     let rp: RelativePath = td.unwrap_or_default().parse().unwrap();
