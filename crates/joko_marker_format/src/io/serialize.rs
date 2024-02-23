@@ -1,12 +1,13 @@
 use crate::{
-    pack::{Category, Marker, PackCore, RelativePath, Trail},
+    pack::{Category, Marker, PackCore, RelativePath, Trail, Texture},
     BASE64_ENGINE,
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
 use indexmap::IndexMap;
 use miette::{Context, IntoDiagnostic, Result};
-use std::{collections::HashSet, io::Write};
+use std::{io::Write};
+use ordered_hash_map::{OrderedHashSet};
 use tracing::info;
 use xot::{Element, Node, SerializeOptions, Xot};
 
@@ -16,9 +17,9 @@ pub(crate) fn save_pack_core_to_dir(
     pack_core: &PackCore,
     dir: &Dir,
     cats: bool,
-    mut maps: HashSet<u32>,
-    mut textures: HashSet<RelativePath>,
-    mut tbins: HashSet<RelativePath>,
+    mut maps: OrderedHashSet<u32>,
+    mut textures: OrderedHashSet<RelativePath>,
+    mut tbins: OrderedHashSet<RelativePath>,
     all: bool,
 ) -> Result<()> {
     if cats || all {
@@ -117,7 +118,7 @@ pub(crate) fn save_pack_core_to_dir(
             dir.create(img_path.as_str())
                 .into_diagnostic()
                 .wrap_err_with(|| miette::miette!("failed to create file for image: {img_path}"))?
-                .write(img)
+                .write(&img.bytes)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     miette::miette!("failed to write image bytes to file: {img_path}")

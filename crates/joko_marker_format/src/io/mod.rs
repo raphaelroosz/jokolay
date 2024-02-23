@@ -16,6 +16,7 @@ pub(crate) struct XotAttributeNameIDs {
     pub pois: NameId,
     pub poi: NameId,
     pub trail: NameId,
+    pub route: NameId,
     // marker specific attributes
     pub category: NameId,
     pub guid: NameId,
@@ -97,6 +98,7 @@ impl XotAttributeNameIDs {
             pois: tree.add_name("POIs"),
             poi: tree.add_name("POI"),
             trail: tree.add_name("Trail"),
+            route: tree.add_name("Route"),
             // non inheritable attributes
             category: tree.add_name("type"),
             xpos: tree.add_name("xpos"),

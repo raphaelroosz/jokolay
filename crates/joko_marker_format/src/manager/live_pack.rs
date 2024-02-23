@@ -1,7 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet},
     sync::Arc,
 };
+use ordered_hash_map::{OrderedHashMap, OrderedHashSet};
 
 use cap_std::fs_utf8::Dir;
 use egui::{ColorImage, TextureHandle};
@@ -9,7 +9,7 @@ use glam::{vec2, Vec2, Vec3};
 use image::EncodableLayout;
 use indexmap::IndexMap;
 use joko_render::billboard::{MarkerObject, MarkerVertex, TrailObject};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
@@ -30,7 +30,7 @@ pub(crate) struct LoadedPack {
     /// The actual xml pack.
     pub core: PackCore,
     /// The selection of categories which are "enabled" and markers belonging to these may be rendered
-    cats_selection: HashMap<String, CategorySelection>,
+    cats_selection: OrderedHashMap<String, CategorySelection>,
     dirty: Dirty,
     activation_data: ActivationData,
     current_map_data: CurrentMapData,
@@ -44,11 +44,11 @@ struct Dirty {
     /// whether cats selection needs to be saved
     cats_selection: bool,
     /// Whether any mapdata needs saving
-    map_dirty: HashSet<u32>,
+    map_dirty: OrderedHashSet<u32>,
     /// whether any texture needs saving
-    texture: HashSet<RelativePath>,
+    texture: OrderedHashSet<RelativePath>,
     /// whether any tbin needs saving
-    tbin: HashSet<RelativePath>,
+    tbin: OrderedHashSet<RelativePath>,
 }
 
 impl Dirty {
@@ -97,11 +97,16 @@ impl LoadedPack {
         }
     }
     pub fn category_sub_menu(&mut self, ui: &mut egui::Ui) {
-        CategorySelection::recursive_selection_ui(
-            &mut self.cats_selection,
-            ui,
-            &mut self.dirty.cats_selection,
-        );
+        //TODO: find a way to merge categories (see LadyElyssa pack)
+        //it is important to generate a new id each time to avoid collision
+        //or to do a look up of an already existing menu
+        ui.push_id(ui.next_auto_id(), |ui| {
+            CategorySelection::recursive_selection_ui(
+                &mut self.cats_selection,
+                ui,
+                &mut self.dirty.cats_selection,
+            );
+        });
     }
     pub fn load_from_dir(dir: Arc<Dir>) -> Result<Self> {
         if !dir
@@ -224,7 +229,7 @@ impl LoadedPack {
         link: &MumbleLink,
         default_tex_id: &TextureHandle,
     ) {
-        info!(
+        trace!(
             self.current_map_data.map_id,
             link.map_id, "current map data is updated."
         );
@@ -241,6 +246,7 @@ impl LoadedPack {
             "",
             &Default::default(),
         );
+        let mut failure_loading = false;
         for (index, marker) in self
             .core
             .maps
@@ -302,7 +308,7 @@ impl LoadedPack {
                 if let Some(tex_path) = attrs.get_icon_file() {
                     if !self.current_map_data.active_textures.contains_key(tex_path) {
                         if let Some(tex) = self.core.textures.get(tex_path) {
-                            let img = image::load_from_memory(tex).unwrap();
+                            let img = image::load_from_memory(&tex.bytes).unwrap();
                             self.current_map_data.active_textures.insert(
                                 tex_path.clone(),
                                 etx.load_texture(
@@ -315,11 +321,12 @@ impl LoadedPack {
                                 ),
                             );
                         } else {
-                            info!(%tex_path, ?self.core.textures, "failed to find this texture");
+                            info!(%tex_path, "failed to find this icon texture");
+                            failure_loading = true;
                         }
                     }
                 } else {
-                    info!("no texture attribute on this marker");
+                    trace!("no texture attribute on this marker");
                 }
                 let th = attrs
                     .get_icon_file()
@@ -361,7 +368,7 @@ impl LoadedPack {
                 if let Some(tex_path) = common_attributes.get_texture() {
                     if !self.current_map_data.active_textures.contains_key(tex_path) {
                         if let Some(tex) = self.core.textures.get(tex_path) {
-                            let img = image::load_from_memory(tex).unwrap();
+                            let img = image::load_from_memory(&tex.bytes).unwrap();
                             self.current_map_data.active_textures.insert(
                                 tex_path.clone(),
                                 etx.load_texture(
@@ -374,11 +381,12 @@ impl LoadedPack {
                                 ),
                             );
                         } else {
-                            info!(%tex_path, ?self.core.textures, "failed to find this texture");
+                            info!(%tex_path, "failed to find this trail texture");
+                            failure_loading = true;
                         }
                     }
                 } else {
-                    info!("no texture attribute on this marker");
+                    trace!("no texture attribute on this marker");
                 }
                 let th = common_attributes
                     .get_texture()
@@ -388,13 +396,13 @@ impl LoadedPack {
                 let tbin_path = if let Some(tbin) = common_attributes.get_trail_data() {
                     tbin
                 } else {
-                    info!(?trail, "missing tbin path");
+                    trace!(?trail, "missing tbin path");
                     continue;
                 };
                 let tbin = if let Some(tbin) = self.core.tbins.get(tbin_path) {
                     tbin
                 } else {
-                    info!(%tbin_path, "failed to find tbin");
+                    trace!(%tbin_path, "failed to find tbin");
                     continue;
                 };
                 if let Some(active_trail) = ActiveTrail::get_vertices_and_texture(
@@ -407,6 +415,13 @@ impl LoadedPack {
                         .insert(index, active_trail);
                 }
             }
+        }
+        if failure_loading {
+            info!("Error when loading textures, here are the keys:");
+            for k in self.core.textures.keys() {
+                info!(%k);
+            }
+            info!("end of keys");
         }
     }
     pub fn save_all(&mut self) -> Result<()> {
@@ -457,7 +472,7 @@ pub(crate) struct CurrentMapData {
     /// the map to which the current map data belongs to
     pub map_id: u32,
     /// The textures that are being used by the markers, so must be kept alive by this hashmap
-    pub active_textures: HashMap<RelativePath, TextureHandle>,
+    pub active_textures: OrderedHashMap<RelativePath, TextureHandle>,
     /// The key is the index of the marker in the map markers
     /// Their position in the map markers serves as their "id" as uuids can be duplicates.
     pub active_markers: IndexMap<usize, ActiveMarker>,
@@ -493,19 +508,19 @@ pub(crate) struct ActiveMarker {
 struct CategorySelection {
     pub selected: bool,
     pub display_name: String,
-    pub children: HashMap<String, CategorySelection>,
+    pub children: OrderedHashMap<String, CategorySelection>,
 }
 
 impl CategorySelection {
-    fn default_from_pack_core(pack: &PackCore) -> HashMap<String, CategorySelection> {
-        let mut selection = HashMap::new();
+    fn default_from_pack_core(pack: &PackCore) -> OrderedHashMap<String, CategorySelection> {
+        let mut selection = OrderedHashMap::new();
         Self::recursive_create_category_selection(&mut selection, &pack.categories);
         selection
     }
     fn recursive_get_full_names(
-        selection: &HashMap<String, CategorySelection>,
+        selection: &OrderedHashMap<String, CategorySelection>,
         cats: &IndexMap<String, Category>,
-        list: &mut HashMap<String, CommonAttributes>,
+        list: &mut OrderedHashMap<String, CommonAttributes>,
         parent_name: &str,
         parent_common_attributes: &CommonAttributes,
     ) {
@@ -533,18 +548,22 @@ impl CategorySelection {
         }
     }
     fn recursive_create_category_selection(
-        selection: &mut HashMap<String, CategorySelection>,
+        selection: &mut OrderedHashMap<String, CategorySelection>,
         cats: &IndexMap<String, Category>,
     ) {
         for (cat_name, cat) in cats.iter() {
-            let s = selection.entry(cat_name.clone()).or_default();
-            s.selected = cat.default_enabled;
-            s.display_name = cat.display_name.clone();
+            if !selection.contains_key(cat_name) {
+                let mut to_insert = CategorySelection::default();
+                to_insert.selected = cat.default_enabled;
+                to_insert.display_name = cat.display_name.clone();
+                selection.insert(cat_name.clone(), to_insert);
+            }
+            let mut s = selection.get_mut(cat_name).unwrap();
             Self::recursive_create_category_selection(&mut s.children, &cat.children);
         }
     }
     fn recursive_selection_ui(
-        selection: &mut HashMap<String, CategorySelection>,
+        selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         changed: &mut bool,
     ) {
@@ -560,6 +579,7 @@ impl CategorySelection {
                         });
                     } else {
                         ui.label(&cat.display_name);
+                        info!("create category {:?}", cat.display_name);
                     }
                 });
             }

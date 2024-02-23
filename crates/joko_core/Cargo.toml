@@ -26,3 +26,4 @@ serde_json = { workspace = true }
 indexmap = { workspace = true }
 rfd = { workspace = true }
 glam = { workspace = true }
+ordered_hash_map = { workspace = true }

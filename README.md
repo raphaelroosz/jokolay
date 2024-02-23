@@ -36,3 +36,5 @@ for now, just look at the github workflow file.
 I will primarily be testing `Jokolay` on `Endeavour (Arch) OS` / `KDE Plasma` latest. need more guinea pigs to test things on other DEs. 
 
 
+=> try winit
+https://docs.rs/winit/latest/winit/index.html

@@ -2,9 +2,10 @@ mod common;
 mod marker;
 mod trail;
 
-use std::{collections::BTreeMap, str::FromStr};
+use std::{str::FromStr};
 
 use indexmap::IndexMap;
+use ordered_hash_map;
 
 pub use common::*;
 pub(crate) use marker::*;
@@ -12,11 +13,19 @@ use smol_str::SmolStr;
 pub(crate) use trail::*;
 
 #[derive(Default, Debug, Clone)]
+pub(crate) struct Texture {
+    pub path: RelativePath,
+    pub original: String, //raw original name
+    pub source: String,//where this was defined for the first time
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Default, Debug, Clone)]
 pub(crate) struct PackCore {
-    pub textures: BTreeMap<RelativePath, Vec<u8>>,
-    pub tbins: BTreeMap<RelativePath, TBin>,
+    pub textures: ordered_hash_map::OrderedHashMap<RelativePath, Texture>,
+    pub tbins: ordered_hash_map::OrderedHashMap<RelativePath, TBin>,
     pub categories: IndexMap<String, Category>,
-    pub maps: BTreeMap<u32, MapData>,
+    pub maps: ordered_hash_map::OrderedHashMap<u32, MapData>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -89,6 +98,9 @@ impl RelativePath {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+    pub fn alternative(&self) -> Self {
+        return Self(self.0.clone().replace("/", "\\").into());
+    }
 }
 
 impl std::fmt::Display for RelativePath {
@@ -96,6 +108,7 @@ impl std::fmt::Display for RelativePath {
         self.0.fmt(f)
     }
 }
+
 impl From<RelativePath> for String {
     fn from(val: RelativePath) -> String {
         val.0.into()

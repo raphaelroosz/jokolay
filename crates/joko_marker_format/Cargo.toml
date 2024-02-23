@@ -36,6 +36,7 @@ itertools = { workspace = true }
 time = { workspace = true , features = ["serde"]}
 phf = { version = "*", features = ["macros"] }
 paste = { version = "*" }
+ordered_hash_map = { workspace = true }
 joko_render = { path = "../joko_render" }
 jokolink = { path = "../jokolink" }
 jokoapi = { path = "../jokoapi" }

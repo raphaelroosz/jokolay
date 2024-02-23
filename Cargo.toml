@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-tracing = { version = "0.1" }
+tracing = { version = "0.1", features = ["max_level_trace", "release_max_level_info"] }
 ringbuffer = { version = "0.14" }
 egui = { version = "*" }
 egui_extras = { version = "*" }
@@ -36,3 +36,4 @@ indexmap = { version = "2" }
 rfd = { version = "*" }
 smol_str = { version = "*" }
 itertools = { version = "*" }
+ordered_hash_map = { version = "*", features= ["serde"] }

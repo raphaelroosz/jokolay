@@ -239,29 +239,42 @@ macro_rules! update_attribute_from_ele {
 ///     }
 /// }
 /// ```
+
+fn parse_boolean(raw_value: &str) -> Option<bool> {
+    let trimmed = raw_value.trim().to_lowercase();
+    match trimmed.as_ref() {
+        "true" => {Some(true)},
+        "false" => {Some(false)},
+        _ => {
+            match trimmed.parse::<i8>() {//might entirely get rid of parsing
+                Ok(parsed_value) => {
+                    match parsed_value {
+                        0 | 1 => {
+                            Some(parsed_value == 1)
+                        }
+                        _ => None
+                    }
+                }
+                Err(_e) => {
+                    None
+                }
+            }
+        },
+    }
+}
 macro_rules! update_attribute_bool_from_ele {
     ($common_attributes: ident, $ele: ident,$names: ident, [$($field: ident),+]) => {
         $(if let Some(value) = $ele.get_attribute($names.$field) {
-            match value.trim().parse::<i8>() {
-                Ok(value) => {
-                    match value {
-                        0 | 1 => {
-                            $common_attributes
-                            .active_attributes
-                            .insert(ActiveAttributes::$field);
-                            $common_attributes.bool_attributes.set(
-                                BoolAttributes::$field,
-                                if value == 0 { false } else { true },
-                            );
-                        }
-                        _ => {
-                            info!(value, "failed to parse {}", stringify!($field));
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::info!(?e, value, "failed to parse {}", stringify!($field));
-                }
+            if let Some(found) = parse_boolean(value) {
+                $common_attributes
+                .active_attributes
+                .insert(ActiveAttributes::$field);
+                $common_attributes.bool_attributes.set(
+                    BoolAttributes::$field,
+                    found,
+                );
+            } else {
+                tracing::info!(value, "failed to parse {}", stringify!($field));
             }
         })+
     };
@@ -285,7 +298,7 @@ macro_rules! update_attribute_bool_from_ele {
 ///         match value.trim().parse::<t1>() {
 ///             Ok(flag) => {
 ///                 ca
-///                 .active_attribus
+///                 .active_attributes
 ///                 .insert(ActiveAttributes::field1);
 ///                 ca.field1.set(flag);
 ///             }
