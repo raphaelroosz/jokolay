@@ -463,7 +463,7 @@ fn recursive_marker_category_parser_categories_xml(
 #[instrument(skip_all)]
 pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
     // all the contents of ZPack
-    let mut new_pack = PackCore::default();
+    let mut pack = PackCore::default();
     // parse zip file
     let mut zip_archive = zip::ZipArchive::new(std::io::Cursor::new(taco))
         .into_diagnostic()
@@ -496,7 +496,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
         if let Some(bytes) = read_file_bytes_from_zip_by_name(&name, &mut zip_archive) {
             match image::load_from_memory_with_format(&bytes, image::ImageFormat::Png) {
                 Ok(_) => assert!(
-                    new_pack.textures.insert(file_path.clone(), Texture{
+                    pack.textures.insert(file_path.clone(), Texture{
                         path: file_path.clone(),
                         original: name.clone(),
                         source: String::from(std::str::from_utf8(taco).unwrap_or_default()),
@@ -519,7 +519,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
         if let Some(bytes) = read_file_bytes_from_zip_by_name(&name, &mut zip_archive) {
             if let Some(tbin) = parse_tbin_from_slice(&bytes) {
                 assert!(
-                    new_pack.tbins.insert(file_path, tbin).is_none(),
+                    pack.tbins.insert(file_path, tbin).is_none(),
                     "duplicate tbin file {name}"
                 );
             } else {
@@ -631,7 +631,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                     let mut common_attributes = CommonAttributes::default();
                     common_attributes.update_common_attributes_from_element(child, &names);
                     if let Some(icon_file) = common_attributes.get_icon_file() {
-                        if !new_pack.textures.contains_key(icon_file) {
+                        if !pack.textures.contains_key(icon_file) {
                             info!(%icon_file, "failed to find this texture in this pack");
                         }
                     } else if let Some(icf) = child.get_attribute(names.icon_file) {
@@ -644,10 +644,10 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                         attrs: common_attributes,
                         guid,
                     };
-                    if !new_pack.maps.contains_key(&map_id) {
-                        new_pack.maps.insert(map_id, MapData::default());
+                    if !pack.maps.contains_key(&map_id) {
+                        pack.maps.insert(map_id, MapData::default());
                     }
-                    new_pack.maps.get_mut(&map_id).unwrap().markers.push(marker);
+                    pack.maps.get_mut(&map_id).unwrap().markers.push(marker);
                 } else {
                     info!("missing map id")
                 }
@@ -656,14 +656,14 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                     .get_attribute(names.trail_data)
                     .and_then(|trail_data| {
                         let path: RelativePath = trail_data.parse().unwrap();
-                        new_pack.tbins.get(&path).map(|tb| tb.map_id)
+                        pack.tbins.get(&path).map(|tb| tb.map_id)
                     })
                 {
                     let mut common_attributes = CommonAttributes::default();
                     common_attributes.update_common_attributes_from_element(child, &names);
 
                     if let Some(tex) = common_attributes.get_texture() {
-                        if !new_pack.textures.contains_key(tex) {
+                        if !pack.textures.contains_key(tex) {
                             info!(%tex, "failed to find this texture in this pack");
                         }
                     }
@@ -674,14 +674,14 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                         props: common_attributes,
                         guid,
                     };
-                    if !new_pack.maps.contains_key(&map_id) {
-                        new_pack.maps.insert(map_id, MapData::default());
+                    if !pack.maps.contains_key(&map_id) {
+                        pack.maps.insert(map_id, MapData::default());
                     }
                     new_pack.maps.get_mut(&map_id).unwrap().trails.push(trail);
                 } else {
                     let td = child.get_attribute(names.trail_data);
                     let rp: RelativePath = td.unwrap_or_default().parse().unwrap();
-                    let tbin = new_pack.tbins.get(&rp).map(|tbin| (tbin.map_id, tbin.version));
+                    let tbin = pack.tbins.get(&rp).map(|tbin| (tbin.map_id, tbin.version));
                     info!("missing map_id: {td:?} {rp} {tbin:?}");
                 }
             } else {
@@ -692,7 +692,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
         drop(span_guard);
     }
 
-    Ok(new_pack)
+    Ok(pack)
 }
 #[instrument(skip(zip_archive))]
 fn read_file_bytes_from_zip_by_name<T: std::io::Read + std::io::Seek>(
