@@ -37,3 +37,7 @@ rfd = { version = "*" }
 smol_str = { version = "*" }
 itertools = { version = "*" }
 ordered_hash_map = { version = "*", features= ["serde"] }
+
+[profile.release]
+strip = "symbols"
+lto = true

@@ -1,6 +1,7 @@
 mod common;
 mod marker;
 mod trail;
+mod route;
 
 use std::{str::FromStr};
 
@@ -11,18 +12,12 @@ pub use common::*;
 pub(crate) use marker::*;
 use smol_str::SmolStr;
 pub(crate) use trail::*;
+pub(crate) use route::*;
 
-#[derive(Default, Debug, Clone)]
-pub(crate) struct Texture {
-    pub path: RelativePath,
-    pub original: String, //raw original name
-    pub source: String,//where this was defined for the first time
-    pub bytes: Vec<u8>,
-}
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct PackCore {
-    pub textures: ordered_hash_map::OrderedHashMap<RelativePath, Texture>,
+    pub textures: ordered_hash_map::OrderedHashMap<RelativePath, Vec<u8>>,
     pub tbins: ordered_hash_map::OrderedHashMap<RelativePath, TBin>,
     pub categories: IndexMap<String, Category>,
     pub maps: ordered_hash_map::OrderedHashMap<u32, MapData>,
@@ -31,6 +26,7 @@ pub(crate) struct PackCore {
 #[derive(Default, Debug, Clone)]
 pub(crate) struct MapData {
     pub markers: Vec<Marker>,
+    pub routes: Vec<Route>,
     pub trails: Vec<Trail>,
 }
 

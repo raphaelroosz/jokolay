@@ -6,7 +6,7 @@ use ordered_hash_map::{OrderedHashMap, OrderedHashSet};
 use cap_std::fs_utf8::Dir;
 use egui::{ColorImage, TextureHandle};
 use glam::{vec2, Vec2, Vec3};
-use image::EncodableLayout;
+use image::{flat, EncodableLayout};
 use indexmap::IndexMap;
 use joko_render::billboard::{MarkerObject, MarkerVertex, TrailObject};
 use tracing::{debug, error, info, trace};
@@ -97,9 +97,7 @@ impl LoadedPack {
         }
     }
     pub fn category_sub_menu(&mut self, ui: &mut egui::Ui) {
-        //TODO: find a way to merge categories (see LadyElyssa pack)
         //it is important to generate a new id each time to avoid collision
-        //or to do a look up of an already existing menu
         ui.push_id(ui.next_auto_id(), |ui| {
             CategorySelection::recursive_selection_ui(
                 &mut self.cats_selection,
@@ -108,22 +106,22 @@ impl LoadedPack {
             );
         });
     }
-    pub fn load_from_dir(dir: Arc<Dir>) -> Result<Self> {
-        if !dir
+    pub fn load_from_dir(pack_dir: Arc<Dir>) -> Result<Self> {
+        if !pack_dir
             .try_exists(Self::CORE_PACK_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to check if pack core exists")?
         {
             bail!("pack core doesn't exist in this pack");
         }
-        let core_dir = dir
+        let core_dir = pack_dir
             .open_dir(Self::CORE_PACK_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to open core pack directory")?;
         let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
 
-        let cats_selection = (if dir.exists(Self::ACTIVATION_DATA_FILE_NAME) {
-            match dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
+        let cats_selection = (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
+            match pack_dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
                 Ok(cd_json) => match serde_json::from_str(&cd_json) {
                     Ok(cd) => Some(cd),
                     Err(e) => {
@@ -143,7 +141,7 @@ impl LoadedPack {
         .unwrap_or_else(|| {
             let cs = CategorySelection::default_from_pack_core(&core);
             match serde_json::to_string_pretty(&cs) {
-                Ok(cs_json) => match dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
+                Ok(cs_json) => match pack_dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                     Ok(_) => {
                         debug!("wrote cat selections to disk after creating a default from pack");
                     }
@@ -157,8 +155,8 @@ impl LoadedPack {
             }
             cs
         });
-        let activation_data = (if dir.exists(Self::ACTIVATION_DATA_FILE_NAME) {
-            match dir.read_to_string(Self::ACTIVATION_DATA_FILE_NAME) {
+        let activation_data = (if pack_dir.is_file(Self::ACTIVATION_DATA_FILE_NAME) {
+            match pack_dir.read_to_string(Self::ACTIVATION_DATA_FILE_NAME) {
                 Ok(contents) => match serde_json::from_str(&contents) {
                     Ok(cd) => Some(cd),
                     Err(e) => {
@@ -177,7 +175,7 @@ impl LoadedPack {
         .flatten()
         .unwrap_or_default();
         Ok(LoadedPack {
-            dir,
+            dir: pack_dir,
             core,
             cats_selection,
             dirty: Default::default(),
@@ -192,6 +190,7 @@ impl LoadedPack {
         joko_renderer: &mut joko_render::JokoRenderer,
         link: &Option<Arc<MumbleLink>>,
         default_tex_id: &TextureHandle,
+        default_trail_id: &TextureHandle,
     ) {
         let categories_changed = self.dirty.cats_selection;
         if self.dirty.is_dirty() {
@@ -208,7 +207,7 @@ impl LoadedPack {
         };
 
         if self.current_map_data.map_id != link.map_id || categories_changed {
-            self.on_map_changed(etx, link, default_tex_id);
+            self.on_map_changed(etx, link, default_tex_id, default_trail_id);
         }
         let z_near = joko_renderer.get_z_near();
         for marker in self.current_map_data.active_markers.values() {
@@ -228,6 +227,7 @@ impl LoadedPack {
         etx: &egui::Context,
         link: &MumbleLink,
         default_tex_id: &TextureHandle,
+        default_trail_id: &TextureHandle,
     ) {
         info!(
             self.current_map_data.map_id,
@@ -235,6 +235,7 @@ impl LoadedPack {
         );
         self.current_map_data = Default::default();
         if link.map_id == 0 {
+            info!("No map do not do anything");
             return;
         }
         self.current_map_data.map_id = link.map_id;
@@ -247,6 +248,8 @@ impl LoadedPack {
             &Default::default(),
         );
         let mut failure_loading = false;
+        let mut nb_markers_attempt = 0;
+        let mut nb_markers_loaded = 0;
         for (index, marker) in self
             .core
             .maps
@@ -256,6 +259,7 @@ impl LoadedPack {
             .iter()
             .enumerate()
         {
+            nb_markers_attempt += 1;
             if let Some(category_attributes) = enabled_cats_list.get(&marker.category) {
                 let mut attrs = marker.attrs.clone();
                 attrs.inherit_if_attr_none(category_attributes);
@@ -308,7 +312,7 @@ impl LoadedPack {
                 if let Some(tex_path) = attrs.get_icon_file() {
                     if !self.current_map_data.active_textures.contains_key(tex_path) {
                         if let Some(tex) = self.core.textures.get(tex_path) {
-                            let img = image::load_from_memory(&tex.bytes).unwrap();
+                            let img = image::load_from_memory(tex).unwrap();
                             self.current_map_data.active_textures.insert(
                                 tex_path.clone(),
                                 etx.load_texture(
@@ -350,9 +354,12 @@ impl LoadedPack {
                         min_pixel_size,
                     },
                 );
+                nb_markers_loaded += 1;
             }
         }
 
+        let mut nb_trails_attempt = 0;
+        let mut nb_trails_loaded = 0;
         for (index, trail) in self
             .core
             .maps
@@ -362,13 +369,14 @@ impl LoadedPack {
             .iter()
             .enumerate()
         {
+            nb_trails_attempt += 1;
             if let Some(category_attributes) = enabled_cats_list.get(&trail.category) {
                 let mut common_attributes = trail.props.clone();
                 common_attributes.inherit_if_attr_none(category_attributes);
                 if let Some(tex_path) = common_attributes.get_texture() {
                     if !self.current_map_data.active_textures.contains_key(tex_path) {
                         if let Some(tex) = self.core.textures.get(tex_path) {
-                            let img = image::load_from_memory(&tex.bytes).unwrap();
+                            let img = image::load_from_memory(tex).unwrap();
                             self.current_map_data.active_textures.insert(
                                 tex_path.clone(),
                                 etx.load_texture(
@@ -384,16 +392,19 @@ impl LoadedPack {
                             info!(%tex_path, "failed to find this trail texture");
                             failure_loading = true;
                         }
+                    } else {
+                        debug!("Trail texture alreadu loaded {:?}", tex_path);
                     }
                 } else {
-                    info!("no texture attribute on this marker");
+                    info!("no texture attribute on this trail");
                 }
-                let th = common_attributes
-                    .get_texture()
+                let texture_path = common_attributes.get_texture();
+                let th = texture_path
                     .and_then(|path| self.current_map_data.active_textures.get(path))
-                    .unwrap_or(default_tex_id);
+                    .unwrap_or(default_trail_id);
 
                 let tbin_path = if let Some(tbin) = common_attributes.get_trail_data() {
+                    debug!(?texture_path, "tbin path");
                     tbin
                 } else {
                     info!(?trail, "missing tbin path");
@@ -405,6 +416,7 @@ impl LoadedPack {
                     info!(%tbin_path, "failed to find tbin");
                     continue;
                 };
+                //TODO: if iso and closed, split it as a polygon and fill it as a surface
                 if let Some(active_trail) = ActiveTrail::get_vertices_and_texture(
                     &common_attributes,
                     &tbin.nodes,
@@ -413,9 +425,17 @@ impl LoadedPack {
                     self.current_map_data
                         .active_trails
                         .insert(index, active_trail);
+                } else {
+                    info!("Cannot display {texture_path:?}")
                 }
+                nb_trails_loaded += 1;
+            } else {
+                info!("category {} is not enabled", trail.category);
             }
         }
+        info!("Loaded for {}: {}/{} markers and {}/{} trails", link.map_id, nb_markers_loaded, nb_markers_attempt, nb_trails_loaded, nb_trails_attempt);
+        debug!("active categories: {:?}", enabled_cats_list.keys());
+
         if failure_loading {
             info!("Error when loading textures, here are the keys:");
             for k in self.core.textures.keys() {
@@ -442,6 +462,19 @@ impl LoadedPack {
                 },
                 Err(e) => {
                     error!(?e, "failed to serialize cat selection");
+                }
+            }
+            match serde_json::to_string_pretty(&self.activation_data) {
+                Ok(ad_json) => match self.dir.write(Self::ACTIVATION_DATA_FILE_NAME, ad_json) {
+                    Ok(_) => {
+                        debug!("wrote activation to disk after creating a default from pack");
+                    }
+                    Err(e) => {
+                        debug!(?e, "failed to write activation data to disk");
+                    }
+                },
+                Err(e) => {
+                    error!(?e, "failed to serialize activation");
                 }
             }
         }
@@ -507,6 +540,7 @@ pub(crate) struct ActiveMarker {
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct CategorySelection {
     pub selected: bool,
+    pub separator: bool,
     pub display_name: String,
     pub children: OrderedHashMap<String, CategorySelection>,
 }
@@ -533,7 +567,7 @@ impl CategorySelection {
                     name.clone()
                 } else {
                     format!("{parent_name}.{name}")
-                };
+                }.to_lowercase();
                 let mut common_attributes = cat.props.clone();
                 common_attributes.inherit_if_attr_none(parent_common_attributes);
                 Self::recursive_get_full_names(
@@ -555,6 +589,7 @@ impl CategorySelection {
             if !selection.contains_key(cat_name) {
                 let mut to_insert = CategorySelection::default();
                 to_insert.selected = cat.default_enabled;
+                to_insert.separator = cat.separator;
                 to_insert.display_name = cat.display_name.clone();
                 selection.insert(cat_name.clone(), to_insert);
             }
@@ -562,24 +597,50 @@ impl CategorySelection {
             Self::recursive_create_category_selection(&mut s.children, &cat.children);
         }
     }
+    /*fn recursive_selection_data(
+        selection: &mut OrderedHashMap<String, CategorySelection>,
+        data: &mut json::object::Object,
+        current_key: &String
+    ) {
+        for (name, cat) in selection.iter_mut() {
+            let mut sub_key = current_key.clone();
+            if sub_key.len() > 0 {
+                sub_key.push_str(".");
+            }
+            sub_key.push_str(name);
+            if cat.separator {
+            } else {
+                data.insert(sub_key.as_str(), json::JsonValue::Boolean(cat.selected));
+                Self::recursive_selection_data(&mut cat.children, data, &sub_key);
+            }
+        }
+    }*/
+
     fn recursive_selection_ui(
         selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         changed: &mut bool,
     ) {
+        if selection.is_empty() {
+            return;
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for cat in selection.values_mut() {
+            for (name, cat) in selection.iter_mut() {
                 ui.horizontal(|ui| {
-                    if ui.checkbox(&mut cat.selected, "").changed() {
-                        *changed = true;
+                    if cat.separator {
+                        ui.add_space(3.0);
+                    } else {
+                        let mut cb = ui.checkbox(&mut cat.selected, "");
+                        if cb.changed() {
+                            *changed = true;
+                        }
                     }
-                    if !cat.children.is_empty() {
+                    if cat.children.is_empty() {
+                        ui.label(&cat.display_name);
+                    } else {
                         ui.menu_button(&cat.display_name, |ui: &mut egui::Ui| {
                             Self::recursive_selection_ui(&mut cat.children, ui, changed);
                         });
-                    } else {
-                        ui.label(&cat.display_name);
-                        info!("create category {:?}", cat.display_name);
                     }
                 });
             }

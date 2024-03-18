@@ -28,6 +28,7 @@ pub(crate) struct XotAttributeNameIDs {
     pub default_enabled: NameId,
     pub display_name: NameId,
     pub name: NameId,
+    pub CapitalName: NameId,//same than "name" but with a starting capital letter
     pub separator: NameId,
     // inheritable attributes
     pub achievement_id: NameId,
@@ -88,6 +89,10 @@ pub(crate) struct XotAttributeNameIDs {
     pub trail_data: NameId,
     pub trail_scale: NameId,
     pub trigger_range: NameId,
+    pub reset_range: NameId,
+    pub resetposx: NameId,
+    pub resetposy: NameId,
+    pub resetposz: NameId,
 }
 impl XotAttributeNameIDs {
     pub fn register_with_xot(tree: &mut Xot) -> Self {
@@ -112,6 +117,7 @@ impl XotAttributeNameIDs {
             default_enabled: tree.add_name("defaulttoggle"),
             display_name: tree.add_name("DisplayName"),
             name: tree.add_name("name"),
+            CapitalName: tree.add_name("Name"),
             // inheritable attributes
             achievement_id: tree.add_name("achievementId"),
             achievement_bit: tree.add_name("achievementBit"),
@@ -171,6 +177,10 @@ impl XotAttributeNameIDs {
             bounce: tree.add_name("bounce"),
             keep_on_map_edge: tree.add_name("keepOnMapEdge"),
             map_fade_out_scale_level: tree.add_name("mapFadeoutScaleLevel"),
+            reset_range: tree.add_name("resetrange"),
+            resetposx: tree.add_name("resetposx"),
+            resetposy: tree.add_name("resetposy"),
+            resetposz: tree.add_name("resetposz"),
         }
     }
 }

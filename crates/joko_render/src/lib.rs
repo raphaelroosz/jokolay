@@ -70,7 +70,7 @@ impl JokoRenderer {
                 Vector3::unit_y(),
                 Deg(90.0),
                 1.0,
-                5000.0,
+                5000.0,//FIXME: trails may have points very far apart, when loading, one should fix those by putting intermediary points.
             ),
             link: Default::default(),
             gl: backend,

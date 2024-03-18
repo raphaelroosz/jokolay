@@ -1,5 +1,5 @@
 use crate::{
-    pack::{Category, Marker, PackCore, RelativePath, Trail, Texture},
+    pack::{Category, Marker, PackCore, RelativePath, Trail, Route},
     BASE64_ENGINE,
 };
 use base64::Engine;
@@ -75,7 +75,13 @@ pub(crate) fn save_pack_core_to_dir(
                 let ele = tree.element_mut(poi).unwrap();
                 serialize_marker_to_element(marker, ele, &names);
             }
+            for route_path in &map_data.routes {
+                serialize_route_to_element(&mut tree, route_path, &pois, &names)?;
+            }
             for trail in &map_data.trails {
+                if trail.dynamic {
+                    continue;
+                }
                 let trail_node = tree.new_element(names.trail);
                 tree.append(pois, trail_node)
                     .into_diagnostic()
@@ -118,7 +124,7 @@ pub(crate) fn save_pack_core_to_dir(
             dir.create(img_path.as_str())
                 .into_diagnostic()
                 .wrap_err_with(|| miette::miette!("failed to create file for image: {img_path}"))?
-                .write(&img.bytes)
+                .write(img)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     miette::miette!("failed to write image bytes to file: {img_path}")
@@ -213,3 +219,32 @@ fn serialize_marker_to_element(marker: &Marker, ele: &mut Element, names: &XotAt
     ele.set_attribute(names.category, &marker.category);
     marker.attrs.serialize_to_element(ele, names);
 }
+
+fn serialize_route_to_element(tree: &mut Xot, route: &Route, parent: &Node, names: &XotAttributeNameIDs) -> Result<()> {
+    let route_node = tree.new_element(names.route);
+    tree.append(*parent, route_node)
+        .into_diagnostic()
+        .wrap_err("failed to append route to pois")?;
+    let ele = tree.element_mut(route_node).unwrap();
+    
+    ele.set_attribute(names.category, route.category.clone());
+    ele.set_attribute(names.resetposx, format!("{}", route.reset_position[0]));
+    ele.set_attribute(names.resetposy, format!("{}", route.reset_position[1]));
+    ele.set_attribute(names.resetposz, format!("{}", route.reset_position[2]));
+    ele.set_attribute(names.reset_range, format!("{}", route.reset_range));
+    ele.set_attribute(names.name, route.name.clone());
+    ele.set_attribute(names.guid, BASE64_ENGINE.encode(route.guid));
+    ele.set_attribute(names.map_id, format!("{}", route.map_id));
+    ele.set_attribute(names.texture, "default_trail_texture.png");
+    for pos in &route.path {
+        let child = tree.new_element(names.poi);
+        tree.append(route_node, child);
+        let child_elt = tree.element_mut(child).unwrap();
+        child_elt.set_attribute(names.xpos, format!("{}", pos.x));
+        child_elt.set_attribute(names.ypos, format!("{}", pos.y));
+        child_elt.set_attribute(names.zpos, format!("{}", pos.z));
+        //child_elt.set_attribute(names.guid, BASE64_ENGINE.encode(uuid::Uuid::new_v4()));
+    }
+    Ok(())
+}
+

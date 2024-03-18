@@ -26,7 +26,7 @@ use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
 use image::EncodableLayout;
 
-use tracing::{error, info, info_span};
+use tracing::{debug, error, info, info_span};
 
 use jokolink::MumbleLink;
 use miette::{Context, IntoDiagnostic, Result};
@@ -63,6 +63,7 @@ pub struct MarkerManager {
     /// The value is a loaded pack that contains additional data for live marker packs like what needs to be saved or category selections etc..
     packs: BTreeMap<String, LoadedPack>,
     missing_texture: Option<TextureHandle>,
+    missing_trail: Option<TextureHandle>,
     /// This is the interval in number of seconds when we check if any of the packs need to be saved due to changes.
     /// This allows us to avoid saving the pack too often.
     pub save_interval: f64,
@@ -156,10 +157,12 @@ impl MarkerManager {
             ui_data: Default::default(),
             save_interval: 0.0,
             missing_texture: None,
+            missing_trail: None
         })
     }
 
     fn pack_importer(import_status: Arc<Mutex<ImportStatus>>) {
+        //called when a new pack is imported
         rayon::spawn(move || {
             *import_status.lock().unwrap() = ImportStatus::WaitingForFileChooser;
 
@@ -203,6 +206,18 @@ impl MarkerManager {
                 },
             ));
         }
+        if self.missing_trail.is_none() {
+            let img = image::load_from_memory(include_bytes!("../pack/trail.png")).unwrap();
+            let size = [img.width() as _, img.height() as _];
+            self.missing_trail = Some(etx.load_texture(
+                "default trail",
+                ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
+                egui::TextureOptions {
+                    magnification: egui::TextureFilter::Linear,
+                    minification: egui::TextureFilter::Linear,
+                },
+            ));
+        }
 
         for pack in self.packs.values_mut() {
             pack.tick(
@@ -211,6 +226,7 @@ impl MarkerManager {
                 joko_renderer,
                 link,
                 self.missing_texture.as_ref().unwrap(),
+                self.missing_trail.as_ref().unwrap(),
             );
         }
     }
