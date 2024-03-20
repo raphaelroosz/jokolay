@@ -9,6 +9,7 @@ pub(crate) struct Trail {
     pub category: String,
     pub props: CommonAttributes,
     pub dynamic: bool,
+    pub source_file_name: String,
 }
 
 #[derive(Debug, Clone)]

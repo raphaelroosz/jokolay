@@ -9,4 +9,5 @@ pub(crate) struct Marker {
     pub map_id: u32,
     pub category: String,
     pub attrs: CommonAttributes,
+    pub source_file_name: String,
 }

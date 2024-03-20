@@ -207,6 +207,7 @@ fn serialize_trail_to_element(trail: &Trail, ele: &mut Element, names: &XotAttri
     ele.set_attribute(names.guid, BASE64_ENGINE.encode(trail.guid));
     ele.set_attribute(names.category, &trail.category);
     ele.set_attribute(names.map_id, format!("{}", trail.map_id));
+    ele.set_attribute(names._source_file_name, &trail.source_file_name);
     trail.props.serialize_to_element(ele, names);
 }
 
@@ -217,6 +218,7 @@ fn serialize_marker_to_element(marker: &Marker, ele: &mut Element, names: &XotAt
     ele.set_attribute(names.guid, BASE64_ENGINE.encode(marker.guid));
     ele.set_attribute(names.map_id, format!("{}", marker.map_id));
     ele.set_attribute(names.category, &marker.category);
+    ele.set_attribute(names._source_file_name, &marker.source_file_name);
     marker.attrs.serialize_to_element(ele, names);
 }
 
@@ -236,6 +238,7 @@ fn serialize_route_to_element(tree: &mut Xot, route: &Route, parent: &Node, name
     ele.set_attribute(names.guid, BASE64_ENGINE.encode(route.guid));
     ele.set_attribute(names.map_id, format!("{}", route.map_id));
     ele.set_attribute(names.texture, "default_trail_texture.png");
+    ele.set_attribute(names._source_file_name, &route.source_file_name);
     for pos in &route.path {
         let child = tree.new_element(names.poi);
         tree.append(route_node, child);

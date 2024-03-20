@@ -93,6 +93,7 @@ pub(crate) struct XotAttributeNameIDs {
     pub resetposx: NameId,
     pub resetposy: NameId,
     pub resetposz: NameId,
+    pub _source_file_name: NameId,
 }
 impl XotAttributeNameIDs {
     pub fn register_with_xot(tree: &mut Xot) -> Self {
@@ -181,6 +182,7 @@ impl XotAttributeNameIDs {
             resetposx: tree.add_name("resetposx"),
             resetposy: tree.add_name("resetposy"),
             resetposz: tree.add_name("resetposz"),
+            _source_file_name: tree.add_name("_source_file_name"),
         }
     }
 }

@@ -6,11 +6,13 @@ mod init;
 mod wm;
 use init::get_jokolay_dir;
 use jmf::MarkerManager;
+use jmf::FileManager;
 use joko_core::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
 use joko_render::JokoRenderer;
 use jokolink::{MumbleChanges, MumbleManager};
 use miette::{Context, Result};
 use tracing::{error, info};
+
 #[allow(unused)]
 pub struct Jokolay {
     frame_stats: wm::WindowStatistics,
@@ -19,10 +21,12 @@ pub struct Jokolay {
     mumble_manager: MumbleManager,
     marker_manager: MarkerManager,
     theme_manager: ThemeManager,
+    file_manager: FileManager,
     joko_renderer: JokoRenderer,
     egui_context: egui::Context,
     glfw_backend: GlfwBackend,
 }
+
 impl Jokolay {
     pub fn new(jdir: Arc<Dir>) -> Result<Self> {
         let mumble =
@@ -31,6 +35,8 @@ impl Jokolay {
             MarkerManager::new(&jdir).wrap_err("failed to create marker manager")?;
         let mut theme_manager =
             ThemeManager::new(&jdir).wrap_err("failed to create theme manager")?;
+        let file_manager =
+            FileManager::new(&jdir).wrap_err("failed to create file manager")?;
         let egui_context = egui::Context::default();
         theme_manager.init_egui(&egui_context);
         let mut glfw_backend = GlfwBackend::new(GlfwConfig {
@@ -62,6 +68,7 @@ impl Jokolay {
             jdir,
             egui_context,
             theme_manager,
+            file_manager,
             menu_panel: MenuPanel::default(),
         })
     }
@@ -77,6 +84,7 @@ impl Jokolay {
                 mumble_manager,
                 marker_manager,
                 theme_manager,
+                file_manager,
                 joko_renderer,
                 egui_context,
                 glfw_backend,
@@ -135,6 +143,7 @@ impl Jokolay {
             };
             joko_renderer.tick(link.clone());
             marker_manager.tick(&etx, latest_time, joko_renderer, &link);
+            file_manager.tick(&etx, latest_time, joko_renderer, &link);
             menu_panel.tick(&etx, link.clone().as_ref().map(|m| m.as_ref()));
 
             // do the gui stuff now
@@ -167,6 +176,10 @@ impl Jokolay {
                                     &mut menu_panel.show_theme_window,
                                     "Show Theme Manager",
                                 );
+                                ui.checkbox(
+                                    &mut menu_panel.show_file_manager_window,
+                                    "Show File Manager",
+                                );
                                 ui.checkbox(&mut menu_panel.show_tracing_window, "Show Logs");
                                 if ui.button("exit").clicked() {
                                     info!("exiting jokolay");
@@ -181,6 +194,7 @@ impl Jokolay {
             mumble_manager.gui(&etx, &mut menu_panel.show_mumble_manager_winodw);
             JokolayTracingLayer::gui(&etx, &mut menu_panel.show_tracing_window);
             theme_manager.gui(&etx, &mut menu_panel.show_theme_window);
+            file_manager.gui(&etx, &mut menu_panel.show_file_manager_window);
             frame_stats.gui(&etx, glfw_backend, &mut menu_panel.show_window_manager);
             // show notifications
             JokolayTracingLayer::show_notifications(&etx);
@@ -327,6 +341,7 @@ pub struct MenuPanel {
     show_marker_manager_window: bool,
     show_mumble_manager_winodw: bool,
     show_window_manager: bool,
+    show_file_manager_window: bool,
 }
 
 impl MenuPanel {

@@ -10,4 +10,5 @@ pub(crate) struct Route {
     pub map_id: u32,
     pub guid: Uuid,
     pub name: String,
+    pub source_file_name: String,
 }
