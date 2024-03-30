@@ -3,16 +3,19 @@ mod marker;
 mod trail;
 mod route;
 
-use std::{str::FromStr};
+use std::{collections::{HashMap, HashSet}, str::FromStr};
 
 use indexmap::IndexMap;
 use ordered_hash_map;
+
+use tracing::info;
 
 pub use common::*;
 pub(crate) use marker::*;
 use smol_str::SmolStr;
 pub(crate) use trail::*;
 pub(crate) use route::*;
+use uuid::Uuid;
 
 
 #[derive(Default, Debug, Clone)]
@@ -20,18 +23,34 @@ pub(crate) struct PackCore {
     pub textures: ordered_hash_map::OrderedHashMap<RelativePath, Vec<u8>>,
     pub tbins: ordered_hash_map::OrderedHashMap<RelativePath, TBin>,
     pub categories: IndexMap<String, Category>,
+    pub all_guids: HashMap<String, HashSet<Uuid>>,
+    pub source_files: ordered_hash_map::OrderedHashMap<String, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
     pub maps: ordered_hash_map::OrderedHashMap<u32, MapData>,
+}
+
+impl PackCore {
+    pub fn register_uuid(&mut self, full_category_name: &String, uuid: &Uuid) {
+        if !self.all_guids.contains_key(full_category_name) {
+            self.all_guids.insert(full_category_name.clone(), HashSet::default());
+        }
+        if let Some(all_guid) = self.all_guids.get_mut(full_category_name) {
+            all_guid.insert(*uuid);
+        } else {
+            panic!("Can't register {} {}", full_category_name, uuid);
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct MapData {
-    pub markers: Vec<Marker>,
-    pub routes: Vec<Route>,
-    pub trails: Vec<Trail>,
+    pub markers: IndexMap<Uuid, Marker>,
+    pub routes: IndexMap<Uuid, Route>,
+    pub trails: IndexMap<Uuid, Trail>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Category {
+    pub guid: Uuid,
     pub display_name: String,
     pub separator: bool,
     pub default_enabled: bool,

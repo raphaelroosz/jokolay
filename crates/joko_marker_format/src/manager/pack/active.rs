@@ -4,6 +4,7 @@ use egui::TextureHandle;
 use glam::{vec2, Vec2, Vec3};
 use indexmap::IndexMap;
 use joko_render::billboard::{MarkerObject, MarkerVertex, TrailObject};
+use uuid::Uuid;
 
 use crate::{
     pack::{CommonAttributes, RelativePath},
@@ -274,8 +275,8 @@ pub(crate) struct CurrentMapData {
     pub active_textures: OrderedHashMap<RelativePath, TextureHandle>,
     /// The key is the index of the marker in the map markers
     /// Their position in the map markers serves as their "id" as uuids can be duplicates.
-    pub active_markers: IndexMap<usize, ActiveMarker>,
+    pub active_markers: IndexMap<Uuid, ActiveMarker>,
     /// The key is the position/index of this trail in the map trails. same as markers
-    pub active_trails: IndexMap<usize, ActiveTrail>,
+    pub active_trails: IndexMap<Uuid, ActiveTrail>,
 }
 

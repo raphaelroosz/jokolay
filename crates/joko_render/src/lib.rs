@@ -15,8 +15,6 @@ use egui_render_three_d::ThreeDConfig;
 use egui_window_glfw_passthrough::GlfwBackend;
 use glam::Mat4;
 use jokolink::MumbleLink;
-use raw_window_handle::HasRawWindowHandle;
-use std::sync::Arc;
 use three_d::prelude::*;
 
 #[macro_export]
@@ -34,7 +32,7 @@ pub struct JokoRenderer {
     pub cam_pos: glam::Vec3,
     pub camera: Camera,
     pub viewport: Viewport,
-    pub link: Option<Arc<MumbleLink>>,
+    pub has_link: bool,
     pub billboard_renderer: BillBoardRenderer,
     pub gl: egui_render_three_d::ThreeDBackend,
 }
@@ -47,7 +45,7 @@ impl JokoRenderer {
                 glow_config: Default::default(),
             },
             |s| glfw.get_proc_address_raw(s),
-            glfw_backend.window.raw_window_handle(),
+            //glfw_backend.window.raw_window_handle(),
             glfw_backend.framebuffer_size_physical,
         );
         let viewport = Viewport {
@@ -70,9 +68,9 @@ impl JokoRenderer {
                 Vector3::unit_y(),
                 Deg(90.0),
                 1.0,
-                5000.0,//FIXME: trails may have points very far apart, when loading, one should fix those by putting intermediary points.
+                5000.0,
             ),
-            link: Default::default(),
+            has_link: false,
             gl: backend,
             billboard_renderer,
             cam_pos: Default::default(),
@@ -84,8 +82,8 @@ impl JokoRenderer {
     pub fn get_z_far(&self) -> f32 {
         1000.0
     }
-    pub fn tick(&mut self, link: Option<Arc<MumbleLink>>) {
-        if let Some(link) = link.as_ref() {
+    pub fn tick(&mut self, link: Option<&MumbleLink>) {
+        if let Some(link) = link {
             let center = link.cam_pos + link.f_camera_front;
             let camera = Camera::new_perspective(
                 self.viewport,
@@ -106,8 +104,10 @@ impl JokoRenderer {
             );
             self.view_proj = proj * view;
             self.cam_pos = link.cam_pos;
+            self.has_link = true;
+        } else {
+            self.has_link = false;
         }
-        self.link = link;
     }
     pub fn add_billboard(&mut self, marker_object: MarkerObject) {
         self.billboard_renderer.markers.push(marker_object);
@@ -140,9 +140,9 @@ impl JokoRenderer {
         textures_delta: egui::TexturesDelta,
         logical_screen_size: [f32; 2],
     ) {
-        if let Some(link) = self.link.as_ref() {
+        if self.has_link {
             self.billboard_renderer
-                .prepare_render_data(link, &self.gl.context);
+                .prepare_render_data(&self.gl.context);
             self.billboard_renderer.render(
                 &self.gl.context,
                 self.cam_pos,

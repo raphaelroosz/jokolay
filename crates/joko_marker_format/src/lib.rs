@@ -7,7 +7,6 @@ pub(crate) mod manager;
 pub(crate) mod pack;
 
 pub use manager::MarkerManager;
-pub use manager::FileManager;
 // for compile time build info like pkg version or build timestamp or git hash etc..
 // shadow_rs::shadow!(build);
 

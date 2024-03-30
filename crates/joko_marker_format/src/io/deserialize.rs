@@ -4,12 +4,10 @@ use crate::{
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
-use egui::lerp;
 use glam::Vec3;
 use indexmap::IndexMap;
 use miette::{bail, Context, IntoDiagnostic, Result};
-use serde_json::map;
-use std::{collections::{BTreeMap, VecDeque}, io::Read};
+use std::{collections::{VecDeque}, io::Read};
 use ordered_hash_map::OrderedHashMap;
 use tracing::{debug, info, info_span, instrument, trace, warn};
 use uuid::Uuid;
@@ -28,6 +26,15 @@ pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
         &RelativePath::default(),
     )
     .wrap_err("failed to walk dir when loading a markerpack")?;
+
+    //categories are required to register other objects
+    let cats_xml = dir
+        .read_to_string("categories.xml")
+        .into_diagnostic()
+        .wrap_err("failed to read categories.xml")?;
+    let categories_file = String::from("categories.xml");
+    parse_categories_file(&categories_file, &cats_xml, &mut pack)
+        .wrap_err("failed to parse category file")?;
 
     // parse map data of the pack
     for entry in dir
@@ -49,15 +56,7 @@ pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
             if let Some(name_as_str) = name.strip_suffix(".xml") {
                 match name_as_str {
                     "categories" => {
-                        // parse categories
-                        {
-                            let cats_xml = dir
-                                .read_to_string("categories.xml")
-                                .into_diagnostic()
-                                .wrap_err("failed to read categories.xml")?;
-                            parse_categories_file(&name, &cats_xml, &mut pack)
-                                .wrap_err("failed to parse category file")?;
-                        }
+                        //already done
                     }
                     map_id => {
                         // parse map file
@@ -301,6 +300,7 @@ fn recursive_marker_category_parser(
             &mut cats
                 .entry(name.to_string())
                 .or_insert_with(|| Category {
+                    guid: parse_guid(names, ele),
                     display_name: display_name.to_string(),
                     separator,
                     default_enabled,
@@ -327,14 +327,16 @@ fn parse_categories_file(file_name: &String, cats_xml_str: &str, pack: &mut Pack
         .wrap_err("no doc element")?;
 
     if let Some(od) = tree.element(overlay_data_node) {
+        let mut categories: IndexMap<String, Category> = Default::default();
         if od.name() == xot_names.overlay_data {
             recursive_marker_category_parser_categories_xml(
                 &file_name,
                 &tree,
                 tree.children(overlay_data_node),
-                &mut pack.categories,
+                &mut categories,
                 &xot_names,
             );
+            pack.categories = categories;
         } else {
             bail!("root tag is not OverlayData")
         }
@@ -396,6 +398,7 @@ fn parse_map_file(map_id: u32, map_xml_str: &str, pack: &mut PackCore) -> Result
                 .ok_or_else(|| miette::miette!("invalid guid {:?}", raw_uid))?;
             
             let source_file_name = child.get_attribute(names._source_file_name).unwrap_or_default().to_string();
+            pack.source_files.insert(source_file_name.clone(), true);
             //TODO: route, difference with trail: trail is binary format while route is text => convert route into a trail
             if child.name() == names.route {
                 debug!("Found a route in core pack {:?}", child);
@@ -429,6 +432,7 @@ fn parse_map_file(map_id: u32, map_xml_str: &str, pack: &mut PackCore) -> Result
                 let mut ca = CommonAttributes::default();
                 ca.update_common_attributes_from_element(child, &names);
 
+                pack.register_uuid(&category, &guid);
                 let marker = Marker {
                     position: [xpos, ypos, zpos].into(),
                     map_id,
@@ -441,7 +445,7 @@ fn parse_map_file(map_id: u32, map_xml_str: &str, pack: &mut PackCore) -> Result
                 if !pack.maps.contains_key(&map_id) {
                     pack.maps.insert(map_id, MapData::default());
                 }
-                pack.maps.get_mut(&map_id).unwrap().markers.push(marker);
+                pack.maps.get_mut(&map_id).unwrap().markers.insert(marker.guid, marker);
             } else if child.name() == names.trail {
                 debug!("Found a trail in core pack {:?}", child);
                 if child
@@ -455,6 +459,7 @@ fn parse_map_file(map_id: u32, map_xml_str: &str, pack: &mut PackCore) -> Result
                 let mut ca = CommonAttributes::default();
                 ca.update_common_attributes_from_element(child, &names);
 
+                pack.register_uuid(&category, &guid);
                 let trail = Trail {
                     category,
                     map_id,
@@ -467,7 +472,7 @@ fn parse_map_file(map_id: u32, map_xml_str: &str, pack: &mut PackCore) -> Result
                 if !pack.maps.contains_key(&map_id) {
                     pack.maps.insert(map_id, MapData::default());
                 }
-                pack.maps.get_mut(&map_id).unwrap().trails.push(trail);
+                pack.maps.get_mut(&map_id).unwrap().trails.insert(trail.guid, trail);
             }
             span_guard.exit();
         }
@@ -521,6 +526,7 @@ fn recursive_marker_category_parser_categories_xml(
                     true
                 }
             };
+            let guid = parse_guid(names, ele);
             recursive_marker_category_parser_categories_xml(
                 file_name,
                 tree,
@@ -528,6 +534,7 @@ fn recursive_marker_category_parser_categories_xml(
                 &mut cats
                     .entry(name.to_string())
                     .or_insert_with(|| Category {
+                        guid,
                         display_name: display_name.to_string(),
                         separator,
                         default_enabled,
@@ -553,6 +560,7 @@ fn recursive_marker_category_parser_categories_xml(
 /// we will ignore any issues like unknown attributes or xml tags. "unknown" attributes means Any attributes that jokolay doesn't parse into Zpack.
 #[instrument(skip_all)]
 pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
+    //FIXME: there is a problem where pack map files are not dump into the folders anymore
     //called to import a new pack
     // all the contents of ZPack
     let mut pack = PackCore::default();
@@ -678,18 +686,18 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                 Some(ele) => ele,
                 None => continue,
             };
-            let category = child
+            let category_name = child
                 .get_attribute(names.category)
                 .unwrap_or_default()
                 .to_lowercase();
 
             debug!("import element: {:?}", child);
             if child.name() == names.poi {
-                import_poi(&mut pack, &names, &child, category, source_file_name.clone());
+                import_poi(&mut pack, &names, &child, category_name, source_file_name.clone());
             } else if child.name() == names.trail {
-                import_trail(&mut pack, &names, &child, category, source_file_name.clone());
+                import_trail(&mut pack, &names, &child, category_name, source_file_name.clone());
             } else if child.name() == names.route {
-                import_route_as_trail(&mut pack, &names, &tree, &child_node, &child, category, source_file_name.clone());
+                import_route_as_trail(&mut pack, &names, &tree, &child_node, &child, category_name, source_file_name.clone());
             } else {
                 info!("unknown element: {:?}", child);
             }
@@ -697,7 +705,6 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
 
         drop(span_guard);
     }
-
     Ok(pack)
 }
 
@@ -718,7 +725,7 @@ fn parse_guid(names: &XotAttributeNameIDs, child: &Element) -> Uuid{
     .unwrap_or_else(Uuid::new_v4)
 }
 
-fn parse_marker(pack: &mut PackCore, names: &XotAttributeNameIDs, poi_element: &Element, category: String, source_file_name: String) -> Option<Marker> {
+fn parse_marker(pack: &mut PackCore, names: &XotAttributeNameIDs, poi_element: &Element, category_name: &String, source_file_name: String) -> Option<Marker> {
     if let Some(map_id) = poi_element
         .get_attribute(names.map_id)
         .and_then(|map_id| map_id.parse::<u32>().ok())
@@ -750,7 +757,7 @@ fn parse_marker(pack: &mut PackCore, names: &XotAttributeNameIDs, poi_element: &
         Some(Marker {
             position: [xpos, ypos, zpos].into(),
             map_id,
-            category,
+            category: category_name.clone(),
             attrs: common_attributes,
             guid: parse_guid(names, poi_element),
             source_file_name
@@ -781,12 +788,12 @@ fn parse_position(names: &XotAttributeNameIDs, poi_element: &Element) -> Vec3 {
 }
 
 fn parse_route(
-    pack: &mut PackCore, 
+    _pack: &mut PackCore, 
     names: &XotAttributeNameIDs,
     tree: &Xot, 
     route_node: &Node, 
     route_element: &Element, 
-    category: String, 
+    category_name: &String, 
     source_file_name: String
 ) -> Option<Route> {
     
@@ -814,7 +821,7 @@ fn parse_route(
         info!("route element is missing name: {route_element:?}");
         return None;
     }
-    let mut category: String = category;
+    let mut category: String = category_name.clone();
     let mut map_id: Option<u32> = route_element.get_attribute(names.map_id)
         .and_then(|map_id| map_id.parse::<u32>().ok());
     for child_node in tree.children(*route_node) {
@@ -863,7 +870,7 @@ fn parse_route(
 }
 
 
-fn parse_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, trail_element: &Element, category: String, source_file_name: String) -> Option<Trail> {
+fn parse_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, trail_element: &Element, category_name: &String, source_file_name: String) -> Option<Trail> {
     //http://www.gw2taco.com/2022/04/a-proper-marker-editor-finally.html
     if let Some(map_id) = trail_element
      .get_attribute(names.trail_data)
@@ -882,7 +889,7 @@ fn parse_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, trail_element: 
         }
 
         Some(Trail {
-            category,
+            category: category_name.clone(),
             map_id,
             props: common_attributes,
             guid: parse_guid(names, trail_element),
@@ -899,24 +906,26 @@ fn parse_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, trail_element: 
 
 }
 
-fn import_poi(pack: &mut PackCore, names: &XotAttributeNameIDs, poi_element: &Element, category: String, source_file_name: String) {
-    if let Some(marker) = parse_marker(pack, names, poi_element, category, source_file_name) {
+fn import_poi(pack: &mut PackCore, names: &XotAttributeNameIDs, poi_element: &Element, category_name: String, source_file_name: String) {
+    if let Some(marker) = parse_marker(pack, names, poi_element, &category_name, source_file_name) {
+        pack.register_uuid(&category_name, &marker.guid);
         if !pack.maps.contains_key(&marker.map_id) {
             pack.maps.insert(marker.map_id, MapData::default());
         }
-        pack.maps.get_mut(&marker.map_id).unwrap().markers.push(marker);
+        pack.maps.get_mut(&marker.map_id).unwrap().markers.insert(marker.guid, marker);
     } else {
         debug!("Could not parse POI");
     }
 }
 
 
-fn import_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, trail_element: &Element, category: String, source_file_name: String) {
-    if let Some(trail) = parse_trail(pack, names, trail_element, category, source_file_name) {
+fn import_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, trail_element: &Element, category_name: String, source_file_name: String) {
+    if let Some(trail) = parse_trail(pack, names, trail_element, &category_name, source_file_name) {
+        pack.register_uuid(&category_name, &trail.guid);
         if !pack.maps.contains_key(&trail.map_id) {
             pack.maps.insert(trail.map_id, MapData::default());
         }
-        pack.maps.get_mut(&trail.map_id).unwrap().trails.push(trail);
+        pack.maps.get_mut(&trail.map_id).unwrap().trails.insert(trail.guid, trail);
     } else {
         debug!("Could not parse Trail");
     }
@@ -934,7 +943,6 @@ fn route_to_tbin(route: &Route) -> TBin {
 
 fn route_to_trail(route: &Route, file_path: &RelativePath) -> Trail {
     let mut props = CommonAttributes::default();
-    let default_texture: RelativePath = "default_trail_texture.png".parse().unwrap();
     props.set_texture(None);
     props.set_trail_data(Some(file_path.clone()));
     debug!("Build dynamic trail {}", route.guid);
@@ -948,18 +956,19 @@ fn route_to_trail(route: &Route, file_path: &RelativePath) -> Trail {
     }
 }
 
-fn import_route_as_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, tree: &Xot, route_node: &Node, route_element: &Element, category: String, source_file_name: String) {
-    if let Some(route) = parse_route(pack, names, tree, route_node, route_element, category, source_file_name) {
+fn import_route_as_trail(pack: &mut PackCore, names: &XotAttributeNameIDs, tree: &Xot, route_node: &Node, route_element: &Element, category_name: String, source_file_name: String) {
+    if let Some(route) = parse_route(pack, names, tree, route_node, route_element, &category_name, source_file_name) {
         let file_name = format!("data/dynamic_trails/{}.trl", &route.guid);
         let file_path: RelativePath = file_name.parse().unwrap();
         let trail = route_to_trail(&route, &file_path);
         let tbin = route_to_tbin(&route);
+        pack.register_uuid(&category_name, &route.guid);
         pack.tbins.insert(file_path, tbin);//there may be duplicates since we load and save each time
         if !pack.maps.contains_key(&trail.map_id) {
             pack.maps.insert(trail.map_id, MapData::default());
         }
-        pack.maps.get_mut(&trail.map_id).unwrap().trails.push(trail);
-        pack.maps.get_mut(&route.map_id).unwrap().routes.push(route);
+        pack.maps.get_mut(&trail.map_id).unwrap().trails.insert(trail.guid, trail);
+        pack.maps.get_mut(&route.map_id).unwrap().routes.insert(route.guid, route);
     } else {
         info!("Could not parse route {:?}", route_element);
     }

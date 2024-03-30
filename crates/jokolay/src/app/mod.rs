@@ -6,7 +6,7 @@ mod init;
 mod wm;
 use init::get_jokolay_dir;
 use jmf::MarkerManager;
-use jmf::FileManager;
+//use jmf::FileManager;
 use joko_core::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
 use joko_render::JokoRenderer;
 use jokolink::{MumbleChanges, MumbleManager};
@@ -21,7 +21,6 @@ pub struct Jokolay {
     mumble_manager: MumbleManager,
     marker_manager: MarkerManager,
     theme_manager: ThemeManager,
-    file_manager: FileManager,
     joko_renderer: JokoRenderer,
     egui_context: egui::Context,
     glfw_backend: GlfwBackend,
@@ -35,8 +34,6 @@ impl Jokolay {
             MarkerManager::new(&jdir).wrap_err("failed to create marker manager")?;
         let mut theme_manager =
             ThemeManager::new(&jdir).wrap_err("failed to create theme manager")?;
-        let file_manager =
-            FileManager::new(&jdir).wrap_err("failed to create file manager")?;
         let egui_context = egui::Context::default();
         theme_manager.init_egui(&egui_context);
         let mut glfw_backend = GlfwBackend::new(GlfwConfig {
@@ -68,7 +65,6 @@ impl Jokolay {
             jdir,
             egui_context,
             theme_manager,
-            file_manager,
             menu_panel: MenuPanel::default(),
         })
     }
@@ -84,7 +80,6 @@ impl Jokolay {
                 mumble_manager,
                 marker_manager,
                 theme_manager,
-                file_manager,
                 joko_renderer,
                 egui_context,
                 glfw_backend,
@@ -141,10 +136,25 @@ impl Jokolay {
                     None
                 }
             };
-            joko_renderer.tick(link.clone());
-            marker_manager.tick(&etx, latest_time, joko_renderer, &link);
-            file_manager.tick(&etx, latest_time, joko_renderer, &link);
-            menu_panel.tick(&etx, link.clone().as_ref().map(|m| m.as_ref()));
+            // check if we need to change window position or size.
+            if let Some(link) = link {
+                if link.changes.contains(MumbleChanges::WindowPosition)
+                    || link.changes.contains(MumbleChanges::WindowSize)
+                {
+                    glfw_backend
+                        .window
+                        .set_pos(link.client_pos.x, link.client_pos.y);
+                    // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
+                    // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
+                    // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
+                    glfw_backend
+                        .window
+                        .set_size(link.client_size.x - 1, link.client_size.y - 1);
+                }
+            }
+            joko_renderer.tick(link);
+            marker_manager.tick(&etx, latest_time, joko_renderer, link);
+            menu_panel.tick(&etx, link);
 
             // do the gui stuff now
             egui::Area::new("menu panel")
@@ -169,7 +179,7 @@ impl Jokolay {
                                     "Show Marker Manager",
                                 );
                                 ui.checkbox(
-                                    &mut menu_panel.show_mumble_manager_winodw,
+                                    &mut menu_panel.show_mumble_manager_window,
                                     "Show Mumble Manager",
                                 );
                                 ui.checkbox(
@@ -190,37 +200,21 @@ impl Jokolay {
                         marker_manager.menu_ui(ui);
                     });
                 });
-            marker_manager.gui(&etx, &mut menu_panel.show_marker_manager_window);
-            mumble_manager.gui(&etx, &mut menu_panel.show_mumble_manager_winodw);
+            marker_manager.gui(
+                &etx, 
+                &mut menu_panel.show_marker_manager_window,
+                &mut menu_panel.show_file_manager_window,
+                latest_time, joko_renderer, 
+                link
+            );
+            mumble_manager.gui(&etx, &mut menu_panel.show_mumble_manager_window);
             JokolayTracingLayer::gui(&etx, &mut menu_panel.show_tracing_window);
             theme_manager.gui(&etx, &mut menu_panel.show_theme_window);
-            file_manager.gui(&etx, &mut menu_panel.show_file_manager_window);
             frame_stats.gui(&etx, glfw_backend, &mut menu_panel.show_window_manager);
             // show notifications
             JokolayTracingLayer::show_notifications(&etx);
 
             // end gui stuff
-            // check if we need to change window position or size.
-            if let Some(link) = link.as_ref() {
-                if link.changes.contains(MumbleChanges::WindowPosition)
-                    || link.changes.contains(MumbleChanges::WindowSize)
-                {
-                    info!(
-                        ?link.client_pos, ?link.client_size,
-                        "resizing/repositioning to match gw2 window dimensions"
-                    );
-
-                    glfw_backend
-                        .window
-                        .set_pos(link.client_pos.x, link.client_pos.y);
-                    // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
-                    // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
-                    // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
-                    glfw_backend
-                        .window
-                        .set_size(link.client_size.x - 1, link.client_size.y - 1);
-                }
-            }
             etx.request_repaint();
 
             let egui::FullOutput {
@@ -241,7 +235,7 @@ impl Jokolay {
                 .window
                 .set_mouse_passthrough(!(etx.wants_keyboard_input() || etx.wants_pointer_input()));
             joko_renderer.render_egui(
-                etx.tessellate(shapes),
+                etx.tessellate(shapes, etx.pixels_per_point()),
                 textures_delta,
                 glfw_backend.window_size_logical,
             );
@@ -339,7 +333,7 @@ pub struct MenuPanel {
     show_theme_window: bool,
     // show_settings_window: bool,
     show_marker_manager_window: bool,
-    show_mumble_manager_winodw: bool,
+    show_mumble_manager_window: bool,
     show_window_manager: bool,
     show_file_manager_window: bool,
 }

@@ -14,8 +14,9 @@ resolver = "2"
 [workspace.dependencies]
 tracing = { version = "0.1", features = ["max_level_trace", "release_max_level_info"] }
 ringbuffer = { version = "0.14" }
-egui = { version = "*" }
-egui_extras = { version = "*" }
+egui = { version = "0.26" }
+egui_extras = { version = "0.26" }
+cap-directories = { version = "2" }
 cap-std = { version = "2", features = ["fs_utf8"] }
 serde = { version = "*", features = ["derive"] }
 miette = { version = "*", features = ["fancy"] }

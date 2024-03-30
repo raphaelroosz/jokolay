@@ -1,5 +1,5 @@
 use crate::{
-    pack::{Category, Marker, PackCore, RelativePath, Trail, Route},
+    pack::{Category, Marker, PackCore, Trail, Route},
     BASE64_ENGINE,
 };
 use base64::Engine;
@@ -7,7 +7,6 @@ use cap_std::fs_utf8::Dir;
 use indexmap::IndexMap;
 use miette::{Context, IntoDiagnostic, Result};
 use std::{io::Write};
-use ordered_hash_map::{OrderedHashSet};
 use tracing::info;
 use xot::{Element, Node, SerializeOptions, Xot};
 
@@ -16,166 +15,133 @@ use super::XotAttributeNameIDs;
 pub(crate) fn save_pack_core_to_dir(
     pack_core: &PackCore,
     dir: &Dir,
-    cats: bool,
-    mut maps: OrderedHashSet<u32>,
-    mut textures: OrderedHashSet<RelativePath>,
-    mut tbins: OrderedHashSet<RelativePath>,
-    all: bool,
+    is_dirty: bool,
 ) -> Result<()> {
-    if cats || all {
-        // save categories
+    if !is_dirty {
+        return Ok(());
+    }
+    // save categories
+    let mut tree = Xot::new();
+    let names = XotAttributeNameIDs::register_with_xot(&mut tree);
+    let od = tree.new_element(names.overlay_data);
+    let root_node = tree
+        .new_root(od)
+        .into_diagnostic()
+        .wrap_err("failed to create new root with overlay data node")?;
+    recursive_cat_serializer(&mut tree, &names, &pack_core.categories, od)
+        .wrap_err("failed to serialize cats")?;
+    let cats = tree
+        .with_serialize_options(SerializeOptions { pretty: true })
+        .to_string(root_node)
+        .into_diagnostic()
+        .wrap_err("failed to convert cats xot to string")?;
+    dir.create("categories.xml")
+        .into_diagnostic()
+        .wrap_err("failed to create categories.xml")?
+        .write_all(cats.as_bytes())
+        .into_diagnostic()
+        .wrap_err("failed to write to categories.xml")?;
+    // save maps
+    for (map_id, map_data) in pack_core.maps.iter() {
+        if map_data.markers.is_empty() && map_data.trails.is_empty() {
+            if let Err(e) = dir.remove_file(format!("{map_id}.xml")) {
+                info!(
+                    ?e,
+                    map_id, "failed to remove xml file that had nothing to write to"
+                );
+            }
+        }
         let mut tree = Xot::new();
         let names = XotAttributeNameIDs::register_with_xot(&mut tree);
         let od = tree.new_element(names.overlay_data);
-        let root_node = tree
+        let root_node: Node = tree
             .new_root(od)
             .into_diagnostic()
-            .wrap_err("failed to create new root with overlay data node")?;
-        recursive_cat_serializer(&mut tree, &names, &pack_core.categories, od)
-            .wrap_err("failed to serialize cats")?;
-        let cats = tree
+            .wrap_err("failed to create root wiht overlay data for pois")?;
+        let pois = tree.new_element(names.pois);
+        tree.append(od, pois)
+            .into_diagnostic()
+            .wrap_err("faild to append pois to od node")?;
+        for marker in map_data.markers.values() {
+            let poi = tree.new_element(names.poi);
+            tree.append(pois, poi)
+                .into_diagnostic()
+                .wrap_err("failed to append poi (marker) to pois")?;
+            let ele = tree.element_mut(poi).unwrap();
+            serialize_marker_to_element(marker, ele, &names);
+        }
+        for route_path in map_data.routes.values() {
+            serialize_route_to_element(&mut tree, route_path, &pois, &names)?;
+        }
+        for trail in map_data.trails.values() {
+            if trail.dynamic {
+                continue;
+            }
+            let trail_node = tree.new_element(names.trail);
+            tree.append(pois, trail_node)
+                .into_diagnostic()
+                .wrap_err("failed to append a trail node to pois")?;
+            let ele = tree.element_mut(trail_node).unwrap();
+            serialize_trail_to_element(trail, ele, &names);
+        }
+        let map_xml = tree
             .with_serialize_options(SerializeOptions { pretty: true })
             .to_string(root_node)
             .into_diagnostic()
-            .wrap_err("failed to convert cats xot to string")?;
-        dir.create("categories.xml")
+            .wrap_err("failed to serialize map data to string")?;
+        dir.create(format!("{map_id}.xml"))
             .into_diagnostic()
-            .wrap_err("failed to create categories.xml")?
-            .write_all(cats.as_bytes())
+            .wrap_err("failed to create map xml file")?
+            .write_all(map_xml.as_bytes())
             .into_diagnostic()
-            .wrap_err("failed to write to categories.xml")?;
-    }
-    // save maps
-    for (map_id, map_data) in pack_core.maps.iter() {
-        if maps.remove(map_id) || all {
-            if map_data.markers.is_empty() && map_data.trails.is_empty() {
-                if let Err(e) = dir.remove_file(format!("{map_id}.xml")) {
-                    info!(
-                        ?e,
-                        map_id, "failed to remove xml file that had nothing to write to"
-                    );
-                }
-            }
-            let mut tree = Xot::new();
-            let names = XotAttributeNameIDs::register_with_xot(&mut tree);
-            let od = tree.new_element(names.overlay_data);
-            let root_node: Node = tree
-                .new_root(od)
-                .into_diagnostic()
-                .wrap_err("failed to create root wiht overlay data for pois")?;
-            let pois = tree.new_element(names.pois);
-            tree.append(od, pois)
-                .into_diagnostic()
-                .wrap_err("faild to append pois to od node")?;
-            for marker in &map_data.markers {
-                let poi = tree.new_element(names.poi);
-                tree.append(pois, poi)
-                    .into_diagnostic()
-                    .wrap_err("failed to append poi (marker) to pois")?;
-                let ele = tree.element_mut(poi).unwrap();
-                serialize_marker_to_element(marker, ele, &names);
-            }
-            for route_path in &map_data.routes {
-                serialize_route_to_element(&mut tree, route_path, &pois, &names)?;
-            }
-            for trail in &map_data.trails {
-                if trail.dynamic {
-                    continue;
-                }
-                let trail_node = tree.new_element(names.trail);
-                tree.append(pois, trail_node)
-                    .into_diagnostic()
-                    .wrap_err("failed to append a trail node to pois")?;
-                let ele = tree.element_mut(trail_node).unwrap();
-                serialize_trail_to_element(trail, ele, &names);
-            }
-            let map_xml = tree
-                .with_serialize_options(SerializeOptions { pretty: true })
-                .to_string(root_node)
-                .into_diagnostic()
-                .wrap_err("failed to serialize map data to string")?;
-            dir.create(format!("{map_id}.xml"))
-                .into_diagnostic()
-                .wrap_err("failed to create map xml file")?
-                .write_all(map_xml.as_bytes())
-                .into_diagnostic()
-                .wrap_err("failed to write map data to file")?;
-        }
-    }
-    // if any other map remained in the maps, then it means the map was deleted from pack, so we remove the xml file too
-    for map_id in maps {
-        if let Err(e) = dir.remove_file(format!("{map_id}.xml")) {
-            info!(
-                ?e,
-                map_id, "failed to remove xml file that had nothing to write to"
-            );
-        }
+            .wrap_err("failed to write map data to file")?;
     }
     // save images
     for (img_path, img) in pack_core.textures.iter() {
-        if textures.remove(img_path) || all {
-            if let Some(parent) = img_path.parent() {
-                dir.create_dir_all(parent)
-                    .into_diagnostic()
-                    .wrap_err_with(|| {
-                        miette::miette!("failed to create parent dir for an image: {img_path}")
-                    })?;
-            }
-            dir.create(img_path.as_str())
-                .into_diagnostic()
-                .wrap_err_with(|| miette::miette!("failed to create file for image: {img_path}"))?
-                .write(img)
+        if let Some(parent) = img_path.parent() {
+            dir.create_dir_all(parent)
                 .into_diagnostic()
                 .wrap_err_with(|| {
-                    miette::miette!("failed to write image bytes to file: {img_path}")
+                    miette::miette!("failed to create parent dir for an image: {img_path}")
                 })?;
         }
-    }
-    for img_path in textures {
-        if let Err(e) = dir.remove_file(img_path.as_str()) {
-            info!(
-                ?e,
-                %img_path, "failed to remove file"
-            );
-        }
+        dir.create(img_path.as_str())
+            .into_diagnostic()
+            .wrap_err_with(|| miette::miette!("failed to create file for image: {img_path}"))?
+            .write(img)
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                miette::miette!("failed to write image bytes to file: {img_path}")
+            })?;
     }
     // save tbins
     for (tbin_path, tbin) in pack_core.tbins.iter() {
-        if tbins.remove(tbin_path) || all {
-            if let Some(parent) = tbin_path.parent() {
-                dir.create_dir_all(parent)
-                    .into_diagnostic()
-                    .wrap_err_with(|| {
-                        miette::miette!("failed to create parent dir of tbin: {tbin_path}")
-                    })?;
-            }
-            let mut bytes: Vec<u8> = vec![];
-            bytes.reserve(8 + tbin.nodes.len() * 12);
-            bytes.extend_from_slice(&tbin.version.to_ne_bytes());
-            bytes.extend_from_slice(&tbin.map_id.to_ne_bytes());
-            for node in &tbin.nodes {
-                bytes.extend_from_slice(&node[0].to_ne_bytes());
-                bytes.extend_from_slice(&node[1].to_ne_bytes());
-                bytes.extend_from_slice(&node[2].to_ne_bytes());
-            }
-            dir.create(tbin_path.as_str())
+        if let Some(parent) = tbin_path.parent() {
+            dir.create_dir_all(parent)
                 .into_diagnostic()
-                .wrap_err_with(|| miette::miette!("failed to create tbin file: {tbin_path}"))?
-                .write_all(&bytes)
-                .into_diagnostic()
-                .wrap_err_with(|| miette::miette!("failed to write tbin to path: {tbin_path}"))?;
+                .wrap_err_with(|| {
+                    miette::miette!("failed to create parent dir of tbin: {tbin_path}")
+                })?;
         }
-    }
-    for tbin_path in tbins {
-        if let Err(e) = dir.remove_file(tbin_path.as_str()) {
-            info!(
-                ?e,
-                %tbin_path, "failed to remove file"
-            );
+        let mut bytes: Vec<u8> = vec![];
+        bytes.reserve(8 + tbin.nodes.len() * 12);
+        bytes.extend_from_slice(&tbin.version.to_ne_bytes());
+        bytes.extend_from_slice(&tbin.map_id.to_ne_bytes());
+        for node in &tbin.nodes {
+            bytes.extend_from_slice(&node[0].to_ne_bytes());
+            bytes.extend_from_slice(&node[1].to_ne_bytes());
+            bytes.extend_from_slice(&node[2].to_ne_bytes());
         }
+        dir.create(tbin_path.as_str())
+            .into_diagnostic()
+            .wrap_err_with(|| miette::miette!("failed to create tbin file: {tbin_path}"))?
+            .write_all(&bytes)
+            .into_diagnostic()
+            .wrap_err_with(|| miette::miette!("failed to write tbin to path: {tbin_path}"))?;
     }
     Ok(())
 }
+
 fn recursive_cat_serializer(
     tree: &mut Xot,
     names: &XotAttributeNameIDs,

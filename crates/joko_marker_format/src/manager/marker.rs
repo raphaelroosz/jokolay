@@ -1,8 +1,8 @@
 use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
+    collections::BTreeMap, sync::{Arc, Mutex}, collections::HashSet
 };
 
+use tribool::Tribool;
 use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
 use image::EncodableLayout;
@@ -11,6 +11,7 @@ use tracing::{error, info, info_span};
 
 use jokolink::MumbleLink;
 use miette::{Context, IntoDiagnostic, Result};
+use uuid::Uuid;
 
 use crate::manager::pack::loaded::LoadedPack;
 use crate::manager::pack::import::{ImportStatus, import_pack_from_zip_file_path};
@@ -28,6 +29,7 @@ pub const MARKER_PACKS_DIRECTORY_NAME: &str = "packs";
 ///     2. marker needs to be drawn
 ///     3. marker's texture is uploaded or being uploaded? if not ready, we will upload or use a temporary "loading" texture
 ///     4. render that marker use joko_render  
+/// FIXME: it is a bad name, it does not manage Markers, but packages
 pub struct MarkerManager {
     /// holds data that is useful for the ui
     ui_data: MarkerManagerUI,
@@ -45,6 +47,12 @@ pub struct MarkerManager {
     /// This is the interval in number of seconds when we check if any of the packs need to be saved due to changes.
     /// This allows us to avoid saving the pack too often.
     pub save_interval: f64,
+
+    all_files_tribool: Tribool,
+    all_files_toggle: bool,
+    currently_used_files: BTreeMap<String, bool>,
+    on_screen: HashSet<Uuid>,
+    is_dirty: bool
 }
 
 #[derive(Debug, Default)]
@@ -116,7 +124,12 @@ impl MarkerManager {
             ui_data: Default::default(),
             save_interval: 0.0,
             missing_texture: None,
-            missing_trail: None
+            missing_trail: None,
+            all_files_tribool: Tribool::True,
+            all_files_toggle: false,
+            currently_used_files: Default::default(),
+            on_screen: Default::default(),
+            is_dirty: true,
         })
     }
 
@@ -151,7 +164,7 @@ impl MarkerManager {
         etx: &egui::Context,
         timestamp: f64,
         joko_renderer: &mut joko_render::JokoRenderer,
-        link: &Option<Arc<MumbleLink>>,
+        link: Option<&MumbleLink>,
     ) {
         if self.missing_texture.is_none() {
             let img = image::load_from_memory(include_bytes!("../pack/marker.png")).unwrap();
@@ -162,6 +175,7 @@ impl MarkerManager {
                 egui::TextureOptions {
                     magnification: egui::TextureFilter::Linear,
                     minification: egui::TextureFilter::Linear,
+                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
                 },
             ));
         }
@@ -174,29 +188,102 @@ impl MarkerManager {
                 egui::TextureOptions {
                     magnification: egui::TextureFilter::Linear,
                     minification: egui::TextureFilter::Linear,
+                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
                 },
             ));
         }
 
-        for pack in self.packs.values_mut() {
-            pack.tick(
-                etx,
-                timestamp,
-                joko_renderer,
-                link,
-                self.missing_texture.as_ref().unwrap(),
-                self.missing_trail.as_ref().unwrap(),
-            );
-        }
+        let mut currently_used_files: BTreeMap<String, bool> = Default::default();
+        let mut next_on_screen: HashSet<Uuid> = Default::default();
+        match link {
+            Some(link) => {
+                //FIXME: how to save/load the active files ?
+                let mut is_dirty = self.is_dirty;
+                for pack in self.packs.values_mut() {
+                    if let Some(current_map) = pack.core.maps.get(&link.map_id) {
+                        for marker in current_map.markers.values() {
+                            if let Some(is_active) = pack.core.source_files.get(&marker.source_file_name) {
+                                currently_used_files.insert(
+                                    marker.source_file_name.clone(), 
+                                    *self.currently_used_files.get(&marker.source_file_name).unwrap_or_else(|| {is_dirty = true; is_active})
+                                );
+                            }
+                        }
+                        for trail in current_map.trails.values() {
+                            if let Some(is_active) = pack.core.source_files.get(&trail.source_file_name) {
+                                currently_used_files.insert(
+                                    trail.source_file_name.clone(), 
+                                    *self.currently_used_files.get(&trail.source_file_name).unwrap_or_else(|| {is_dirty = true; is_active})
+                                );
+                            }
+                        }
+                    }
+                }
+                for pack in self.packs.values_mut() {
+                    pack.tick(
+                        etx,
+                        timestamp,
+                        link,
+                        self.missing_texture.as_ref().unwrap(),
+                        self.missing_trail.as_ref().unwrap(),
+                        &currently_used_files,
+                        is_dirty
+                    );
+                    pack.render(
+                        timestamp,
+                        joko_renderer,
+                        link,
+                        &mut next_on_screen,
+                    );
+                }
+                std::mem::take(&mut self.is_dirty);
+            },
+            None => {},
+        };
+        self.currently_used_files = currently_used_files;
+        self.on_screen = next_on_screen;//those are the elements displayed, not the categories, one would need to keep the link between the two
     }
     pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Markers", |ui| {
             for pack in self.packs.values_mut() {
-                pack.category_sub_menu(ui);
+                pack.category_sub_menu(ui, &self.on_screen);
             }
         });
+        
     }
-    pub fn gui(&mut self, etx: &egui::Context, open: &mut bool) {
+    fn gui_file_manager(&mut self, etx: &egui::Context, open: &mut bool, link: Option<&MumbleLink>) {
+        Window::new("File Manager").open(open).show(etx, |ui| -> Result<()> {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::Grid::new("link grid")
+                    .num_columns(4)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        if self.all_files_tribool.is_indeterminate(){
+                            ui.add(egui::Checkbox::new(&mut self.all_files_toggle, "File").indeterminate(true));
+                        } else {
+                            ui.checkbox(&mut self.all_files_toggle, "File");
+                        }
+                        ui.label("Trails");
+                        ui.label("Markers");
+                        ui.end_row();
+                        
+                        for file in self.currently_used_files.iter_mut() {
+                            let cb = ui.checkbox(file.1, file.0.clone());
+                            if cb.changed() {
+                                self.is_dirty = true;
+                            }
+                            if ui.button("Edit").clicked() {
+                                println!("click {}", file.0.clone());
+                            }
+                            ui.end_row();
+                        }
+                        ui.end_row();
+                    })
+            });
+            Ok(())
+        });
+    }
+    fn gui_marker_manager(&mut self, etx: &egui::Context, open: &mut bool) {
         Window::new("Marker Manager").open(open).show(etx, |ui| -> Result<()> {
             CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
                 egui::Grid::new("packs").striped(true).show(ui, |ui| {
@@ -297,5 +384,17 @@ impl MarkerManager {
             Ok(())
         });
     }
+    pub fn gui(
+        &mut self, 
+        etx: &egui::Context, 
+        is_marker_open: &mut bool, 
+        is_file_open: &mut bool, 
+        timestamp: f64,
+        joko_renderer: &mut joko_render::JokoRenderer,
+        link: Option<&MumbleLink>
+    ) {
+        self.gui_marker_manager(etx, is_marker_open);
+        self.gui_file_manager(etx, is_file_open, link);
+}
 }
 

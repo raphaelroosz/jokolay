@@ -75,7 +75,7 @@ impl BillBoardRenderer {
         self.markers.clear();
         self.trails.clear();
     }
-    pub fn prepare_render_data(&mut self, _link: &jokolink::MumbleLink, gl: &Context) {
+    pub fn prepare_render_data(&mut self, gl: &Context) {
         unsafe {
             gl_error!(gl);
         }

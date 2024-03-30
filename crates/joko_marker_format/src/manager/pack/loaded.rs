@@ -1,5 +1,5 @@
 use std::{
-    sync::Arc,
+    collections::{BTreeMap, HashSet}, sync::Arc
 };
 use ordered_hash_map::{OrderedHashMap};
 
@@ -8,15 +8,14 @@ use egui::{ColorImage, TextureHandle};
 use image::{EncodableLayout};
 use joko_render::billboard::{TrailObject};
 use tracing::{debug, error, info};
+use uuid::Uuid;
 
 use crate::{
-    io::{load_pack_core_from_dir, save_pack_core_to_dir},
-    pack::{PackCore},
+    io::{load_pack_core_from_dir, save_pack_core_to_dir}, manager::pack::{category_selection::SelectedCategoryManager, file_selection::SelectedFileManager}, pack::{PackCore}
 };
 use jokolink::MumbleLink;
 use miette::{bail, Context, IntoDiagnostic, Result};
 
-use super::dirty::Dirty;
 use super::activation::{ActivationData, ActivationType};
 use super::active::{CurrentMapData, ActiveMarker, ActiveTrail};
 use crate::manager::pack::category_selection::CategorySelection;
@@ -30,38 +29,38 @@ pub(crate) struct LoadedPack {
     /// The actual xml pack.
     pub core: PackCore,
     /// The selection of categories which are "enabled" and markers belonging to these may be rendered
-    cats_selection: OrderedHashMap<String, CategorySelection>,
-    dirty: Dirty,
+    selected_categories: OrderedHashMap<String, CategorySelection>,
+    selected_files: OrderedHashMap<String, bool>,
+    is_dirty: bool,
     activation_data: ActivationData,
     current_map_data: CurrentMapData,
 }
 
 impl LoadedPack {
-    const CORE_PACK_DIR_NAME: &str = "core";
-    const CATEGORY_SELECTION_FILE_NAME: &str = "cats.json";
-    const ACTIVATION_DATA_FILE_NAME: &str = "activation.json";
+    const CORE_PACK_DIR_NAME: &'static str = "core";
+    const CATEGORY_SELECTION_FILE_NAME: &'static str = "cats.json";
+    const ACTIVATION_DATA_FILE_NAME: &'static str = "activation.json";
 
     pub fn new(core: PackCore, dir: Arc<Dir>) -> Self {
-        let cats_selection = CategorySelection::default_from_pack_core(&core);
+        let selected_categories = CategorySelection::default_from_pack_core(&core);
         LoadedPack {
-            core,
-            cats_selection,
-            dirty: Dirty {
-                all: true,
-                ..Default::default()
-            },
-            current_map_data: Default::default(),
             dir,
+            core,
+            selected_categories,
+            selected_files: Default::default(),
+            is_dirty: true,
             activation_data: Default::default(),
+            current_map_data: Default::default(),
         }
     }
-    pub fn category_sub_menu(&mut self, ui: &mut egui::Ui) {
+    pub fn category_sub_menu(&mut self, ui: &mut egui::Ui, on_screen: &HashSet<Uuid>) {
         //it is important to generate a new id each time to avoid collision
         ui.push_id(ui.next_auto_id(), |ui| {
             CategorySelection::recursive_selection_ui(
-                &mut self.cats_selection,
+                &mut self.selected_categories,
                 ui,
-                &mut self.dirty.cats_selection,
+                &mut self.is_dirty,
+                on_screen,
             );
         });
     }
@@ -79,7 +78,7 @@ impl LoadedPack {
             .wrap_err("failed to open core pack directory")?;
         let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
 
-        let cats_selection = (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
+        let selected_categories = (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
             match pack_dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
                 Ok(cd_json) => match serde_json::from_str(&cd_json) {
                     Ok(cd) => Some(cd),
@@ -136,23 +135,26 @@ impl LoadedPack {
         Ok(LoadedPack {
             dir: pack_dir,
             core,
-            cats_selection,
-            dirty: Default::default(),
-            current_map_data: Default::default(),
+            selected_categories,
+            selected_files: Default::default(),
+            is_dirty: true,
             activation_data,
+            current_map_data: Default::default(),
         })
     }
+
     pub fn tick(
         &mut self,
         etx: &egui::Context,
         _timestamp: f64,
-        joko_renderer: &mut joko_render::JokoRenderer,
-        link: &Option<Arc<MumbleLink>>,
+        link: &MumbleLink,
         default_tex_id: &TextureHandle,
         default_trail_id: &TextureHandle,
+        currently_used_files: &BTreeMap<String, bool>,
+        is_dirty: bool,
     ) {
-        let categories_changed = self.dirty.cats_selection;
-        if self.dirty.is_dirty() {
+        let is_dirty = self.is_dirty || is_dirty;
+        if self.is_dirty {
             match self.save() {
                 Ok(_) => {}
                 Err(e) => {
@@ -160,25 +162,32 @@ impl LoadedPack {
                 }
             }
         }
-        let link = match link {
-            Some(link) => link,
-            None => return,
-        };
-
-        if self.current_map_data.map_id != link.map_id || categories_changed {
-            self.on_map_changed(etx, link, default_tex_id, default_trail_id);
+        //FIXME: takes a lot of time when "is_dirty" is true (i.e.: the map of things to display changes). Everythings get reloaded => how to do partial version ?
+        if self.current_map_data.map_id != link.map_id || is_dirty {
+            self.on_map_changed(etx, link, default_tex_id, default_trail_id, currently_used_files);
         }
+    }
+    pub fn render(
+        &mut self,
+        _timestamp: f64,
+        joko_renderer: &mut joko_render::JokoRenderer,
+        link: &MumbleLink,
+        next_on_screen: &mut HashSet<Uuid>,
+    ) {
         let z_near = joko_renderer.get_z_near();
-        for marker in self.current_map_data.active_markers.values() {
+        for (uuid, marker) in self.current_map_data.active_markers.iter() {
+            //FIXME: what's the difference between a Marker and an ActiveMarker ? rename second one in something more fitting ?
             if let Some(mo) = marker.get_vertices_and_texture(link, z_near) {
                 joko_renderer.add_billboard(mo);
+                next_on_screen.insert(*uuid);
             }
         }
-        for trail in self.current_map_data.active_trails.values() {
+        for (uuid, trail) in self.current_map_data.active_trails.iter() {
             joko_renderer.add_trail(TrailObject {
                 vertices: trail.trail_object.vertices.clone(),
                 texture: trail.trail_object.texture,
             });
+            next_on_screen.insert(*uuid);
         }
     }
     fn on_map_changed(
@@ -187,6 +196,7 @@ impl LoadedPack {
         link: &MumbleLink,
         default_tex_id: &TextureHandle,
         default_trail_id: &TextureHandle,
+        currently_used_files: &BTreeMap<String, bool>,
     ) {
         info!(
             self.current_map_data.map_id,
@@ -198,16 +208,10 @@ impl LoadedPack {
             return;
         }
         self.current_map_data.map_id = link.map_id;
-        let mut list_of_enabled_categories = Default::default();
-        let mut list_of_enabled_files: OrderedHashMap<String, bool> = OrderedHashMap::new();
-        //TODO: build list_of_enabled_files
-        CategorySelection::recursive_get_full_names(
-            &self.cats_selection,
-            &self.core.categories,
-            &mut list_of_enabled_categories,
-            "",
-            &Default::default(),
-        );
+        CategorySelection::recursive_populate_guids(&mut self.selected_categories, &self.core.all_guids, None);
+        let selected_categories_manager = SelectedCategoryManager::new(&self.selected_categories, &self.core.categories);
+
+        let selected_files_manager = SelectedFileManager::new(&self.selected_files, &self.core.source_files, &currently_used_files);
         
         let mut failure_loading = false;
         let mut nb_markers_attempt = 0;
@@ -218,13 +222,14 @@ impl LoadedPack {
             .get(&link.map_id)
             .unwrap_or(&Default::default())
             .markers
-            .iter()
+            .values()
             .enumerate()
         {
             nb_markers_attempt += 1;
-            if let Some(source_file_name) = list_of_enabled_files.get(&marker.source_file_name) {
-                if let Some(category_attributes) = list_of_enabled_categories.get(&marker.category) {
-                    let mut attrs = marker.attrs.clone();
+            if selected_files_manager.is_selected(&marker.source_file_name) {
+                if selected_categories_manager.is_selected(&marker.category) {
+                    let category_attributes = selected_categories_manager.get(&marker.category);
+                    let mut attrs = marker.attrs.clone();// why a clone ?
                     attrs.inherit_if_attr_none(category_attributes);
                     let key = &marker.guid;
                     if let Some(behavior) = attrs.get_behavior() {
@@ -307,7 +312,7 @@ impl LoadedPack {
                     let max_pixel_size = attrs.get_max_size().copied().unwrap_or(2048.0); // default taco max size
                     let min_pixel_size = attrs.get_min_size().copied().unwrap_or(5.0); // default taco min size
                     self.current_map_data.active_markers.insert(
-                        index,
+                        marker.guid,
                         ActiveMarker {
                             texture_id,
                             _texture: th.clone(),
@@ -330,12 +335,13 @@ impl LoadedPack {
             .get(&link.map_id)
             .unwrap_or(&Default::default())
             .trails
-            .iter()
+            .values()
             .enumerate()
         {
             nb_trails_attempt += 1;
-            if let Some(source_file_name) = list_of_enabled_files.get(&trail.source_file_name) {
-                if let Some(category_attributes) = list_of_enabled_categories.get(&trail.category) {
+            if selected_files_manager.is_selected(&trail.source_file_name) {
+                if selected_categories_manager.is_selected(&trail.category) {
+                    let category_attributes = selected_categories_manager.get(&trail.category);
                     let mut common_attributes = trail.props.clone();
                     common_attributes.inherit_if_attr_none(category_attributes);
                     if let Some(tex_path) = common_attributes.get_texture() {
@@ -389,7 +395,7 @@ impl LoadedPack {
                     ) {
                         self.current_map_data
                             .active_trails
-                            .insert(index, active_trail);
+                            .insert(trail.guid, active_trail);
                     } else {
                         info!("Cannot display {texture_path:?}")
                     }
@@ -400,7 +406,7 @@ impl LoadedPack {
             }
         }
         info!("Loaded for {}: {}/{} markers and {}/{} trails", link.map_id, nb_markers_loaded, nb_markers_attempt, nb_trails_loaded, nb_trails_attempt);
-        debug!("active categories: {:?}", list_of_enabled_categories.keys());
+        debug!("active categories: {:?}", selected_categories_manager.keys());
 
         if failure_loading {
             info!("Error when loading textures, here are the keys:");
@@ -411,13 +417,13 @@ impl LoadedPack {
         }
     }
     pub fn save_all(&mut self) -> Result<()> {
-        self.dirty.all = true;
+        self.is_dirty = true;
         self.save()
     }
     #[tracing::instrument(skip(self))]
     pub fn save(&mut self) -> Result<()> {
-        if std::mem::take(&mut self.dirty.cats_selection) || self.dirty.all {
-            match serde_json::to_string_pretty(&self.cats_selection) {
+        if std::mem::take(&mut self.is_dirty) {
+            match serde_json::to_string_pretty(&self.selected_categories) {
                 Ok(cs_json) => match self.dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                     Ok(_) => {
                         debug!("wrote cat selections to disk after creating a default from pack");
@@ -456,11 +462,7 @@ impl LoadedPack {
         save_pack_core_to_dir(
             &self.core,
             &core_dir,
-            std::mem::take(&mut self.dirty.cats),
-            std::mem::take(&mut self.dirty.map_dirty),
-            std::mem::take(&mut self.dirty.texture),
-            std::mem::take(&mut self.dirty.tbin),
-            std::mem::take(&mut self.dirty.all),
+            std::mem::take(&mut self.is_dirty),
         )?;
         Ok(())
     }

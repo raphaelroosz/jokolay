@@ -46,12 +46,12 @@ impl Default for ThemeManagerConfig {
 }
 
 impl ThemeManager {
-    const THEME_MANAGER_DIR_NAME: &str = "theme_manager";
-    const THEMES_DIR_NAME: &str = "themes";
-    const FONTS_DIR_NAME: &str = "fonts";
-    const DEFAULT_FONT_NAME: &str = "default";
-    const DEFAULT_THEME_NAME: &str = "default";
-    const THEME_MANAGER_CONFIG_NAME: &str = "theme_manager_config";
+    const THEME_MANAGER_DIR_NAME: &'static str = "theme_manager";
+    const THEMES_DIR_NAME: &'static str = "themes";
+    const FONTS_DIR_NAME: &'static str = "fonts";
+    const DEFAULT_FONT_NAME: &'static str = "default";
+    const DEFAULT_THEME_NAME: &'static str = "default";
+    const THEME_MANAGER_CONFIG_NAME: &'static str = "theme_manager_config";
     pub fn new(jdir: &Dir) -> Result<Self> {
         jdir.create_dir_all(Self::THEME_MANAGER_DIR_NAME)
             .into_diagnostic()

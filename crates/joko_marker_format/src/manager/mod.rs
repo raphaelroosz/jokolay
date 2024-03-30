@@ -18,8 +18,6 @@ We will make not having a valid category/texture/tbin path as allowed. So, users
 
 mod marker;
 mod pack;
-mod file;
 
 pub use marker::MarkerManager;
-pub use file::FileManager;
 

@@ -9,14 +9,13 @@
 //!
 
 mod mumble;
-use egui::DragValue;
+use egui::{DragValue};
 use enumflags2::BitFlags;
 use glam::IVec2;
 use jokoapi::end_point::mounts::Mount;
 use miette::{IntoDiagnostic, Result, WrapErr};
 pub use mumble::*;
 use serde_json::from_str;
-use std::sync::Arc;
 use tracing::error;
 
 /// The default mumble link name. can only be changed by passing the `-mumble` options to gw2 for multiboxing
@@ -43,33 +42,36 @@ pub struct MumbleManager {
     /// we use this to get the latest mumble link and latest window dimensions of the current mumble link
     backend: MumblePlatformImpl,
     /// latest mumble link
-    link: Arc<MumbleLink>,
+    link: MumbleLink,
+
 }
 impl MumbleManager {
     pub fn new(name: &str, _jokolay_window_id: Option<u32>) -> Result<Self> {
         let backend = MumblePlatformImpl::new(name)?;
         Ok(Self {
             backend,
-            link: Arc::new(Default::default()),
+            link: Default::default(),
         })
     }
-    pub fn tick(&mut self) -> Result<Option<Arc<MumbleLink>>> {
+    pub fn is_alive(&self) -> bool {
+        self.backend.is_alive()
+    }
+    pub fn tick(&mut self) -> Result<Option<&MumbleLink>> {
         if let Err(e) = self.backend.tick() {
             error!(?e, "mumble backend tick error");
             return Ok(None);
         }
 
         if !self.backend.is_alive() {
-            // reset link
-            if self.link.ui_tick != 0 {
-                self.link = Arc::new(Default::default());
-            }
-            return Ok(None);
+            self.link.client_size.x = self.link.client_size.x.max(1024);
+            self.link.client_size.y = self.link.client_size.y.max(768);
+            self.link.changes = BitFlags::all();
+            return Ok(Some(&self.link));
         }
         // backend is alive and tick is successful. time to get link
         let cml: ctypes::CMumbleLink = self.backend.get_cmumble_link();
         if cml.ui_tick == 0 && self.link.ui_tick != 0 {
-            self.link = Arc::new(Default::default());
+            self.link = Default::default();
         }
 
         if cml.ui_tick == 0 || cml.context.client_pos_size == [0; 4] {
@@ -136,7 +138,7 @@ impl MumbleManager {
         if self.link.client_size != client_size {
             changes.insert(MumbleChanges::WindowSize);
         }
-        let link = Arc::new(MumbleLink {
+        self.link = MumbleLink {
             ui_tick: cml.ui_tick,
             player_pos: cml.f_avatar_position.into(),
             f_avatar_front: cml.f_avatar_front.into(),
@@ -171,22 +173,26 @@ impl MumbleManager {
             map_scale: cml.context.map_scale,
             process_id: cml.context.process_id,
             mount: Mount::try_from_mumble_link(cml.context.mount_index),
-        });
-        self.link = link.clone();
+        };
+        //self.link = link.clone();
         Ok(if self.link.ui_tick == 0 {
             None
         } else {
-            Some(link)
+            Some(&self.link)
         })
     }
     pub fn gui(&mut self, etx: &egui::Context, open: &mut bool) {
         egui::Window::new("Mumble Manager")
             .open(open)
             .show(etx, |ui| {
-                if self.link.ui_tick == 0 {
-                    ui.label("Mumble is not initialized");
+                if !self.is_alive() {
+                    ui.label(
+                        egui::RichText::new("Mumble is not initialized, display dummy link instead.")
+                        .color(egui::Color32::RED)
+                    );
+                    editable_mumble_ui(ui, &mut self.link);
                 } else {
-                    let link: MumbleLink = self.link.as_ref().clone();
+                    let link: MumbleLink = self.link.clone();
                     mumble_ui(ui, link);
                 }
             });
@@ -276,6 +282,94 @@ fn mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {
             ui.end_row();
             ui.label("dpi");
             ui.add(DragValue::new(&mut link.dpi));
+            ui.end_row();
+        });
+}
+
+
+fn editable_mumble_ui(ui: &mut egui::Ui, dummy_link: &mut MumbleLink) {
+    egui::Grid::new("link grid")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            ui.label("ui tick");
+            ui.add(DragValue::new(&mut dummy_link.ui_tick));
+            ui.end_row();
+            ui.label("player position");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut dummy_link.player_pos.x));
+                ui.add(DragValue::new(&mut dummy_link.player_pos.y));
+                ui.add(DragValue::new(&mut dummy_link.player_pos.z));
+            });
+            ui.end_row();
+            ui.label("player direction");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut dummy_link.f_avatar_front.x));
+                ui.add(DragValue::new(&mut dummy_link.f_avatar_front.y));
+                ui.add(DragValue::new(&mut dummy_link.f_avatar_front.z));
+            });
+            ui.end_row();
+            ui.label("camera position");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut dummy_link.cam_pos.x));
+                ui.add(DragValue::new(&mut dummy_link.cam_pos.y));
+                ui.add(DragValue::new(&mut dummy_link.cam_pos.z));
+            });
+            ui.end_row();
+            ui.label("camera direction");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut dummy_link.f_camera_front.x));
+                ui.add(DragValue::new(&mut dummy_link.f_camera_front.y));
+                ui.add(DragValue::new(&mut dummy_link.f_camera_front.z));
+            });
+            ui.end_row();
+
+            ui.label("fov");
+            ui.add(DragValue::new(&mut dummy_link.fov));
+            ui.end_row();
+            ui.label("w/h ratio");
+            let ratio = dummy_link.client_size.as_vec2();
+            let mut ratio = ratio.x / ratio.y;
+            ui.add(DragValue::new(&mut ratio));
+            ui.end_row();
+            ui.label("character");
+            ui.label(&dummy_link.name);
+            ui.end_row();
+            ui.label("map id");
+            ui.add(DragValue::new(&mut dummy_link.map_id));
+            ui.end_row();
+            ui.label("map type");
+            ui.add(DragValue::new(&mut dummy_link.map_type));
+            ui.end_row();
+            ui.label("address");
+            ui.label(format!("{}", dummy_link.server_address));
+            ui.end_row();
+            ui.label("instance");
+            ui.add(DragValue::new(&mut dummy_link.instance));
+            ui.end_row();
+            ui.label("shard id");
+            ui.add(DragValue::new(&mut dummy_link.shard_id));
+            ui.end_row();
+            ui.label("mount");
+            ui.label(format!("{:?}", dummy_link.mount));
+            ui.end_row();
+            ui.label("client pos");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut dummy_link.client_pos.x));
+                ui.add(DragValue::new(&mut dummy_link.client_pos.y));
+            });
+            ui.end_row();
+            ui.label("client size");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut dummy_link.client_size.x));
+                ui.add(DragValue::new(&mut dummy_link.client_size.y));
+            });
+            ui.end_row();
+            ui.label("dpi scaling");
+            ui.add(DragValue::new(&mut dummy_link.dpi_scaling));
+            ui.end_row();
+            ui.label("dpi");
+            ui.add(DragValue::new(&mut dummy_link.dpi));
             ui.end_row();
 
             // ui.label("position");

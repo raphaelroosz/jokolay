@@ -80,8 +80,8 @@ impl JokolayTracingLayer {
             })
             .body(|body| {
                 let events = &JKL_TRACING_DATA.get().unwrap().lock().unwrap().buffer;
-                body.rows(20.0, events.len(), |index, mut row| {
-                    let ev = events.get(index as _).unwrap();
+                body.rows(20.0, events.len(), |mut row| {
+                    let ev = events.get(row.index() as _).unwrap();
                     ev.ui_row(&mut row);
                 });
             });
