@@ -24,6 +24,7 @@ serde = { workspace = true }
 glam = { workspace = true }
 serde_json = { workspace = true }
 notify = { version = "*", default-features = false }
+
 [target.'cfg(unix)'.dependencies]
 x11rb = { version = "0.12", default-features = false, features = [] }
 

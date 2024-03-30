@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 egui_render_three_d = { version = "*" }
-egui_window_glfw_passthrough = { version = "0.5" }
+egui_window_glfw_passthrough = { version = "0.8" }
 bytemuck = { version = "1", default-features = false }
 jokolink = { path = "../jokolink" }
 glam = { workspace = true, features = ["bytemuck"] }

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 # jmf deps
 # for marker packs 
-xot = { version = "0" }
+xot = { version = "0.16.0" }
 # to keep the order of files inside zip. markers packs rely on some files like aaa.xml being read first for marker category order# for representing the paths of files inside xml pack zip
 indexmap = { workspace = true, features = ["serde"]}
 uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
@@ -40,6 +40,7 @@ ordered_hash_map = { workspace = true }
 joko_render = { path = "../joko_render" }
 jokolink = { path = "../jokolink" }
 jokoapi = { path = "../jokoapi" }
+tribool = "0.3.0"
 
 
 [dev-dependencies]
