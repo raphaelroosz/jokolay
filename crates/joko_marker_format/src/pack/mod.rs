@@ -34,7 +34,8 @@ impl PackCore {
         if let Some(parent_uuid) = self.all_categories.get(full_category_name) {
             self.entities_parents.insert(*uuid, *parent_uuid);
         } else {
-            println!("Can't register world entity {} {}, no associated category found.", full_category_name, uuid);
+            //FIXME: this means a broken package, we could fix it by making usage of the relative category the node is in.
+            info!("Can't register world entity {} {}, no associated category found.", full_category_name, uuid);
         }
     }
     pub fn register_categories(&mut self) {

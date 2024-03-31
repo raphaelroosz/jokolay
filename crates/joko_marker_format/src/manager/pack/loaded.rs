@@ -48,7 +48,7 @@ impl LoadedPack {
             core,
             selected_categories,
             selected_files: Default::default(),
-            is_dirty: true,
+            is_dirty: false,
             activation_data: Default::default(),
             current_map_data: Default::default(),
         }
@@ -78,7 +78,47 @@ impl LoadedPack {
             .wrap_err("failed to open core pack directory")?;
         let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
 
+        //FIXME: Since categories have randomly generated uuids (and not saved), one need to build from those, all the time.
         let selected_categories = CategorySelection::default_from_pack_core(&core);
+        /***
+        FIXME: Once this is saved  properly, we can restore following block of code.
+
+        let selected_categories = (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
+            match pack_dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
+                Ok(cd_json) => match serde_json::from_str(&cd_json) {
+                    Ok(cd) => Some(cd),
+                    Err(e) => {
+                        error!(?e, "failed to deserialize category data");
+                        None
+                    }
+                },
+                Err(e) => {
+                    error!(?e, "failed to read string of category data");
+                    None
+                }
+            }
+        } else {
+            None
+        })
+        .flatten()
+        .unwrap_or_else(|| {
+            let cs = CategorySelection::default_from_pack_core(&core);
+            match serde_json::to_string_pretty(&cs) {
+                Ok(cs_json) => match pack_dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
+                    Ok(_) => {
+                        debug!("wrote cat selections to disk after creating a default from pack");
+                    }
+                    Err(e) => {
+                        debug!(?e, "failed to write category data to disk");
+                    }
+                },
+                Err(e) => {
+                    error!(?e, "failed to serialize cat selection");
+                }
+            }
+            cs
+        });
+        **/
         let activation_data = (if pack_dir.is_file(Self::ACTIVATION_DATA_FILE_NAME) {
             match pack_dir.read_to_string(Self::ACTIVATION_DATA_FILE_NAME) {
                 Ok(contents) => match serde_json::from_str(&contents) {
@@ -103,7 +143,7 @@ impl LoadedPack {
             core,
             selected_categories,
             selected_files: Default::default(),
-            is_dirty: true,
+            is_dirty: false,
             activation_data,
             current_map_data: Default::default(),
         })
@@ -388,7 +428,8 @@ impl LoadedPack {
     }
     #[tracing::instrument(skip(self))]
     pub fn save(&mut self) -> Result<()> {
-        if std::mem::take(&mut self.is_dirty) {
+        let is_dirty = std::mem::take(&mut self.is_dirty);
+        if is_dirty {
             match serde_json::to_string_pretty(&self.selected_categories) {
                 Ok(cs_json) => match self.dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                     Ok(_) => {
@@ -428,7 +469,7 @@ impl LoadedPack {
         save_pack_core_to_dir(
             &self.core,
             &core_dir,
-            std::mem::take(&mut self.is_dirty),
+            is_dirty,
         )?;
         Ok(())
     }
