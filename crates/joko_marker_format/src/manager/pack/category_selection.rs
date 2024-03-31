@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, BTreeSet};
 use ordered_hash_map::{OrderedHashMap};
 
 use indexmap::IndexMap;
@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct CategorySelection {
     #[serde(skip)]
-    pub guid: HashSet<Uuid>,//should be a HashSet of all the children markers/trails uuid and self (but not sub categories)
+    pub uuid: Uuid,//FIXME: there seems to be guid generated at several places leading to confusion in what is active or not (most likely in category, not saved versys categoryselection, saved)
+    #[serde(skip)]
+    pub parent: Option<Uuid>,
     pub selected: bool,
     pub separator: bool,
     pub display_name: String,
@@ -56,8 +58,6 @@ impl<'a> SelectedCategoryManager {
     }
 }
 
-static mut once: bool = true;
-
 impl CategorySelection {
     pub fn default_from_pack_core(pack: &PackCore) -> OrderedHashMap<String, CategorySelection> {
         let mut selection = OrderedHashMap::new();
@@ -96,22 +96,18 @@ impl CategorySelection {
     }
     pub fn recursive_populate_guids(
         selection: &mut OrderedHashMap<String, CategorySelection>,
-        all_pack_guids: &HashMap<String, HashSet<Uuid>>,
-        parent_name: Option<String>,
+        entities_parents: &mut HashMap<Uuid, Uuid>,
+        parent_uuid: Option<Uuid>,
     ) {
         for (cat_name, cat) in selection.iter_mut() {
-            let current_name = if let Some(parent_name) = &parent_name {
-                format!("{}.{}", parent_name, cat_name)
-            } else {
-                cat_name.clone()
-            };
-            if let Some(other_existing_uuid) = all_pack_guids.get(&current_name) {
-                cat.guid.extend(other_existing_uuid);
+            if cat.uuid.is_nil() {
+                cat.uuid = Uuid::new_v4();
             }
-            Self::recursive_populate_guids(&mut cat.children, all_pack_guids, Some(current_name));
-                for child in cat.children.values() {
-                    cat.guid.extend(&child.guid);
-                }
+            cat.parent = parent_uuid.clone();
+            Self::recursive_populate_guids(&mut cat.children, entities_parents, Some(cat.uuid));
+            if parent_uuid.is_some() {
+                entities_parents.insert(cat.uuid, parent_uuid.unwrap().clone());
+            }
             //assert!(cat.guid.len() > 0);
         }
     }
@@ -121,15 +117,15 @@ impl CategorySelection {
     ) {
         for (cat_name, cat) in cats.iter() {
             if !selection.contains_key(cat_name) {
-                let mut all_uuids: HashSet<Uuid> = Default::default();
-                all_uuids.insert(cat.guid);
                 let to_insert = CategorySelection {
-                    guid: all_uuids,
+                    uuid: cat.guid,
+                    parent: cat.parent,
                     selected: cat.default_enabled,
                     separator: cat.separator,
                     display_name: cat.display_name.clone(),
                     children: Default::default(),
                 };
+                //println!("recursive_create_category_selection {} {}", cat_name, to_insert.uuid);
                 selection.insert(cat_name.clone(), to_insert);
             }
             let s = selection.get_mut(cat_name).unwrap();
@@ -141,13 +137,13 @@ impl CategorySelection {
         selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         is_dirty: &mut bool,
-        on_screen: &HashSet<Uuid>,
+        on_screen: &BTreeSet<Uuid>
     ) {
         if selection.is_empty() {
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (_name, cat) in selection.iter_mut() {
+            for (name, cat) in selection.iter_mut() {
                 ui.horizontal(|ui| {
                     if cat.separator {
                         ui.add_space(3.0);
@@ -157,8 +153,8 @@ impl CategorySelection {
                             *is_dirty = true;
                         }
                     }
-                    let mut is_current_branch_displayed = on_screen.intersection(&cat.guid).count() > 0;
-                    let color = if is_current_branch_displayed {
+                    //println!("Look for {} {} among displayed elements {}", name,  cat.uuid, on_screen.contains(&cat.uuid));
+                    let color = if on_screen.contains(&cat.uuid) {
                         egui::Color32::LIGHT_GREEN
                     } else {
                         egui::Color32::GRAY

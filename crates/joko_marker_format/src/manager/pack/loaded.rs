@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet}, sync::Arc
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::Arc
 };
 use ordered_hash_map::{OrderedHashMap};
 
@@ -53,14 +53,14 @@ impl LoadedPack {
             current_map_data: Default::default(),
         }
     }
-    pub fn category_sub_menu(&mut self, ui: &mut egui::Ui, on_screen: &HashSet<Uuid>) {
+    pub fn category_sub_menu(&mut self, ui: &mut egui::Ui, on_screen: &BTreeSet<Uuid>) {
         //it is important to generate a new id each time to avoid collision
         ui.push_id(ui.next_auto_id(), |ui| {
             CategorySelection::recursive_selection_ui(
                 &mut self.selected_categories,
                 ui,
                 &mut self.is_dirty,
-                on_screen,
+                on_screen
             );
         });
     }
@@ -78,41 +78,7 @@ impl LoadedPack {
             .wrap_err("failed to open core pack directory")?;
         let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
 
-        let selected_categories = (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
-            match pack_dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
-                Ok(cd_json) => match serde_json::from_str(&cd_json) {
-                    Ok(cd) => Some(cd),
-                    Err(e) => {
-                        error!(?e, "failed to deserialize category data");
-                        None
-                    }
-                },
-                Err(e) => {
-                    error!(?e, "failed to read string of category data");
-                    None
-                }
-            }
-        } else {
-            None
-        })
-        .flatten()
-        .unwrap_or_else(|| {
-            let cs = CategorySelection::default_from_pack_core(&core);
-            match serde_json::to_string_pretty(&cs) {
-                Ok(cs_json) => match pack_dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
-                    Ok(_) => {
-                        debug!("wrote cat selections to disk after creating a default from pack");
-                    }
-                    Err(e) => {
-                        debug!(?e, "failed to write category data to disk");
-                    }
-                },
-                Err(e) => {
-                    error!(?e, "failed to serialize cat selection");
-                }
-            }
-            cs
-        });
+        let selected_categories = CategorySelection::default_from_pack_core(&core);
         let activation_data = (if pack_dir.is_file(Self::ACTIVATION_DATA_FILE_NAME) {
             match pack_dir.read_to_string(Self::ACTIVATION_DATA_FILE_NAME) {
                 Ok(contents) => match serde_json::from_str(&contents) {
@@ -208,7 +174,7 @@ impl LoadedPack {
             return;
         }
         self.current_map_data.map_id = link.map_id;
-        CategorySelection::recursive_populate_guids(&mut self.selected_categories, &self.core.all_guids, None);
+        //CategorySelection::recursive_populate_guids(&mut self.selected_categories, &mut self.core.entities_parents, None);
         let selected_categories_manager = SelectedCategoryManager::new(&self.selected_categories, &self.core.categories);
 
         let selected_files_manager = SelectedFileManager::new(&self.selected_files, &self.core.source_files, &currently_used_files);

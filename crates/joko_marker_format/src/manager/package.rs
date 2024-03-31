@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap, sync::{Arc, Mutex}, collections::HashSet
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, Mutex}
 };
 
 use tribool::Tribool;
@@ -16,8 +16,8 @@ use uuid::Uuid;
 use crate::manager::pack::loaded::LoadedPack;
 use crate::manager::pack::import::{ImportStatus, import_pack_from_zip_file_path};
 
-pub const MARKER_MANAGER_DIRECTORY_NAME: &str = "marker_manager";
-pub const MARKER_PACKS_DIRECTORY_NAME: &str = "packs";
+pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager";//name kept for compatibility purpose
+pub const PACKAGES_DIRECTORY_NAME: &str = "packs";//name kept for compatibility purpose
 // pub const MARKER_MANAGER_CONFIG_NAME: &str = "marker_manager_config.json";
 
 /// It manage everything that has to do with marker packs.
@@ -30,9 +30,9 @@ pub const MARKER_PACKS_DIRECTORY_NAME: &str = "packs";
 ///     3. marker's texture is uploaded or being uploaded? if not ready, we will upload or use a temporary "loading" texture
 ///     4. render that marker use joko_render  
 /// FIXME: it is a bad name, it does not manage Markers, but packages
-pub struct MarkerManager {
+pub struct PackageManager {
     /// holds data that is useful for the ui
-    ui_data: MarkerManagerUI,
+    ui_manager: PackageUIManager,
     /// marker manager directory. not useful yet, but in future we could be using this to store config files etc..
     _marker_manager_dir: Arc<Dir>,
     /// packs directory which contains marker packs. each directory inside pack directory is an individual marker pack.
@@ -51,18 +51,18 @@ pub struct MarkerManager {
     all_files_tribool: Tribool,
     all_files_toggle: bool,
     currently_used_files: BTreeMap<String, bool>,
-    on_screen: HashSet<Uuid>,
+    on_screen: BTreeSet<Uuid>,
     is_dirty: bool
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct MarkerManagerUI {
+pub(crate) struct PackageUIManager {
     // tf is this type supposed to be? maybe we should have used a ECS for this reason.
     pub import_status: Option<Arc<Mutex<ImportStatus>>>,
+    parents: HashMap<Uuid, Uuid>,
 }
 
-
-impl MarkerManager {
+impl PackageManager {
     /// Creates a new instance of [MarkerManager].
     /// 1. It opens the marker manager directory
     /// 2. loads its configuration
@@ -71,22 +71,23 @@ impl MarkerManager {
     /// 5. loads all the activation data
     /// 6. returns self
     pub fn new(jdir: &Dir) -> Result<Self> {
-        jdir.create_dir_all(MARKER_MANAGER_DIRECTORY_NAME)
+        jdir.create_dir_all(PACKAGE_MANAGER_DIRECTORY_NAME)
             .into_diagnostic()
             .wrap_err("failed to create marker manager directory")?;
         let marker_manager_dir = jdir
-            .open_dir(MARKER_MANAGER_DIRECTORY_NAME)
+            .open_dir(PACKAGE_MANAGER_DIRECTORY_NAME)
             .into_diagnostic()
             .wrap_err("failed to open marker manager directory")?;
         marker_manager_dir
-            .create_dir_all(MARKER_PACKS_DIRECTORY_NAME)
+            .create_dir_all(PACKAGES_DIRECTORY_NAME)
             .into_diagnostic()
             .wrap_err("failed to create marker packs directory")?;
         let marker_packs_dir = marker_manager_dir
-            .open_dir(MARKER_PACKS_DIRECTORY_NAME)
+            .open_dir(PACKAGES_DIRECTORY_NAME)
             .into_diagnostic()
             .wrap_err("failed to open marker packs dir")?;
         let mut packs: BTreeMap<String, LoadedPack> = Default::default();
+
 
         for entry in marker_packs_dir
             .entries()
@@ -121,7 +122,7 @@ impl MarkerManager {
             packs,
             marker_packs_dir: marker_packs_dir.into(),
             _marker_manager_dir: marker_manager_dir.into(),
-            ui_data: Default::default(),
+            ui_manager: PackageUIManager::new(),
             save_interval: 0.0,
             missing_texture: None,
             missing_trail: None,
@@ -241,9 +242,19 @@ impl MarkerManager {
             None => {},
         };
         self.currently_used_files = currently_used_files;
-        self.on_screen = next_on_screen;//those are the elements displayed, not the categories, one would need to keep the link between the two
+        //those are the elements displayed, not the categories, one would need to keep the link between the two
+        self.on_screen = self.update_active_elements(next_on_screen);
+    }
+    fn update_active_elements(&mut self, on_screen: HashSet<Uuid>) -> BTreeSet<Uuid> {
+        let mut parents: HashMap<Uuid, Uuid> = Default::default();
+        for pack in self.packs.values() {
+            parents.extend(pack.core.entities_parents.clone());
+        }
+        self.ui_manager.parents = parents;
+        self.ui_manager.get_parents(on_screen.iter())
     }
     pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        //println!("Elements on screen: {:?}", self.on_screen);
         ui.menu_button("Markers", |ui| {
             for pack in self.packs.values_mut() {
                 pack.category_sub_menu(ui, &self.on_screen);
@@ -283,8 +294,8 @@ impl MarkerManager {
             Ok(())
         });
     }
-    fn gui_marker_manager(&mut self, etx: &egui::Context, open: &mut bool) {
-        Window::new("Marker Manager").open(open).show(etx, |ui| -> Result<()> {
+    fn gui_package_loader(&mut self, etx: &egui::Context, open: &mut bool) {
+        Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
             CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
                 egui::Grid::new("packs").striped(true).show(ui, |ui| {
                     let mut delete = vec![];
@@ -305,17 +316,17 @@ impl MarkerManager {
             });
             });
 
-            if self.ui_data.import_status.is_some() {
+            if self.ui_manager.import_status.is_some() {
                 if ui.button("clear").on_hover_text(
                     "This will cancel any pack import in progress. If import is already finished, then it wil simply clear the import status").clicked() {
-                    self.ui_data.import_status = None;
+                    self.ui_manager.import_status = None;
                 }
             } else if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
                 let import_status = Arc::new(Mutex::default());
-                self.ui_data.import_status = Some(import_status.clone());
+                self.ui_manager.import_status = Some(import_status.clone());
                 Self::pack_importer(import_status);
             }
-            if let Some(import_status) = self.ui_data.import_status.as_ref() {
+            if let Some(import_status) = self.ui_manager.import_status.as_ref() {
                 if let Ok(mut status) = import_status.lock() {
                     match &mut *status {
                         ImportStatus::UnInitialized => {
@@ -393,8 +404,54 @@ impl MarkerManager {
         joko_renderer: &mut joko_render::JokoRenderer,
         link: Option<&MumbleLink>
     ) {
-        self.gui_marker_manager(etx, is_marker_open);
+        self.gui_package_loader(etx, is_marker_open);
         self.gui_file_manager(etx, is_file_open, link);
 }
+}
+
+impl PackageUIManager {
+    pub fn new() -> Self {
+        Self{
+            import_status: Default::default(),
+            parents: Default::default()
+        }
+    }
+    
+    pub fn register(&mut self, element: Uuid, parent: Uuid) {
+        self.parents.insert(element, parent);
+    }
+    pub fn get_parent(&self, element: &Uuid) -> Option<&Uuid> {
+        self.parents.get(element)
+    }
+    pub fn get_parents<'a, I>(&self, input: I) -> BTreeSet<Uuid>
+    where I: Iterator<Item=&'a Uuid>
+    {
+        let iter = input.into_iter();
+        let mut result: BTreeSet<Uuid> = BTreeSet::new();
+        let mut current_generation: Vec<Uuid> = Vec::new();
+        for elt in iter {
+            current_generation.push(*elt)
+        }
+        //info!("starts with {}", current_generation.len());
+        loop {
+            if current_generation.is_empty() {
+                //info!("ends with {}", result.len());
+                return result;
+            }
+            let mut next_gen: Vec<Uuid> = Vec::new();
+            for elt in current_generation.iter() {
+                if let Some(p) = self.get_parent(elt) {
+                    if result.contains(p) {
+                        //avoid duplicate, redundancy or loop
+                        continue;
+                    }
+                    next_gen.push(p.clone());
+                }
+            }
+            let to_insert = std::mem::replace(&mut current_generation, next_gen);
+            result.extend(to_insert);
+        }
+        unreachable!("The loop should always return");
+    }
 }
 

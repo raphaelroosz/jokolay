@@ -154,6 +154,7 @@ fn recursive_cat_serializer(
         {
             let ele = tree.element_mut(cat_node).unwrap();
             ele.set_attribute(names.display_name, &cat.display_name);
+            ele.set_attribute(names.guid, BASE64_ENGINE.encode(&cat.guid));
             // let cat_name = tree.add_name(cat_name);
             ele.set_attribute(names.name, cat_name);
             // no point in serializing default values

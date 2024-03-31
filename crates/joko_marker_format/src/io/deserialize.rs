@@ -262,6 +262,7 @@ fn recursive_marker_category_parser(
     tags: impl Iterator<Item = Node>,
     cats: &mut IndexMap<String, Category>,
     names: &XotAttributeNameIDs,
+    parent_uuid: Option<Uuid>,
 ) {
     for tag in tags {
         let ele = match tree.element(tag) {
@@ -294,13 +295,16 @@ fn recursive_marker_category_parser(
             .parse()
             .map(|u: u8| u != 0)
             .unwrap_or(true);
+        let guid = parse_guid(names, ele);
+        //println!("recursive_marker_category_parser {} {} {:?}", name, guid, parent_uuid);
         recursive_marker_category_parser(
             tree,
             tree.children(tag),
             &mut cats
                 .entry(name.to_string())
                 .or_insert_with(|| Category {
-                    guid: parse_guid(names, ele),
+                    guid,
+                    parent: parent_uuid.clone(),
                     display_name: display_name.to_string(),
                     separator,
                     default_enabled,
@@ -309,6 +313,7 @@ fn recursive_marker_category_parser(
                 })
                 .children,
             names,
+            Some(guid),
         );
     }
 }
@@ -333,10 +338,14 @@ fn parse_categories_file(file_name: &String, cats_xml_str: &str, pack: &mut Pack
                 &file_name,
                 &tree,
                 tree.children(overlay_data_node),
+                pack,
                 &mut categories,
                 &xot_names,
+                None,
             );
+            //println!("loaded categories: {:?}", categories);
             pack.categories = categories;
+            pack.register_categories();
         } else {
             bail!("root tag is not OverlayData")
         }
@@ -485,8 +494,10 @@ fn recursive_marker_category_parser_categories_xml(
     file_name: &String,
     tree: &Xot,
     tags: impl Iterator<Item = Node>,
+    pack: &mut PackCore,
     cats: &mut IndexMap<String, Category>,
     names: &XotAttributeNameIDs,
+    parent_uuid: Option<Uuid>,
 ) {
     for tag in tags {
         if let Some(ele) = tree.element(tag) {
@@ -527,14 +538,17 @@ fn recursive_marker_category_parser_categories_xml(
                 }
             };
             let guid = parse_guid(names, ele);
+            //println!("recursive_marker_category_parser_categories_xml {} {} {:?}", name, guid, parent_uuid);
             recursive_marker_category_parser_categories_xml(
                 file_name,
                 tree,
                 tree.children(tag),
+                pack,
                 &mut cats
                     .entry(name.to_string())
                     .or_insert_with(|| Category {
                         guid,
+                        parent: parent_uuid.clone(),
                         display_name: display_name.to_string(),
                         separator,
                         default_enabled,
@@ -543,6 +557,7 @@ fn recursive_marker_category_parser_categories_xml(
                     })
                     .children,
                 names,
+                Some(guid),
             );
             std::mem::drop(span_guard);
         } else {
@@ -667,7 +682,7 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
         };
 
         // parse_categories
-        recursive_marker_category_parser(&tree, tree.children(od), &mut pack.categories, &names);
+        recursive_marker_category_parser(&tree, tree.children(od), &mut pack.categories, &names, None);
 
         let pois = match tree.children(od).find(|node| {
             tree.element(*node)

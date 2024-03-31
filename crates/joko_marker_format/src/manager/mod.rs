@@ -16,8 +16,8 @@ We will make not having a valid category/texture/tbin path as allowed. So, users
 
 */
 
-mod marker;
+mod package;
 mod pack;
 
-pub use marker::MarkerManager;
+pub use package::PackageManager;
 

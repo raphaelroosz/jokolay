@@ -23,20 +23,47 @@ pub(crate) struct PackCore {
     pub textures: ordered_hash_map::OrderedHashMap<RelativePath, Vec<u8>>,
     pub tbins: ordered_hash_map::OrderedHashMap<RelativePath, TBin>,
     pub categories: IndexMap<String, Category>,
-    pub all_guids: HashMap<String, HashSet<Uuid>>,
+    pub all_categories: HashMap<String, Uuid>,
+    pub entities_parents: HashMap<Uuid, Uuid>,
     pub source_files: ordered_hash_map::OrderedHashMap<String, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
     pub maps: ordered_hash_map::OrderedHashMap<u32, MapData>,
 }
 
 impl PackCore {
     pub fn register_uuid(&mut self, full_category_name: &String, uuid: &Uuid) {
-        if !self.all_guids.contains_key(full_category_name) {
-            self.all_guids.insert(full_category_name.clone(), HashSet::default());
-        }
-        if let Some(all_guid) = self.all_guids.get_mut(full_category_name) {
-            all_guid.insert(*uuid);
+        if let Some(parent_uuid) = self.all_categories.get(full_category_name) {
+            self.entities_parents.insert(*uuid, *parent_uuid);
         } else {
-            panic!("Can't register {} {}", full_category_name, uuid);
+            println!("Can't register world entity {} {}, no associated category found.", full_category_name, uuid);
+        }
+    }
+    pub fn register_categories(&mut self) {
+        let mut entities_parents: HashMap<Uuid, Uuid> = Default::default();
+        let mut all_categories: HashMap<String, Uuid> = Default::default();
+        self.recursive_register_categories(&mut entities_parents, &self.categories, &mut all_categories, None);
+        self.entities_parents.extend(entities_parents);
+        info!("Catepories registered: {}", all_categories.len());
+        self.all_categories = all_categories;
+    }
+    fn recursive_register_categories(
+        &self, 
+        entities_parents: &mut HashMap<Uuid, Uuid>, 
+        categories: &IndexMap<String, Category>, 
+        all_categories: &mut HashMap<String, Uuid>,
+        parent_name: Option<String>
+    ) {
+        for (name, cat) in categories.iter() {
+            let full_category_name: String = if let Some(parent_name) = &parent_name {
+                format!("{}.{}", parent_name, name)
+            } else {
+                name.to_string()
+            };
+            //println!("Register catepory {} {} {:?}", full_category_name, cat.guid, cat.parent);
+            all_categories.insert(full_category_name.clone(), cat.guid);
+            if let Some(parent) = cat.parent {
+                entities_parents.insert(cat.guid, parent);
+            }
+            self.recursive_register_categories(entities_parents, &cat.children, all_categories, Some(full_category_name));
         }
     }
 }
@@ -51,6 +78,7 @@ pub(crate) struct MapData {
 #[derive(Debug, Clone)]
 pub(crate) struct Category {
     pub guid: Uuid,
+    pub parent: Option<Uuid>,
     pub display_name: String,
     pub separator: bool,
     pub default_enabled: bool,

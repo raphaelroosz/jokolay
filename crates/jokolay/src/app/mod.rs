@@ -5,7 +5,7 @@ use egui_window_glfw_passthrough::{glfw::Context as _, GlfwBackend, GlfwConfig};
 mod init;
 mod wm;
 use init::get_jokolay_dir;
-use jmf::MarkerManager;
+use jmf::PackageManager;
 //use jmf::FileManager;
 use joko_core::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
 use joko_render::JokoRenderer;
@@ -19,7 +19,7 @@ pub struct Jokolay {
     jdir: Arc<Dir>,
     menu_panel: MenuPanel,
     mumble_manager: MumbleManager,
-    marker_manager: MarkerManager,
+    package_manager: PackageManager,
     theme_manager: ThemeManager,
     joko_renderer: JokoRenderer,
     egui_context: egui::Context,
@@ -31,9 +31,10 @@ impl Jokolay {
         let mumble =
             MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
         let marker_manager =
-            MarkerManager::new(&jdir).wrap_err("failed to create marker manager")?;
+            PackageManager::new(&jdir).wrap_err("failed to create marker manager")?;
         let mut theme_manager =
             ThemeManager::new(&jdir).wrap_err("failed to create theme manager")?;
+        
         let egui_context = egui::Context::default();
         theme_manager.init_egui(&egui_context);
         let mut glfw_backend = GlfwBackend::new(GlfwConfig {
@@ -58,7 +59,7 @@ impl Jokolay {
         let joko_renderer = JokoRenderer::new(&mut glfw_backend, Default::default());
         Ok(Self {
             mumble_manager: mumble,
-            marker_manager,
+            package_manager: marker_manager,
             frame_stats: wm::WindowStatistics::new(glfw_backend.glfw.get_time() as _),
             joko_renderer,
             glfw_backend,
@@ -71,14 +72,14 @@ impl Jokolay {
     pub fn enter_event_loop(mut self) {
         tracing::info!("entering glfw event loop");
         self.menu_panel.show_theme_window = true;
-        self.menu_panel.show_marker_manager_window = true;
+        self.menu_panel.show_package_manager_window = true;
         loop {
             let Self {
                 frame_stats,
                 jdir: _,
                 menu_panel,
                 mumble_manager,
-                marker_manager,
+                package_manager: marker_manager,
                 theme_manager,
                 joko_renderer,
                 egui_context,
@@ -175,8 +176,8 @@ impl Jokolay {
                                     "Show Window Manager",
                                 );
                                 ui.checkbox(
-                                    &mut menu_panel.show_marker_manager_window,
-                                    "Show Marker Manager",
+                                    &mut menu_panel.show_package_manager_window,
+                                    "Show Package Manager",
                                 );
                                 ui.checkbox(
                                     &mut menu_panel.show_mumble_manager_window,
@@ -202,7 +203,7 @@ impl Jokolay {
                 });
             marker_manager.gui(
                 &etx, 
-                &mut menu_panel.show_marker_manager_window,
+                &mut menu_panel.show_package_manager_window,
                 &mut menu_panel.show_file_manager_window,
                 latest_time, joko_renderer, 
                 link
@@ -332,7 +333,7 @@ pub struct MenuPanel {
     show_tracing_window: bool,
     show_theme_window: bool,
     // show_settings_window: bool,
-    show_marker_manager_window: bool,
+    show_package_manager_window: bool,
     show_mumble_manager_window: bool,
     show_window_manager: bool,
     show_file_manager_window: bool,
