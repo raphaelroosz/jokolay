@@ -20,6 +20,8 @@ use crate::{message::BackToUIMessage, pack::CommonAttributes};
 use crate::manager::pack::loaded::{LoadedPackData, PackTasks, LoadedPackTexture};
 use crate::manager::pack::import::{ImportStatus, import_pack_from_zip_file_path};
 
+use super::pack::loaded::jokolay_to_marker_dir;
+
 pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager";//name kept for compatibility purpose
 pub const PACKAGES_DIRECTORY_NAME: &str = "packs";//name kept for compatibility purpose
 // pub const MARKER_MANAGER_CONFIG_NAME: &str = "marker_manager_config.json";
@@ -79,11 +81,12 @@ impl PackageDataManager {
     /// 4. loads all the packs
     /// 5. loads all the activation data
     /// 6. returns self
-    pub fn new(packs: BTreeMap<Uuid, LoadedPackData>, marker_packs_dir: &Arc<Dir>) -> Self {
-        Self {
+    pub fn new(packs: BTreeMap<Uuid, LoadedPackData>, jokolay_dir: Arc<Dir>) -> Result<Self> {
+        let marker_packs_dir = jokolay_to_marker_dir(&jokolay_dir)?;
+        Ok(Self {
             packs,
             tasks: PackTasks::new(),
-            marker_packs_dir: marker_packs_dir.clone(),
+            marker_packs_dir: Arc::new(marker_packs_dir),
             //_marker_manager_dir: marker_manager_dir.into(),
             current_map_id: 0,
             save_interval: 0.0,
@@ -92,7 +95,7 @@ impl PackageDataManager {
             parents: Default::default(),
             loaded_elements: Default::default(),
             on_screen: Default::default(),
-        }
+        })
     }
 
     pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
@@ -200,8 +203,10 @@ impl PackageDataManager {
                         }
                     }
                 }
+                let mut tasks = &self.tasks;
                 for (uuid, pack) in self.packs.iter_mut() {
                     let span_guard = info_span!("Updating package status").entered();
+                    tasks.save_data(pack, pack.is_dirty());
                     pack.tick(
                         &b2u_sender,
                         loop_index,
@@ -209,7 +214,7 @@ impl PackageDataManager {
                         &currently_used_files,
                         have_used_files_list_changed || choice_of_category_changed,
                         map_changed,
-                        &self.tasks, 
+                        &tasks, 
                         &mut categories_and_elements_to_be_loaded,
                     );
                     std::mem::drop(span_guard);
@@ -239,6 +244,11 @@ impl PackageDataManager {
             self.loaded_elements = self.update_active_elements(next_loaded);
         }*/
         //self.on_screen = self.update_active_elements(next_on_screen);
+    }
+
+    pub fn save(&mut self, mut data_pack: LoadedPackData) {
+        self.tasks.save_data(&mut data_pack, true);
+        self.packs.insert(data_pack.uuid, data_pack);
     }
 
 }
@@ -292,6 +302,11 @@ impl PackageUIManager {
         }
     }
 
+    pub fn delete_packs(&mut self, to_delete: Vec<Uuid>) {
+        for uuid in to_delete {
+            self.packs.remove(&uuid);
+        }
+    }
     pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
         self.currently_used_files = currently_used_files;
     }
@@ -401,20 +416,21 @@ impl PackageUIManager {
         link: &MumbleLink,
         z_near: f32,
     ) {
-        trace!("nb packs: {}", self.packs.len());
+        let mut tasks = &self.tasks;
         for (uuid, pack) in self.packs.iter_mut() {
             let span_guard = info_span!("Updating package status").entered();
+            tasks.save_texture(pack, pack.is_dirty());
             pack.tick(
                 &u2u_sender,
                 timestamp,
                 link,
-                //&mut next_on_screen,
                 z_near,
-                &self.tasks
+                &tasks
             );
             std::mem::drop(span_guard);
         }
-        u2u_sender.send(UIToUIMessage::Present);
+        u2u_sender.send(UIToUIMessage::RenderSwapChain);
+        //u2u_sender.send(UIToUIMessage::Present);
     }
 
     pub fn menu_ui(
@@ -505,18 +521,18 @@ impl PackageUIManager {
         Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
             CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
                 egui::Grid::new("packs").striped(true).show(ui, |ui| {
-                    let mut delete = vec![];
-                for pack in self.packs.values() {
-                    ui.label(pack.name.clone());
-                    if ui.button("delete").clicked() {
-                        delete.push(pack.uuid);
+                    let mut to_delete = vec![];
+                    for pack in self.packs.values() {
+                        ui.label(pack.name.clone());
+                        if ui.button("delete").clicked() {
+                            to_delete.push(pack.uuid);
+                        }
                     }
-                }
-                if !delete.is_empty() {
-                    //TODO: send message to background thread, UIToBackMessage::DeletePack
-                    event_sender.send(UIToBackMessage::DeletePacks(delete));
-                }
-            });
+                    if !to_delete.is_empty() {
+                        //TODO: send message to background thread, UIToBackMessage::DeletePack
+                        event_sender.send(UIToBackMessage::DeletePacks(to_delete));
+                    }
+                });
             });
 
             if self.import_status.is_some() {
@@ -582,6 +598,11 @@ impl PackageUIManager {
     ) {
         self.gui_package_loader(event_sender, etx, is_marker_open);
         self.gui_file_manager(event_sender, etx, is_file_open, link);
+    }
+
+    pub fn save(&mut self, mut texture_pack: LoadedPackTexture) {
+        self.tasks.save_texture(&mut texture_pack, true);
+        self.packs.insert(texture_pack.uuid, texture_pack);
     }
 }
 

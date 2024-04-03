@@ -113,15 +113,15 @@ impl JokoRenderer {
             self.has_link = false;
         }
     }
-    pub fn set_billboard(&mut self, marker_objects: Vec<MarkerObject>) {
-        self.billboard_renderer.markers_wip = marker_objects;
+    pub fn extend_markers(&mut self, marker_objects: Vec<MarkerObject>) {
+        self.billboard_renderer.markers_wip.extend(marker_objects);
     }
     pub fn add_billboard(&mut self, marker_object: MarkerObject) {
         self.billboard_renderer.markers_wip.push(marker_object);
     }
 
-    pub fn set_trail(&mut self, trail_objects: Vec<TrailObject>) {
-        self.billboard_renderer.trails_wip = trail_objects;
+    pub fn extend_trails(&mut self, trail_objects: Vec<TrailObject>) {
+        self.billboard_renderer.trails_wip.extend(trail_objects);
     }
     pub fn add_trail(&mut self, trail_object: TrailObject) {
         self.billboard_renderer.trails_wip.push(trail_object);

@@ -44,6 +44,7 @@ pub enum BackToUIMessage {
     ActiveElements(HashSet<Uuid>),//list of all elements that are loaded for current map
     CurrentlyUsedFiles(BTreeMap<String, bool>),//when there is a change in map or anything else, the list of files is sent to ui for display
     LoadedPack(LoadedPackTexture),//push a loaded pack to UI
+    DeletedPacks(Vec<Uuid>),//push a deleted set of packs to UI
     Loading,
     MarkerTexture(Uuid, RelativePath, Uuid, Vec3, CommonAttributes),
     MumbleLink(Option<MumbleLink>),
@@ -67,7 +68,7 @@ pub enum UIToBackMessage {
 pub enum UIToUIMessage {
     BulkMarkerObject(Vec<MarkerObject>),
     BulkTrailObject(Vec<TrailObject>),
-    Present,// a render loop is finished and we can present it
+    //Present,// a render loop is finished and we can present it
     MarkerObject(MarkerObject),
     RenderSwapChain,// The list of elements to display was changed
     TrailObject(TrailObject),

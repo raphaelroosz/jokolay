@@ -21,6 +21,7 @@ pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
     //FIXME: this should return two elements:
     //called from already parsed data
     let mut pack = PackCore::default();
+    pack.uuid = Uuid::new_v4();
     // walks the directory and loads all files into the hashmap
     recursive_walk_dir_and_read_images_and_tbins(
         dir,

@@ -19,6 +19,7 @@ pub(crate) fn save_pack_data_to_dir(
     writing_directory: &Dir,
 ) -> Result<()> {
     // save categories
+    info!("Saving data pack {}, {} categories, {} maps", pack_data.name, pack_data.categories.len(), pack_data.maps.len());
     let mut tree = Xot::new();
     let names = XotAttributeNameIDs::register_with_xot(&mut tree);
     let od = tree.new_element(names.overlay_data);
@@ -101,6 +102,7 @@ pub(crate) fn save_pack_texture_to_dir(
     writing_directory: &Dir,
 ) -> Result<()> {
 
+    info!("Saving texture pack {}, {} textures, {} tbins", pack_texture.name, pack_texture.textures.len(), pack_texture.tbins.len());
     // save images
     for (img_path, img) in pack_texture.textures.iter() {
         if let Some(parent) = img_path.parent() {

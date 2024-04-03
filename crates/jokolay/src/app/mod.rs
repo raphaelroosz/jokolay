@@ -33,6 +33,7 @@ struct JokolayGui {
     egui_context: egui::Context,
     glfw_backend: GlfwBackend,
     theme_manager: ThemeManager,
+    mumble_manager: MumbleManager,
     package_manager: PackageUIManager,
 }
 #[allow(unused)]
@@ -40,22 +41,24 @@ pub struct Jokolay {
     jdir: Arc<Dir>,
     gui: Arc<Mutex<JokolayGui>>,
     app: Arc<Mutex<Box<JokolayApp>>>,
-    state: Arc<Mutex<Box<JokolayState>>>,
+    state: JokolayState,
 }
 
 
 impl Jokolay {
-    pub fn new(jdir: Arc<Dir>) -> Result<Self> {
+    pub fn new(jokolay_dir: Arc<Dir>) -> Result<Self> {
         //TODO: we could have two mumble_manager, one for UI, one for backend, each keeping its own copy
         //this would allow overwriting from gui to back ?
         //if we want to be able to edit the link, one need to put a "form submission" logic.
-        let mumble_manager =
+        let mumble_data_manager =
+            MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
+        let mumble_ui_manager =
             MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
             
-        let (data_packages, texture_packages) = load_all_from_dir(&jdir).wrap_err("failed to load packages")?;
-        let mut package_data_manager = PackageDataManager::new(data_packages, &jdir);
+        let (data_packages, texture_packages) = load_all_from_dir(&jokolay_dir).wrap_err("failed to load packages")?;
+        let mut package_data_manager = PackageDataManager::new(data_packages, Arc::clone(&jokolay_dir))?;
         let mut package_ui_manager = PackageUIManager::new(texture_packages);
-        let mut theme_manager = ThemeManager::new(&jdir).wrap_err("failed to create theme manager")?;
+        let mut theme_manager = ThemeManager::new(Arc::clone(&jokolay_dir)).wrap_err("failed to create theme manager")?;
         
         let egui_context = egui::Context::default();
         theme_manager.init_egui(&egui_context);
@@ -87,7 +90,7 @@ impl Jokolay {
 
         package_ui_manager.late_init(&egui_context);
         Ok(Self {
-            jdir,
+            jdir: jokolay_dir,
             gui: Arc::new(Mutex::new(JokolayGui {
                 frame_stats,
                 joko_renderer,
@@ -95,36 +98,37 @@ impl Jokolay {
                 egui_context,
                 menu_panel,
                 theme_manager,
+                mumble_manager: mumble_ui_manager,
                 package_manager: package_ui_manager
             })),
             app: Arc::new(Mutex::new(Box::new(JokolayApp{
-                mumble_manager,
+                mumble_manager: mumble_data_manager,
                 package_manager: package_data_manager,
             }))),
-            state: Arc::new(Mutex::new(Box::new(JokolayState{
+            state: JokolayState{
                 link: None,
                 window_changed: true,
                 choice_of_category_changed: false,
                 list_of_textures_changed: false,
-            })))
+            }
         })
     }
 
     fn start_background_loop(
         app: Arc<Mutex<Box<JokolayApp>>>, 
-        state: Arc<Mutex<Box<JokolayState>>>,
+        state: JokolayState,
         b2u_sender: std::sync::mpsc::Sender<BackToUIMessage>,
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
         let background_thread = std::thread::spawn(move || {
-            Self::background_loop(Arc::clone(&app), Arc::clone(&state), b2u_sender, u2b_receiver);
+            Self::background_loop(Arc::clone(&app), state, b2u_sender, u2b_receiver);
         });
     }
 
     fn handle_u2b_message(
         package_manager: &mut PackageDataManager, 
         local_state: &mut JokolayState,
-        state_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
+        b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         msg: UIToBackMessage
     ) {
         match msg {
@@ -147,14 +151,17 @@ impl Jokolay {
             }
             UIToBackMessage::DeletePacks(to_delete) => {
                 tracing::trace!("Handling of UIToBackMessage::DeletePacks");
+                let mut deleted = Vec::new();
                 for pack_uuid in to_delete {
                     let pack = package_manager.packs.remove(&pack_uuid).unwrap();
                     if let Err(e) = package_manager.marker_packs_dir.remove_dir_all(&pack.name) {
                         error!(?e, pack.name,"failed to remove pack");
                     } else {
                         info!("deleted marker pack: {}", pack.name);
+                        deleted.push(pack_uuid);
                     }
                 }
+                b2u_sender.send(BackToUIMessage::DeletedPacks(deleted));
             }
             UIToBackMessage::ImportPack => {
                 unimplemented!("Handling of UIToBackMessage::ImportPack has not been implemented yet");
@@ -163,26 +170,32 @@ impl Jokolay {
                 unimplemented!("Handling of UIToBackMessage::ReloadPack has not been implemented yet");
             }
             UIToBackMessage::SavePack(name, pack) => {
-                //TODO: send message to background thread, UIToBackMessage::SavePack
+                tracing::trace!("Handling of UIToBackMessage::SavePack");
                 let name = name.as_str();
+                if package_manager.marker_packs_dir.exists(name) {
+                    match package_manager.marker_packs_dir
+                        .remove_dir_all(name)
+                        .into_diagnostic() {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!(?e, "failed to delete already existing marker pack");
+                            }
+                        }
+                }
+                if let Err(e) = package_manager.marker_packs_dir.create_dir_all(name) {
+                    error!(?e, "failed to create directory for pack");
+                }
                 match package_manager.marker_packs_dir.open_dir(name) {
                     Ok(dir) => {
                         let (mut data_pack, texture_pack) = build_from_core(name.to_string(), dir.into(), pack);
-                        match data_pack.save_all() {
-                            Ok(_) => {
-                                package_manager.packs.insert(data_pack.uuid, data_pack);
-                            },
-                            Err(e) => {
-                                error!(?e, "failed to save marker pack");
-                            },
-                        }
-                        state_sender.send(BackToUIMessage::LoadedPack(texture_pack));
+                        tracing::trace!("Package loaded into data and texture");
+                        package_manager.save(data_pack);
+                        b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack));
                     },
                     Err(e) => {
-                        error!(?e, "failed to open marker pack directory to save pack");
+                        error!(?e, "failed to open marker pack directory to save pack {:?} {}", package_manager.marker_packs_dir, name);
                     }
                 };
-                tracing::trace!("Handling of UIToBackMessage::SavePack");
             }
             _ => {
                 unimplemented!("Handling BackToUIMessage has not been implemented yet");
@@ -191,13 +204,12 @@ impl Jokolay {
     }
     fn background_loop(
         mut app: Arc<Mutex<Box<JokolayApp>>>, 
-        state: Arc<Mutex<Box<JokolayState>>>,
+        mut local_state: JokolayState,
         b2u_sender: std::sync::mpsc::Sender<BackToUIMessage>,
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
         tracing::info!("entering background event loop");
         let span_guard = info_span!("background event loop").entered();
-        let mut local_state = state.lock().unwrap().as_mut().clone();
         let mut loop_index: u128 = 0;
         let mut nb_messages: u128 = 0;
         loop {
@@ -207,12 +219,11 @@ impl Jokolay {
                 mumble_manager,
                 package_manager
             } = &mut app.deref_mut().as_mut();
-            while let Ok(msg) = u2b_receiver.try_recv() {
-                Self::handle_u2b_message(package_manager, &mut local_state,&b2u_sender,  msg);
-                nb_messages += 1;
-            }
+            //very first thing to do is to read the mumble link
             let link = match mumble_manager.tick() {
                 Ok(ml) => {
+                    //let link_clone = ml.cloned();
+                    //b2u_sender.send(BackToUIMessage::MumbleLink(link_clone));
                     if let Some(link) = ml {
                         if link.changes.contains(MumbleChanges::WindowPosition)
                             || link.changes.contains(MumbleChanges::WindowSize)
@@ -227,6 +238,10 @@ impl Jokolay {
                     None
                 }
             };
+            while let Ok(msg) = u2b_receiver.try_recv() {
+                Self::handle_u2b_message(package_manager, &mut local_state,&b2u_sender,  msg);
+                nb_messages += 1;
+            }
             tracing::trace!("choice_of_category_changed: {}", local_state.choice_of_category_changed);
             package_manager.tick(
                 &b2u_sender, 
@@ -236,8 +251,6 @@ impl Jokolay {
             );
             local_state.choice_of_category_changed = false;
             
-            let link_clone = link.cloned();
-            b2u_sender.send(BackToUIMessage::MumbleLink(link_clone));
             thread::sleep(std::time::Duration::from_millis(10));
             loop_index += 1;
         }
@@ -251,12 +264,12 @@ impl Jokolay {
     ) {
         match msg {
             UIToUIMessage::BulkMarkerObject(marker_objects) => {
-                tracing::trace!("Handling of UIToUIMessage::BulkMarkerObject {}", marker_objects.len());
-                gui.joko_renderer.set_billboard(marker_objects);
+                tracing::info!("Handling of UIToUIMessage::BulkMarkerObject {}", marker_objects.len());
+                gui.joko_renderer.extend_markers(marker_objects);
             }
             UIToUIMessage::BulkTrailObject(trail_objects) => {
-                tracing::trace!("Handling of UIToUIMessage::BulkTrailObject");
-                gui.joko_renderer.set_trail(trail_objects);
+                tracing::info!("Handling of UIToUIMessage::BulkTrailObject {}", trail_objects.len());
+                gui.joko_renderer.extend_trails(trail_objects);
             }
             UIToUIMessage::MarkerObject(mo) => {
                 tracing::trace!("Handling of UIToUIMessage::MarkerObject");
@@ -266,12 +279,8 @@ impl Jokolay {
                 tracing::trace!("Handling of UIToUIMessage::TrailObject");
                 gui.joko_renderer.add_trail(to);
             }
-            UIToUIMessage::Present => {
-                tracing::trace!("Handling of UIToUIMessage::Present");
-                //gui.package_manager.swap();
-            }
             UIToUIMessage::RenderSwapChain => {
-                tracing::trace!("Handling of UIToUIMessage::RenderSwapChain");
+                tracing::info!("Handling of UIToUIMessage::RenderSwapChain");
                 gui.joko_renderer.swap();
             }
             _ => {
@@ -281,7 +290,7 @@ impl Jokolay {
     }
     fn handle_b2u_message(
         gui: &mut JokolayGui, 
-        state: &mut JokolayState,
+        local_state: &mut JokolayState,
         msg: BackToUIMessage
     ) {
         match msg {
@@ -294,8 +303,14 @@ impl Jokolay {
                 tracing::trace!("Handling of BackToUIMessage::CurrentlyUsedFiles");
                 gui.package_manager.set_currently_used_files(currently_used_files);
             }
+            BackToUIMessage::DeletedPacks(to_delete) => {
+                tracing::trace!("Handling of BackToUIMessage::DeletedPacks");
+                gui.package_manager.delete_packs(to_delete);
+            }
             BackToUIMessage::LoadedPack(pack_texture) => {
-                unimplemented!("Handling of BackToUIMessage::LoadedPack has not been implemented yet");
+                tracing::trace!("Handling of BackToUIMessage::LoadedPack");
+                gui.package_manager.save(pack_texture);
+                gui.package_manager.import_status = None;
             }
             BackToUIMessage::Loading => {
                 unimplemented!("Handling of BackToUIMessage::Loading has not been implemented yet");
@@ -306,20 +321,20 @@ impl Jokolay {
             }
             BackToUIMessage::MumbleLink(link) => {
                 tracing::trace!("Handling of BackToUIMessage::MumbleLink");
-                state.link = link;
+                local_state.link = link;
             }
             BackToUIMessage::MumbleLinkChanged => {
                 //too verbose to trace
-                state.window_changed = true;
+                local_state.window_changed = true;
             }
             BackToUIMessage::PackageActiveElements(pack_uuid, active_elements) => {
                 tracing::trace!("Handling of BackToUIMessage::PackageActiveElements");
                 gui.package_manager.update_pack_active_categories(pack_uuid, &active_elements);
             }
             BackToUIMessage::TextureSwapChain => {
-                tracing::trace!("Handling of BackToUIMessage::TextureSwapChain");
+                tracing::info!("Handling of BackToUIMessage::TextureSwapChain");
                 gui.package_manager.swap();
-                state.list_of_textures_changed = true;
+                local_state.list_of_textures_changed = true;
             }
             BackToUIMessage::TrailTexture(pack_uuid, tex_path, trail_uuid, common_attributes) => {
                 tracing::trace!("Handling of BackToUIMessage::TrailTexture");
@@ -335,29 +350,26 @@ impl Jokolay {
         let (b2u_sender, b2u_receiver) = std::sync::mpsc::channel();
         let (u2b_sender, u2b_receiver) = std::sync::mpsc::channel();
         let (u2u_sender, u2u_receiver) = std::sync::mpsc::channel();
-        Self::start_background_loop(Arc::clone(&self.app), Arc::clone(&self.state), b2u_sender, u2b_receiver);
+        Self::start_background_loop(Arc::clone(&self.app), self.state.clone(), b2u_sender, u2b_receiver);
 
         tracing::info!("entering glfw event loop");
         let span_guard = info_span!("glfw event loop").entered();
+        let mut local_state = self.state.clone();
         let mut nb_frames: u128 = 0;
         let mut nb_messages: u128 = 0;
         //u2u_sender.send(UIToUIMessage::Present);// force a first drawing
         loop {
             {
                 tracing::trace!("glfw event loop, {} frames, {} messages", nb_frames, nb_messages);
-                if let Ok(mut state) = self.state.lock() {
-                    //untested and might crash due to .unwrap()
-                    let mut gui = self.gui.lock().unwrap();
-                    while let Ok(msg) = b2u_receiver.try_recv() {
-                        nb_messages += 1;
-                        Self::handle_b2u_message(gui.deref_mut(), state.deref_mut(), msg);
-                    }
-                    while let Ok(msg) = u2u_receiver.try_recv() {
-                        nb_messages += 1;
-                        Self::handle_u2u_message(gui.deref_mut(), state.deref_mut(), msg);
-                    }
-                } else {
-                    error!("Failed to aquire lock on state");
+                //untested and might crash due to .unwrap()
+                let mut gui = self.gui.lock().unwrap();
+                while let Ok(msg) = b2u_receiver.try_recv() {
+                    nb_messages += 1;
+                    Self::handle_b2u_message(gui.deref_mut(), &mut local_state, msg);
+                }
+                while let Ok(msg) = u2u_receiver.try_recv() {
+                    nb_messages += 1;
+                    Self::handle_u2u_message(gui.deref_mut(), &mut local_state, msg);
                 }
             }
 
@@ -369,6 +381,7 @@ impl Jokolay {
                 egui_context,
                 glfw_backend,
                 theme_manager,
+                mumble_manager,
                 package_manager
             } = &mut gui.deref_mut();
             let latest_time = glfw_backend.glfw.get_time();
@@ -418,38 +431,51 @@ impl Jokolay {
             
             // do all the non-gui stuff first
             frame_stats.tick(latest_time);
-            {
-                let state = Arc::clone(&self.state);
-                let mut state = state.lock().unwrap();
-                // check if we need to change window position or size.
-                if let Some(link) = state.link.as_ref() {
-                    if state.window_changed {
-                        glfw_backend
-                            .window
-                            .set_pos(link.client_pos.x, link.client_pos.y);
-                        // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
-                        // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
-                        // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
-                        glfw_backend
-                            .window
-                            .set_size(link.client_size.x - 1, link.client_size.y - 1);
+            let link = match mumble_manager.tick() {
+                Ok(ml) => {
+                    if let Some(link) = ml {
+                        if link.changes.contains(MumbleChanges::WindowPosition)
+                            || link.changes.contains(MumbleChanges::WindowSize)
+                        {
+                            local_state.window_changed = true;
+                        }
+                        local_state.link = Some(link.clone());
                     }
-                    if state.list_of_textures_changed || link.changes.contains(MumbleChanges::Position) || link.changes.contains(MumbleChanges::Map){
-                        package_manager.tick(
-                            &u2u_sender, 
-                            latest_time, 
-                            link, 
-                            JokoRenderer::get_z_near()
-                        );
-                        state.list_of_textures_changed = false;
-                    }
-                    state.window_changed = false;
+                    ml
+                },
+                Err(e) => {
+                    error!(?e, "mumble manager tick error");
+                    None
                 }
-                
-                joko_renderer.tick(state.link.as_ref());
-                menu_panel.tick(&etx, state.link.as_ref());
-                
+            };
+            
+            // check if we need to change window position or size.
+            if let Some(link) = link {
+                if local_state.window_changed {
+                    glfw_backend
+                        .window
+                        .set_pos(link.client_pos.x, link.client_pos.y);
+                    // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
+                    // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
+                    // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
+                    glfw_backend
+                        .window
+                        .set_size(link.client_size.x - 1, link.client_size.y - 1);
+                }
+                if local_state.list_of_textures_changed || link.changes.contains(MumbleChanges::Position) || link.changes.contains(MumbleChanges::Map) {
+                    package_manager.tick(
+                        &u2u_sender, 
+                        latest_time, 
+                        link, 
+                        JokoRenderer::get_z_near()
+                    );
+                    local_state.list_of_textures_changed = false;
+                }
+                local_state.window_changed = false;
             }
+            
+            joko_renderer.tick(link);
+            menu_panel.tick(&etx, link);
             
             // do the gui stuff now
             egui::Area::new("menu panel")
@@ -494,25 +520,21 @@ impl Jokolay {
                         );
                         package_manager.menu_ui(&u2b_sender, &u2u_sender, ui);
                     });
-                });
+                }
+            );
             
-            {
-                let state = Arc::clone(&self.state);
-                if let Some(link) = state.lock().unwrap().link.as_mut() {
-                    //updates need to be sent to the background state
-                    mumble_gui(&etx, &mut menu_panel.show_mumble_manager_window, true, link);
-                    package_manager.gui(
-                        &u2b_sender,
-                        &etx, 
-                        &mut menu_panel.show_package_manager_window,
-                        &mut menu_panel.show_file_manager_window,
-                        latest_time,
-                        Some(link)
-                    );
-               } else {
-                    //no mumble link available
-               };
-            }
+            if let Some(link) = local_state.link.as_mut() {
+                //updates need to be sent to the background state
+                mumble_gui(&etx, &mut menu_panel.show_mumble_manager_window, true, link);
+            };
+            package_manager.gui(
+                &u2b_sender,
+                &etx, 
+                &mut menu_panel.show_package_manager_window,
+                &mut menu_panel.show_file_manager_window,
+                latest_time,
+                link
+            );
             JokolayTracingLayer::gui(&etx, &mut menu_panel.show_tracing_window);
             theme_manager.gui(&etx, &mut menu_panel.show_theme_window);
             frame_stats.gui(&etx, glfw_backend, &mut menu_panel.show_window_manager);

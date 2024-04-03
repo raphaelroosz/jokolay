@@ -52,28 +52,28 @@ impl ThemeManager {
     const DEFAULT_FONT_NAME: &'static str = "default";
     const DEFAULT_THEME_NAME: &'static str = "default";
     const THEME_MANAGER_CONFIG_NAME: &'static str = "theme_manager_config";
-    pub fn new(jdir: &Dir) -> Result<Self> {
-        jdir.create_dir_all(Self::THEME_MANAGER_DIR_NAME)
+    pub fn new(jokolay_dir: Arc<Dir>) -> Result<Self> {
+        jokolay_dir.create_dir_all(Self::THEME_MANAGER_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to create theme manager dir")?;
-        let dir: Arc<Dir> = jdir
+        let theme_manager_dir: Arc<Dir> = jokolay_dir
             .open_dir(Self::THEME_MANAGER_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to open theme_manager dir")?
             .into();
-        dir.create_dir_all(Self::THEMES_DIR_NAME)
+        theme_manager_dir.create_dir_all(Self::THEMES_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to create themes dir")?;
-        let themes_dir: Arc<Dir> = dir
+        let themes_dir: Arc<Dir> = theme_manager_dir
             .open_dir(Self::THEMES_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to open themes dir")?
             .into();
 
-        dir.create_dir_all(Self::FONTS_DIR_NAME)
+        theme_manager_dir.create_dir_all(Self::FONTS_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to create themes dir")?;
-        let fonts_dir: Arc<Dir> = dir
+        let fonts_dir: Arc<Dir> = theme_manager_dir
             .open_dir(Self::FONTS_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to open themes dir")?
@@ -167,8 +167,8 @@ impl ThemeManager {
                 fonts.insert(theme_name, font_bytes);
             }
         }
-        if !dir.exists(format!("{}.json", Self::THEME_MANAGER_CONFIG_NAME)) {
-            dir.write(
+        if !theme_manager_dir.exists(format!("{}.json", Self::THEME_MANAGER_CONFIG_NAME)) {
+            theme_manager_dir.write(
                 format!("{}.json", Self::THEME_MANAGER_CONFIG_NAME),
                 serde_json::to_vec_pretty(&ThemeManagerConfig::default())
                     .into_diagnostic()
@@ -178,14 +178,14 @@ impl ThemeManager {
             .wrap_err("failed to write theme manager config to the theme manager dir")?;
         }
         let config = serde_json::from_str(
-            &dir.read_to_string(format!("{}.json", Self::THEME_MANAGER_CONFIG_NAME))
+            &theme_manager_dir.read_to_string(format!("{}.json", Self::THEME_MANAGER_CONFIG_NAME))
                 .into_diagnostic()
                 .wrap_err("failed to read theme manager config file")?,
         )
         .into_diagnostic()
         .wrap_err("failed to deserialize theme manager config file")?;
         Ok(Self {
-            dir,
+            dir: theme_manager_dir,
             themes_dir,
             fonts_dir,
             themes,

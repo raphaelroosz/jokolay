@@ -74,10 +74,12 @@ impl BillBoardRenderer {
     }
     
     pub fn swap(&mut self) {
-        std::mem::swap(&mut self.markers, &mut self.markers_wip);
-        std::mem::swap(&mut self.trails, &mut self.trails_wip);
-        self.markers_wip.clear();
-        self.trails_wip.clear();
+        info!("swap UI to display {} markers, {} trails", 
+            self.markers_wip.len(), 
+            self.trails_wip.len()
+        );
+        self.markers = std::mem::take(&mut self.markers_wip);
+        self.trails = std::mem::take(&mut self.trails_wip);
     }
 
     pub fn prepare_render_data(&mut self, gl: &Context) {

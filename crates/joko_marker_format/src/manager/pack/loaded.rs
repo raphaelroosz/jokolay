@@ -34,7 +34,7 @@ use crate::manager::package::{PACKAGES_DIRECTORY_NAME, PACKAGE_MANAGER_DIRECTORY
 pub (crate) struct PackTasks {
     //TODO: the tasks should be in GUI and not in package
     //an object that can handle such tasks should be passed as argument of any function that may required an async action
-    save_ui_task: AsyncTask<LoadedPackTexture, Result<()>>,
+    save_texture_task: AsyncTask<LoadedPackTexture, Result<()>>,
     save_data_task: AsyncTask<LoadedPackData, Result<()>>,
 }
 
@@ -86,28 +86,28 @@ pub struct LoadedPackTexture {
 impl PackTasks {
     pub fn new() -> Self {
         Self {
-            save_ui_task: AsyncTaskGuard::new(PackTasks::async_save_ui),
+            save_texture_task: AsyncTaskGuard::new(PackTasks::async_save_texture),
             save_data_task: AsyncTaskGuard::new(PackTasks::async_save_data),
         }
     }
     pub fn is_running(&self) -> bool {
-        self.save_ui_task.lock().unwrap().is_running()
+        self.save_texture_task.lock().unwrap().is_running()
     }
 
-    fn save_ui(&self, pack: &mut LoadedPackTexture) {
-        if pack._is_dirty {
-            std::mem::take(&mut pack._is_dirty);
-            self.save_ui_task.lock().unwrap().send(
-                pack.clone()
+    pub fn save_texture(&self, texture_pack: &mut LoadedPackTexture, status: bool) {
+        if status {
+            std::mem::take(&mut texture_pack._is_dirty);
+            self.save_texture_task.lock().unwrap().send(
+                texture_pack.clone()
             );
         }
     }
 
-    fn save_data(&self, pack: &mut LoadedPackData) {
-        if pack._is_dirty {
-            std::mem::take(&mut pack._is_dirty);
+    pub fn save_data(&self, data_pack: &mut LoadedPackData, status: bool) {
+        if status {
+            std::mem::take(&mut data_pack._is_dirty);
             self.save_data_task.lock().unwrap().send(
-                pack.clone()
+                data_pack.clone()
             );
         }
     }
@@ -123,11 +123,11 @@ impl PackTasks {
         //self.load_map_task.lock().unwrap().send(pack);
     }
 
-    fn async_save_ui(
+    fn async_save_texture(
         pack_texture: LoadedPackTexture
     ) -> Result<()> {
         //let (dir, selectable_categories, activation_data, core) = pack;
-        info!("Save package {:?}", pack_texture.dir);//FIXME: the context is no more since this is another thread entirely, we do not know which package this is about
+        info!("Save texture package {:?}", pack_texture.dir);//FIXME: the context is no more since this is another thread entirely, we do not know which package this is about
         match serde_json::to_string_pretty(&pack_texture.selectable_categories) {
             Ok(cs_json) => match pack_texture.dir.write(LoadedPackData::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                 Ok(_) => {
@@ -165,6 +165,7 @@ impl PackTasks {
     fn async_save_data(
         pack_data: LoadedPackData
     ) -> Result<()> {
+        info!("Save data package {:?}", pack_data.dir);
         pack_data.dir
             .create_dir_all(LoadedPackData::CORE_PACK_DIR_NAME)
             .into_diagnostic()
@@ -272,6 +273,10 @@ impl LoadedPackData {
         self._is_dirty = true;
     }
 
+    pub fn is_dirty(&self) -> bool {
+        self._is_dirty
+    }
+
     pub fn tick(
         &mut self,
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
@@ -291,7 +296,7 @@ impl LoadedPackData {
                 activation_data
          */
         //we are in a GUI drawing, save in background.
-        tasks.save_data(self);
+        //tasks.save_data(self);
         //FIXME: takes a lot of time when "is_dirty" is true (i.e.: the map of things to display changes). Everythings get reloaded => how to do partial version ?
         if map_changed || list_of_active_or_selected_elements_changed {
             tasks.change_map(self, b2u_sender, link, currently_used_files);
@@ -320,7 +325,7 @@ impl LoadedPackData {
             ensure load of every texture regardless of status
 
         */
-        info!(link.map_id, "current map data is updated.");
+        info!(link.map_id, "current map data is updated. {}", self.name);
         if link.map_id == 0 {
             info!("No map do not do anything");
             return;
@@ -444,16 +449,8 @@ impl LoadedPackData {
                 }
             }
         }
-        info!("Load notifications for {}: {}/{} markers and {}/{} trails", link.map_id, nb_markers_loaded, nb_markers_attempt, nb_trails_loaded, nb_trails_attempt);
+        info!("Load notifications for {} on map {}: {}/{} markers and {}/{} trails", self.name, link.map_id, nb_markers_loaded, nb_markers_attempt, nb_trails_loaded, nb_trails_attempt);
         debug!("active categories: {:?}", selected_categories_manager.keys());
-    }
-
-    pub fn save_all(&mut self) -> Result<()> {
-        unimplemented!("Replace by a save on both data and ui");
-        /*
-        self._is_dirty = true;
-        self.save()
-        */
     }
 
     /*
@@ -549,7 +546,10 @@ impl LoadedPackTexture {
         }
     }
 
-   pub fn tick(
+    pub fn is_dirty(&self) -> bool {
+        self._is_dirty
+    }
+    pub fn tick(
         &mut self,
         u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         _timestamp: f64,
@@ -558,9 +558,10 @@ impl LoadedPackTexture {
         z_near: f32,
         tasks: &PackTasks,
     ) {
-        tasks.save_ui(self);
+        //tasks.save_texture(self);
         //FIXME: how to reset state correctly to only display what is necessary ?
-        tracing::trace!("LoadedPackTexture.tick: {}-{} {}-{}", 
+        tracing::trace!("LoadedPackTexture.tick: {} {}-{} {}-{}", 
+            self.name,
             self.current_map_data.active_markers.len(), 
             self.current_map_data.wip_markers.len(), 
             self.current_map_data.active_trails.len(), 
@@ -573,7 +574,7 @@ impl LoadedPackTexture {
                 marker_objects.push(mo);
             }
         }
-        tracing::trace!("LoadedPackTexture.tick: markers {}", marker_objects.len());
+        tracing::info!("LoadedPackTexture.tick: {}, markers {}", self.name, marker_objects.len());
         u2u_sender.send(UIToUIMessage::BulkMarkerObject(marker_objects));
         let mut trail_objects = Vec::new();
         for (uuid, trail) in self.current_map_data.active_trails.iter() {
@@ -583,16 +584,19 @@ impl LoadedPackTexture {
             });
             //next_on_screen.insert(*uuid);
         }
-        tracing::trace!("LoadedPackTexture.tick: trails {}", trail_objects.len());
+        tracing::info!("LoadedPackTexture.tick: {}, trails {}", self.name, trail_objects.len());
         u2u_sender.send(UIToUIMessage::BulkTrailObject(trail_objects));
-        u2u_sender.send(UIToUIMessage::RenderSwapChain);
     }
 
     pub fn swap(&mut self) {
-        std::mem::swap(&mut self.current_map_data.active_markers, &mut self.current_map_data.wip_markers);
-        std::mem::swap(&mut self.current_map_data.active_trails, &mut self.current_map_data.wip_trails);
-        self.current_map_data.wip_markers.clear();
-        self.current_map_data.wip_trails.clear();
+        info!("swap {} to display {} textures, {} markers, {} trails", 
+            self.name, 
+            self.current_map_data.active_textures.len(),
+            self.current_map_data.wip_markers.len(), 
+            self.current_map_data.wip_trails.len()
+        );
+        self.current_map_data.active_markers = std::mem::take(&mut self.current_map_data.wip_markers);
+        self.current_map_data.active_trails = std::mem::take(&mut self.current_map_data.wip_trails);
     }
 
     pub fn load_marker_texture(
@@ -708,23 +712,27 @@ impl LoadedPackTexture {
 
 }
 
-
-pub fn load_all_from_dir(pack_dir: &Arc<Dir>) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>{
-    pack_dir.create_dir_all(PACKAGE_MANAGER_DIRECTORY_NAME)
+pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
+    jokolay_dir.create_dir_all(PACKAGE_MANAGER_DIRECTORY_NAME)
         .into_diagnostic()
-        .wrap_err("failed to create marker manager directory")?;
-    let marker_manager_dir = pack_dir
+        .wrap_err(format!("failed to create marker manager directory {}", PACKAGE_MANAGER_DIRECTORY_NAME))?;
+    let marker_manager_dir = jokolay_dir
         .open_dir(PACKAGE_MANAGER_DIRECTORY_NAME)
         .into_diagnostic()
-        .wrap_err("failed to open marker manager directory")?;
+        .wrap_err(format!("failed to open marker manager directory {}", PACKAGE_MANAGER_DIRECTORY_NAME))?;
     marker_manager_dir
         .create_dir_all(PACKAGES_DIRECTORY_NAME)
         .into_diagnostic()
-        .wrap_err("failed to create marker packs directory")?;
+        .wrap_err(format!("failed to create marker packs directory {}", PACKAGES_DIRECTORY_NAME))?;
     let marker_packs_dir = marker_manager_dir
         .open_dir(PACKAGES_DIRECTORY_NAME)
         .into_diagnostic()
-        .wrap_err("failed to open marker packs dir")?;
+        .wrap_err(format!("failed to open marker packs dir {}", PACKAGES_DIRECTORY_NAME))?;
+    Ok(marker_packs_dir)
+}
+
+pub fn load_all_from_dir(jokolay_dir: &Arc<Dir>) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>{
+    let marker_packs_dir = jokolay_to_marker_dir(jokolay_dir)?;
     let mut data_packs: BTreeMap<Uuid, LoadedPackData> = Default::default();
     let mut texture_packs: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
 
@@ -742,18 +750,18 @@ pub fn load_all_from_dir(pack_dir: &Arc<Dir>) -> Result<(BTreeMap<Uuid, LoadedPa
             let pack_dir = entry
                 .open_dir()
                 .into_diagnostic()
-                .wrap_err("failed to open pack entry as directory")?;
+                .wrap_err(format!("failed to open pack entry as directory: {}", name))?;
             {
                 let span_guard = info_span!("loading pack from dir", name).entered();
 
-                match build_from_dir(name, pack_dir.into()) {
+                match build_from_dir(name.clone(), pack_dir.into()) {
                     Ok(lp) => {
                         let (data, tex) = lp;
                         data_packs.insert(data.uuid, data);
                         texture_packs.insert(tex.uuid, tex);
                     }
                     Err(e) => {
-                        error!(?e, "failed to load pack from directory");
+                        error!(?e, "failed to load pack from directory: {}", name);
                     }
                 }
                 drop(span_guard);
@@ -783,7 +791,7 @@ fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<(LoadedPackData, L
 pub fn build_from_core(name: String, dir: Arc<Dir>, core: PackCore) -> (LoadedPackData, LoadedPackTexture) {
     let selectable_categories = CategorySelection::default_from_pack_core(&core);
     let data = LoadedPackData {
-        name,
+        name: name.clone(),
         uuid: core.uuid,
         dir: Arc::clone(&dir),
         selected_files: Default::default(),
@@ -821,11 +829,11 @@ pub fn build_from_core(name: String, dir: Arc<Dir>, core: PackCore) -> (LoadedPa
         selectable_categories,
         textures: core.textures,
         current_map_data: Default::default(),
-        _is_dirty: true,
+        _is_dirty: false,
         activation_data,
         dir: Arc::clone(&dir),
         late_discovery_categories: core.late_discovery_categories,
-        name: core.name,
+        name: name,
         tbins: core.tbins,
         active_elements: Default::default(),
     };

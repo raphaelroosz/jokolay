@@ -20,7 +20,8 @@ pub fn get_jokolay_dir() -> Result<cap_std::fs_utf8::Dir> {
             .wrap_err(jkl_path)
             .wrap_err("failed to open jokolay data dir")?
     } else {
-        let dir = cap_directories::ProjectDirs::from("com.jokolay", "", "jokolay", authoratah)
+        let project_dir = cap_directories::ProjectDirs::from("com.jokolay", "", "jokolay", authoratah);
+        let dir = project_dir
             .ok_or(miette::miette!(
                 "getting project dirs failed for some reason"
             ))?
