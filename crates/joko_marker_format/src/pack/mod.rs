@@ -21,12 +21,8 @@ use uuid::Uuid;
 #[derive(Default, Debug, Clone)]
 pub struct PackCore {
     /*
-    TODO:
-        this is a temporary holder of data
-        it might be deleted at some point to avoid copy of data => into parts, break it down as fields and reassemble those.
-        it mean the "new" functions have to be rewritten to take those fields instead of a PackCore as a whole.
-        The "new" functions might even be removed to not be able to build them independantly.
-        Once built the UI version would be sent to UI.
+        PackCore is a temporary holder of data
+        It is moved and breaked down into a Data and Texture part. Former for background work and later for UI display.
     */
     pub name: String,
     pub uuid: Uuid,
@@ -55,7 +51,7 @@ impl PackCore {
             category_uuid.clone()
         } else {
             //TODO: if import is "dirty", create missing category
-            //default import mode is "strict" (get inspiration from HTML modes)
+            //TODO: default import mode is "strict" (get inspiration from HTML modes)
             debug!("There is no defined category for {}", full_category_name);
 
             let mut n = 0;
@@ -297,7 +293,6 @@ impl Category {
         for full_category_name in third_pass_categories_ref {
             if let Some(cat) = third_pass_categories.shift_remove(&full_category_name) {
                 if let Some(parent) = cat.parent {
-                    //FIXME: this only look for top level
                     if let Some(parent_category) = Category::per_uuid(&mut third_pass_categories, &parent, 0) {
                         parent_category.children.insert(cat.guid.clone(), cat);
                     } else if let Some(parent_category) = Category::per_uuid(&mut root, &parent, 0) {

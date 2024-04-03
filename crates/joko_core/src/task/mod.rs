@@ -1,7 +1,5 @@
 use std::{
-    sync::{mpsc::SendError, Arc, Mutex},
-    thread::JoinHandle,
-    result::Result
+    result::Result, sync::{mpsc::{RecvError, SendError}, Arc, Mutex}, thread::JoinHandle
 };
 
 //TODO: could this be a wrapper only and a move/copy would not impact content ?
@@ -63,6 +61,9 @@ where
     }
     pub fn send(&self, value: TaskItem) -> Result<(), SendError<TaskItem>> {
         self.task_sender.send(value)
+    }
+    pub fn recv(&self) -> Result<ResultItem, RecvError> {
+        self.result_receiver.recv()
     }
 
     pub fn is_running(&self) -> bool {

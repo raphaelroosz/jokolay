@@ -47,15 +47,15 @@ pub struct Jokolay {
 
 impl Jokolay {
     pub fn new(jokolay_dir: Arc<Dir>) -> Result<Self> {
-        //TODO: we could have two mumble_manager, one for UI, one for backend, each keeping its own copy
-        //this would allow overwriting from gui to back ?
-        //if we want to be able to edit the link, one need to put a "form submission" logic.
+        //We have two mumble_managers, one for UI, one for backend, each keeping its own copy
+        //this avoid transmition between threads to read same data from system
+        //TODO: if we want to be able to edit the link, one need to put a "form submission" logic.
         let mumble_data_manager =
             MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
         let mumble_ui_manager =
             MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
             
-        let (data_packages, texture_packages) = load_all_from_dir(&jokolay_dir).wrap_err("failed to load packages")?;
+        let (data_packages, texture_packages) = load_all_from_dir(Arc::clone(&jokolay_dir)).wrap_err("failed to load packages")?;
         let mut package_data_manager = PackageDataManager::new(data_packages, Arc::clone(&jokolay_dir))?;
         let mut package_ui_manager = PackageUIManager::new(texture_packages);
         let mut theme_manager = ThemeManager::new(Arc::clone(&jokolay_dir)).wrap_err("failed to create theme manager")?;
@@ -121,6 +121,7 @@ impl Jokolay {
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
         let background_thread = std::thread::spawn(move || {
+            //TODO here, load the directory with packages
             Self::background_loop(Arc::clone(&app), state, b2u_sender, u2b_receiver);
         });
     }
@@ -291,6 +292,7 @@ impl Jokolay {
     fn handle_b2u_message(
         gui: &mut JokolayGui, 
         local_state: &mut JokolayState,
+        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         msg: BackToUIMessage
     ) {
         match msg {
@@ -311,6 +313,7 @@ impl Jokolay {
                 tracing::trace!("Handling of BackToUIMessage::LoadedPack");
                 gui.package_manager.save(pack_texture);
                 gui.package_manager.import_status = None;
+                u2b_sender.send(UIToBackMessage::CategoryActivationStatusChanged);
             }
             BackToUIMessage::Loading => {
                 unimplemented!("Handling of BackToUIMessage::Loading has not been implemented yet");
@@ -357,21 +360,34 @@ impl Jokolay {
         let mut local_state = self.state.clone();
         let mut nb_frames: u128 = 0;
         let mut nb_messages: u128 = 0;
+        let max_nb_messages_per_loop: u128 = 100;
         //u2u_sender.send(UIToUIMessage::Present);// force a first drawing
         loop {
             {
+                let mut nb_message_on_curent_loop: u128 = 0;
                 tracing::trace!("glfw event loop, {} frames, {} messages", nb_frames, nb_messages);
                 //untested and might crash due to .unwrap()
                 let mut gui = self.gui.lock().unwrap();
-                while let Ok(msg) = b2u_receiver.try_recv() {
-                    nb_messages += 1;
-                    Self::handle_b2u_message(gui.deref_mut(), &mut local_state, msg);
-                }
                 while let Ok(msg) = u2u_receiver.try_recv() {
                     nb_messages += 1;
                     Self::handle_u2u_message(gui.deref_mut(), &mut local_state, msg);
+                    nb_message_on_curent_loop += 1;
+                    if nb_message_on_curent_loop == max_nb_messages_per_loop {
+                        break;
+                    }
+                }
+                if nb_message_on_curent_loop < max_nb_messages_per_loop {
+                    while let Ok(msg) = b2u_receiver.try_recv() {
+                        nb_messages += 1;
+                        Self::handle_b2u_message(gui.deref_mut(), &mut local_state, &u2b_sender, msg);
+                        nb_message_on_curent_loop += 1;
+                        if nb_message_on_curent_loop == max_nb_messages_per_loop {
+                            break;
+                        }
+                    }
                 }
             }
+
 
             let mut gui = self.gui.lock().unwrap();
             let JokolayGui {

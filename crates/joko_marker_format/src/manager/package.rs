@@ -35,7 +35,6 @@ pub const PACKAGES_DIRECTORY_NAME: &str = "packs";//name kept for compatibility 
 ///     2. marker needs to be drawn
 ///     3. marker's texture is uploaded or being uploaded? if not ready, we will upload or use a temporary "loading" texture
 ///     4. render that marker use joko_render  
-/// FIXME: it is a bad name, it does not manage Markers, but packages
 #[must_use]
 pub struct PackageDataManager {
     /// marker manager directory. not useful yet, but in future we could be using this to store config files etc..
@@ -178,7 +177,7 @@ impl PackageDataManager {
         
         match link {
             Some(link) => {
-                //FIXME: how to save/load the active files ?
+                //TODO: how to save/load the active files ?
                 //TODO: find an efficient way to propagate the file deactivation
                 let mut have_used_files_list_changed = false;
                 let map_changed = self.current_map_id != link.map_id;
@@ -232,21 +231,21 @@ impl PackageDataManager {
             },
             None => {},
         };
-        //TODO: state_sender.send(BackToUIMessage::ActiveElements(active_elements));
-        
-        
-        //those are the elements displayed, not the categories, one would need to keep the link between the two
-        /*if is_one_package_reloaded {
-            for pack in self.packs.values() {
-                next_loaded.extend(pack.active_elements());
-            }
-            info!("Loaded {} elements", next_loaded.len());
-            self.loaded_elements = self.update_active_elements(next_loaded);
-        }*/
-        //self.on_screen = self.update_active_elements(next_on_screen);
     }
 
+    fn delete_packs(&mut self, to_delete: Vec<Uuid>) {
+        for uuid in to_delete {
+            self.packs.remove(&uuid);
+        }
+    }
     pub fn save(&mut self, mut data_pack: LoadedPackData) {
+        let mut to_delete: Vec<Uuid> = Vec::new();
+        for (uuid, pack) in self.packs.iter() {
+            if pack.name == data_pack.name {
+                to_delete.push(*uuid);
+            }
+        }
+        self.delete_packs(to_delete);
         self.tasks.save_data(&mut data_pack, true);
         self.packs.insert(data_pack.uuid, data_pack);
     }
@@ -466,7 +465,8 @@ impl PackageUIManager {
             
         });
         if self.tasks.is_running() {
-            ui.spinner();
+            let sp = egui::Spinner::new().color(self.tasks.status_as_color());
+            ui.add(sp);
         }
     }
 
@@ -529,7 +529,6 @@ impl PackageUIManager {
                         }
                     }
                     if !to_delete.is_empty() {
-                        //TODO: send message to background thread, UIToBackMessage::DeletePack
                         event_sender.send(UIToBackMessage::DeletePacks(to_delete));
                     }
                 });
@@ -541,7 +540,7 @@ impl PackageUIManager {
                     self.import_status = None;
                 }
             } else if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
-                //TODO: send message to background thread, UIToBackMessage::ImportPack
+                //TODO: send message to background thread, UIToBackMessage::ImportPack instead of a rayon thread ?
                 let import_status = Arc::new(Mutex::default());
                 self.import_status = Some(import_status.clone());
                 Self::pack_importer(import_status);
@@ -601,6 +600,17 @@ impl PackageUIManager {
     }
 
     pub fn save(&mut self, mut texture_pack: LoadedPackTexture) {
+        /*
+            We save in a file with the name of the package, while we keep track of it from a uuid point of view.
+            It means we can have duplicates unless package with same name is deleted.
+        */
+        let mut to_delete: Vec<Uuid> = Vec::new();
+        for (uuid, pack) in self.packs.iter() {
+            if pack.name == texture_pack.name {
+                to_delete.push(*uuid);
+            }
+        }
+        self.delete_packs(to_delete);
         self.tasks.save_texture(&mut texture_pack, true);
         self.packs.insert(texture_pack.uuid, texture_pack);
     }

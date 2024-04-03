@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct CategorySelection {
-    #[serde(skip)]
-    pub uuid: Uuid,//FIXME: there seems to be guid generated at several places leading to confusion in what is active or not (most likely in category, not saved versys categoryselection, saved)
+    //#[serde(skip)]
+    pub uuid: Uuid,//FIXME: if not present, one MUST fix it or mark the current import as a failure and reset all information
     #[serde(skip)]
     pub parent: Option<Uuid>,
     pub is_selected: bool,//has it been selected in configuration to be displayed

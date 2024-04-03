@@ -13,7 +13,6 @@ impl<'a> SelectedFileManager {
         pack_source_files: &OrderedHashMap<String, bool>,
         currently_used_files: &BTreeMap<String, bool>,
     ) -> Self {
-        //TODO: build data
         let mut list_of_enabled_files: OrderedHashMap<String, bool> = Default::default();
         SelectedFileManager::recursive_get_full_names(
             &selected_files,

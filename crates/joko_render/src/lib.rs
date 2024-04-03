@@ -128,7 +128,6 @@ impl JokoRenderer {
     }
     
     pub fn prepare_frame(&mut self, latest_framebuffer_size_getter: impl FnMut() -> [u32; 2]) {
-        //FIXME: have a double buffering
         self.gl.prepare_frame(latest_framebuffer_size_getter);
         unsafe {
             let gl = self.gl.context.clone();

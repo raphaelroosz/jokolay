@@ -18,7 +18,6 @@ use xot::{Node, Xot, Element};
 use super::XotAttributeNameIDs;
 
 pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
-    //FIXME: this should return two elements:
     //called from already parsed data
     let mut pack = PackCore::default();
     pack.uuid = Uuid::new_v4();
@@ -307,13 +306,6 @@ fn parse_categories_recursive(
         let mut ca = CommonAttributes::default();
         ca.update_common_attributes_from_element(ele, names);
 
-        /*
-        FIXME: how to handle both
-            orphans
-            out of order evaluation => mark the current marker category to be skipped and not inserted, this is an orphan for later reinsertion
-        if the category has a Display name, then the name is relative, if not, it means this is defined somewhere else and name is absolute.
-            => have a "late insertion" container
-        */
         let display_name = ele.get_attribute(names.display_name).unwrap_or(&name);
 
         let separator = ele
@@ -454,7 +446,7 @@ fn parse_map_file(map_id: u32, map_xml_str: &str, pack: &mut PackCore) -> Result
             
             let source_file_name = child.get_attribute(names._source_file_name).unwrap_or_default().to_string();
             pack.source_files.insert(source_file_name.clone(), true);
-            //TODO: route, difference with trail: trail is binary format while route is text => convert route into a trail
+
             if child.name() == names.route {
                 debug!("Found a route in core pack {:?}", child);
                 import_route_as_trail(pack, &names, &tree, &poi_node, child, full_category_name, &category_uuid, source_file_name)
@@ -554,7 +546,6 @@ fn parse_category_categories_xml_recursive(
                 continue;
             }
 
-            //TODO: if no display name, only keep the parent/enfant relationship
             let relative_category_name = ele.get_attribute(names.name)
                 .or(ele.get_attribute(names.display_name)
                     .or(ele.get_attribute(names.CapitalName)
@@ -648,7 +639,6 @@ fn parse_category_categories_xml_recursive(
 /// we will ignore any issues like unknown attributes or xml tags. "unknown" attributes means Any attributes that jokolay doesn't parse into Zpack.
 #[instrument(skip_all)]
 pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
-    //FIXME: there might be a problem where the elements are not displayed immediately after save
     //called to import a new pack
     // all the contents of ZPack
     let mut pack = PackCore::default();

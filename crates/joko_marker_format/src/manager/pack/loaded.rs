@@ -1,6 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc
+    collections::{BTreeMap, HashMap, HashSet}, sync::Arc
 };
 
 use indexmap::IndexMap;
@@ -32,10 +31,10 @@ use crate::manager::package::{PACKAGES_DIRECTORY_NAME, PACKAGE_MANAGER_DIRECTORY
 
 
 pub (crate) struct PackTasks {
-    //TODO: the tasks should be in GUI and not in package
     //an object that can handle such tasks should be passed as argument of any function that may required an async action
     save_texture_task: AsyncTask<LoadedPackTexture, Result<()>>,
     save_data_task: AsyncTask<LoadedPackData, Result<()>>,
+    load_pack_task: AsyncTask<Arc<Dir>, Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>>
 }
 
 #[derive(Clone)]
@@ -58,10 +57,7 @@ pub struct LoadedPackData {
     activation_data: ActivationData,
     active_elements: HashSet<Uuid>,//keep track of which elements are active
 }
-/*
-TODO: LoadedPack is in fact the perfect tool to handle GUI if there was no "core" member inside it
-    it means dig out a CorePack into multiple parts
-*/
+
 #[derive(Clone)]
 pub struct LoadedPackTexture {
     pub name: String,
@@ -88,10 +84,22 @@ impl PackTasks {
         Self {
             save_texture_task: AsyncTaskGuard::new(PackTasks::async_save_texture),
             save_data_task: AsyncTaskGuard::new(PackTasks::async_save_data),
+            load_pack_task: AsyncTaskGuard::new(load_all_from_dir),
         }
     }
     pub fn is_running(&self) -> bool {
-        self.save_texture_task.lock().unwrap().is_running()
+        self.save_texture_task.lock().unwrap().is_running() ||
+        self.save_data_task.lock().unwrap().is_running()
+    }
+    pub fn status_as_color(&self) -> egui::Color32 {
+        //we can choose whatever color code we want to focus on load, save, network queries, anything.
+        let max_nb_saving = 2;
+        let nb_saving = 
+            self.save_texture_task.lock().unwrap().is_running() as u8
+            + self.save_data_task.lock().unwrap().is_running() as u8
+        ;
+        let color_saving = nb_saving * 0xff / max_nb_saving;
+        egui::Color32::from_rgb(color_saving, 0, 0)
     }
 
     pub fn save_texture(&self, texture_pack: &mut LoadedPackTexture, status: bool) {
@@ -126,8 +134,7 @@ impl PackTasks {
     fn async_save_texture(
         pack_texture: LoadedPackTexture
     ) -> Result<()> {
-        //let (dir, selectable_categories, activation_data, core) = pack;
-        info!("Save texture package {:?}", pack_texture.dir);//FIXME: the context is no more since this is another thread entirely, we do not know which package this is about
+        info!("Save texture package {:?}", pack_texture.dir);
         match serde_json::to_string_pretty(&pack_texture.selectable_categories) {
             Ok(cs_json) => match pack_texture.dir.write(LoadedPackData::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                 Ok(_) => {
@@ -188,26 +195,9 @@ impl LoadedPackData {
     const CORE_PACK_DIR_NAME: &'static str = "core";
     const CATEGORY_SELECTION_FILE_NAME: &'static str = "cats.json";
 
-    pub fn load_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<Self> {
-        if !pack_dir
-            .try_exists(Self::CORE_PACK_DIR_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to check if pack core exists")?
-        {
-            bail!("pack core doesn't exist in this pack");
-        }
-        let core_dir = pack_dir
-            .open_dir(Self::CORE_PACK_DIR_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to open core pack directory")?;
-        let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
-
-        //FIXME: Since categories have randomly generated uuids (and not saved), one need to build from those, all the time.
-        let selectable_categories = CategorySelection::default_from_pack_core(&core);
-        /***
-        FIXME: Once this is saved  properly, we can restore following block of code.
-
-        let selected_categories = (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
+    fn load_selectable_categories(pack_dir: &Arc<Dir>, pack: &PackCore) -> OrderedHashMap<String, CategorySelection> {
+        //FIXME: we need to patch those categories from the one in the files
+        (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
             match pack_dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
                 Ok(cd_json) => match serde_json::from_str(&cd_json) {
                     Ok(cd) => Some(cd),
@@ -226,7 +216,7 @@ impl LoadedPackData {
         })
         .flatten()
         .unwrap_or_else(|| {
-            let cs = CategorySelection::default_from_pack_core(&core);
+            let cs = CategorySelection::default_from_pack_core(&pack);
             match serde_json::to_string_pretty(&cs) {
                 Ok(cs_json) => match pack_dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                     Ok(_) => {
@@ -241,8 +231,26 @@ impl LoadedPackData {
                 }
             }
             cs
-        });
-        **/
+        })
+    }
+    pub fn load_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<Self> {
+        if !pack_dir
+            .try_exists(Self::CORE_PACK_DIR_NAME)
+            .into_diagnostic()
+            .wrap_err("failed to check if pack core exists")?
+        {
+            bail!("pack core doesn't exist in this pack");
+        }
+        let core_dir = pack_dir
+            .open_dir(Self::CORE_PACK_DIR_NAME)
+            .into_diagnostic()
+            .wrap_err("failed to open core pack directory")?;
+        let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
+
+        //FIXME: Since categories have randomly generated uuids (and not saved), one need to build from those, all the time.
+        //let selectable_categories = CategorySelection::default_from_pack_core(&core);
+        let selectable_categories = Self::load_selectable_categories(&pack_dir, &core);
+        
         Ok(LoadedPackData {
             name,
             uuid: core.uuid,
@@ -288,16 +296,7 @@ impl LoadedPackData {
         tasks: &PackTasks,
         next_loaded: &mut HashSet<Uuid>,
     ) {
-        /*
-        TODO:
-            need to be used for redraw from last known copy (should be an argument):
-                selectable_categories
-                active_elements
-                activation_data
-         */
-        //we are in a GUI drawing, save in background.
-        //tasks.save_data(self);
-        //FIXME: takes a lot of time when "is_dirty" is true (i.e.: the map of things to display changes). Everythings get reloaded => how to do partial version ?
+        //since the loading of texture is lazy, there is no problem when calling this regularly
         if map_changed || list_of_active_or_selected_elements_changed {
             tasks.change_map(self, b2u_sender, link, currently_used_files);
             let mut active_elements: HashSet<Uuid> = Default::default();
@@ -313,18 +312,8 @@ impl LoadedPackData {
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         link: &MumbleLink,
         currently_used_files: &BTreeMap<String, bool>,
-        //selectable_categories: OrderedHashMap<String, CategorySelection>,
-        //activation_data: ActivationData,
         active_elements: &mut HashSet<Uuid>,
     ){
-        /*
-        FIXME:
-            this is processing too much information
-            one need to process more at first load and not on map change
-
-            ensure load of every texture regardless of status
-
-        */
         info!(link.map_id, "current map data is updated. {}", self.name);
         if link.map_id == 0 {
             info!("No map do not do anything");
@@ -401,11 +390,6 @@ impl LoadedPackData {
                             continue;
                         }
                     }
-                    /*
-                    TODO: purely make it a notification ?
-                    
-                    what are the pro and cons to have a map data per package
-                    */
                     if let Some(tex_path) = common_attributes.get_icon_file() {
                         b2u_sender.send(BackToUIMessage::MarkerTexture(self.uuid, tex_path.clone(), marker.guid, marker.position, common_attributes));
                     } else {
@@ -452,54 +436,6 @@ impl LoadedPackData {
         info!("Load notifications for {} on map {}: {}/{} markers and {}/{} trails", self.name, link.map_id, nb_markers_loaded, nb_markers_attempt, nb_trails_loaded, nb_trails_attempt);
         debug!("active categories: {:?}", selected_categories_manager.keys());
     }
-
-    /*
-    pub fn save(&mut self) -> Result<()> {
-        let is_dirty = std::mem::take(&mut self._is_dirty);
-        if is_dirty {
-            match serde_json::to_string_pretty(&self.selectable_categories) {
-                Ok(cs_json) => match self.dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
-                    Ok(_) => {
-                        debug!("wrote cat selections to disk after creating a default from pack");
-                    }
-                    Err(e) => {
-                        debug!(?e, "failed to write category data to disk");
-                    }
-                },
-                Err(e) => {
-                    error!(?e, "failed to serialize cat selection");
-                }
-            }
-            match serde_json::to_string_pretty(&self.activation_data) {
-                Ok(ad_json) => match self.dir.write(Self::ACTIVATION_DATA_FILE_NAME, ad_json) {
-                    Ok(_) => {
-                        debug!("wrote activation to disk after creating a default from pack");
-                    }
-                    Err(e) => {
-                        debug!(?e, "failed to write activation data to disk");
-                    }
-                },
-                Err(e) => {
-                    error!(?e, "failed to serialize activation");
-                }
-            }
-        }
-        self.dir
-            .create_dir_all(Self::CORE_PACK_DIR_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to create xmlpack directory")?;
-        let core_dir = self
-            .dir
-            .open_dir(Self::CORE_PACK_DIR_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to open core pack directory")?;
-        save_pack_core_to_dir(
-            &self,
-            &core_dir,
-            is_dirty,
-        )?;
-        Ok(())
-    }*/
 }
 
 
@@ -507,13 +443,6 @@ impl LoadedPackData {
 impl LoadedPackTexture {
     const ACTIVATION_DATA_FILE_NAME: &'static str = "activation.json";
     
-    /*pub fn is_dirty(&self) -> bool {
-        self._is_dirty
-    }
-    pub fn active_elements(&self) -> HashSet<Uuid> {
-        self.current_map_data.active_elements.clone()
-    }*/
- 
     pub fn category_set_all(&mut self, status: bool) {
         CategorySelection::recursive_set_all(&mut self.selectable_categories, status);
         self._is_dirty = true;
@@ -558,8 +487,6 @@ impl LoadedPackTexture {
         z_near: f32,
         tasks: &PackTasks,
     ) {
-        //tasks.save_texture(self);
-        //FIXME: how to reset state correctly to only display what is necessary ?
         tracing::trace!("LoadedPackTexture.tick: {} {}-{} {}-{}", 
             self.name,
             self.current_map_data.active_markers.len(), 
@@ -567,7 +494,6 @@ impl LoadedPackTexture {
             self.current_map_data.active_trails.len(), 
             self.current_map_data.wip_trails.len(),
         );
-        //FIXME: SelectedCategoryManager works with categories, not elements
         let mut marker_objects = Vec::new();
         for (uuid, marker) in self.current_map_data.active_markers.iter() {
             if let Some(mo) = marker.get_vertices_and_texture(link, z_near) {
@@ -695,7 +621,6 @@ impl LoadedPackTexture {
             info!(%tbin_path, "failed to find tbin");
             return;
         };
-        //TODO: if iso and closed, split it as a polygon and fill it as a surface
         if let Some(active_trail) = ActiveTrail::get_vertices_and_texture(
             &common_attributes,
             &tbin.nodes,
@@ -731,8 +656,8 @@ pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
     Ok(marker_packs_dir)
 }
 
-pub fn load_all_from_dir(jokolay_dir: &Arc<Dir>) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>{
-    let marker_packs_dir = jokolay_to_marker_dir(jokolay_dir)?;
+pub fn load_all_from_dir(jokolay_dir: Arc<Dir>) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>{
+    let marker_packs_dir = jokolay_to_marker_dir(&jokolay_dir)?;
     let mut data_packs: BTreeMap<Uuid, LoadedPackData> = Default::default();
     let mut texture_packs: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
 
@@ -788,12 +713,12 @@ fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<(LoadedPackData, L
 }
 
 
-pub fn build_from_core(name: String, dir: Arc<Dir>, core: PackCore) -> (LoadedPackData, LoadedPackTexture) {
-    let selectable_categories = CategorySelection::default_from_pack_core(&core);
+pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> (LoadedPackData, LoadedPackTexture) {
+    let selectable_categories = LoadedPackData::load_selectable_categories(&pack_dir, &core);
     let data = LoadedPackData {
         name: name.clone(),
         uuid: core.uuid,
-        dir: Arc::clone(&dir),
+        dir: Arc::clone(&pack_dir),
         selected_files: Default::default(),
         all_categories: core.all_categories,
         categories: core.categories,
@@ -805,8 +730,8 @@ pub fn build_from_core(name: String, dir: Arc<Dir>, core: PackCore) -> (LoadedPa
         selectable_categories: selectable_categories.clone(),
         entities_parents: core.entities_parents,
     };
-    let activation_data = (if dir.is_file(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME) {
-        match dir.read_to_string(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME) {
+    let activation_data = (if pack_dir.is_file(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME) {
+        match pack_dir.read_to_string(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME) {
                 Ok(contents) => match serde_json::from_str(&contents) {
                     Ok(cd) => Some(cd),
                     Err(e) => {
@@ -831,7 +756,7 @@ pub fn build_from_core(name: String, dir: Arc<Dir>, core: PackCore) -> (LoadedPa
         current_map_data: Default::default(),
         _is_dirty: false,
         activation_data,
-        dir: Arc::clone(&dir),
+        dir: Arc::clone(&pack_dir),
         late_discovery_categories: core.late_discovery_categories,
         name: name,
         tbins: core.tbins,
