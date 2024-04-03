@@ -227,7 +227,7 @@ impl Jokolay {
                     None
                 }
             };
-            println!("choice_of_category_changed: {}", local_state.choice_of_category_changed);
+            tracing::trace!("choice_of_category_changed: {}", local_state.choice_of_category_changed);
             package_manager.tick(
                 &b2u_sender, 
                 loop_index, 

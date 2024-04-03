@@ -560,7 +560,7 @@ impl LoadedPackTexture {
     ) {
         tasks.save_ui(self);
         //FIXME: how to reset state correctly to only display what is necessary ?
-        println!("LoadedPackTexture.tick: {}-{} {}-{}", 
+        tracing::trace!("LoadedPackTexture.tick: {}-{} {}-{}", 
             self.current_map_data.active_markers.len(), 
             self.current_map_data.wip_markers.len(), 
             self.current_map_data.active_trails.len(), 
@@ -573,7 +573,7 @@ impl LoadedPackTexture {
                 marker_objects.push(mo);
             }
         }
-        println!("LoadedPackTexture.tick: markers {}", marker_objects.len());
+        tracing::trace!("LoadedPackTexture.tick: markers {}", marker_objects.len());
         u2u_sender.send(UIToUIMessage::BulkMarkerObject(marker_objects));
         let mut trail_objects = Vec::new();
         for (uuid, trail) in self.current_map_data.active_trails.iter() {
@@ -583,7 +583,7 @@ impl LoadedPackTexture {
             });
             //next_on_screen.insert(*uuid);
         }
-        println!("LoadedPackTexture.tick: trails {}", trail_objects.len());
+        tracing::trace!("LoadedPackTexture.tick: trails {}", trail_objects.len());
         u2u_sender.send(UIToUIMessage::BulkTrailObject(trail_objects));
         u2u_sender.send(UIToUIMessage::RenderSwapChain);
     }
