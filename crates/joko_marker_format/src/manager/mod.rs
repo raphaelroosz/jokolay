@@ -19,5 +19,5 @@ We will make not having a valid category/texture/tbin path as allowed. So, users
 mod package;
 mod pack;
 
-pub use package::PackageManager;
-
+pub use package::{PackageDataManager, PackageUIManager};
+pub use pack::loaded::{LoadedPackData, LoadedPackTexture, load_all_from_dir, build_from_core};

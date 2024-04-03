@@ -1,25 +1,23 @@
 use crate::{
-    pack::{Category, Marker, PackCore, Trail, Route},
+    pack::{Category, Marker, Trail, Route},
+    manager::{LoadedPackData, LoadedPackTexture},
     BASE64_ENGINE,
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
 use indexmap::IndexMap;
 use miette::{Context, IntoDiagnostic, Result};
-use std::{io::Write};
+use std::io::Write;
 use tracing::info;
+use uuid::Uuid;
 use xot::{Element, Node, SerializeOptions, Xot};
 
 use super::XotAttributeNameIDs;
 /// Save the pack core as xml pack using the given directory as pack root path.
-pub(crate) fn save_pack_core_to_dir(
-    pack_core: &PackCore,
-    dir: &Dir,
-    is_dirty: bool,
+pub(crate) fn save_pack_data_to_dir(
+    pack_data: &LoadedPackData,
+    writing_directory: &Dir,
 ) -> Result<()> {
-    if !is_dirty {
-        return Ok(());
-    }
     // save categories
     let mut tree = Xot::new();
     let names = XotAttributeNameIDs::register_with_xot(&mut tree);
@@ -28,23 +26,23 @@ pub(crate) fn save_pack_core_to_dir(
         .new_root(od)
         .into_diagnostic()
         .wrap_err("failed to create new root with overlay data node")?;
-    recursive_cat_serializer(&mut tree, &names, &pack_core.categories, od)
+    recursive_cat_serializer(&mut tree, &names, &pack_data.categories, od)
         .wrap_err("failed to serialize cats")?;
     let cats = tree
         .with_serialize_options(SerializeOptions { pretty: true })
         .to_string(root_node)
         .into_diagnostic()
         .wrap_err("failed to convert cats xot to string")?;
-    dir.create("categories.xml")
+    writing_directory.create("categories.xml")
         .into_diagnostic()
         .wrap_err("failed to create categories.xml")?
         .write_all(cats.as_bytes())
         .into_diagnostic()
         .wrap_err("failed to write to categories.xml")?;
     // save maps
-    for (map_id, map_data) in pack_core.maps.iter() {
+    for (map_id, map_data) in pack_data.maps.iter() {
         if map_data.markers.is_empty() && map_data.trails.is_empty() {
-            if let Err(e) = dir.remove_file(format!("{map_id}.xml")) {
+            if let Err(e) = writing_directory.remove_file(format!("{map_id}.xml")) {
                 info!(
                     ?e,
                     map_id, "failed to remove xml file that had nothing to write to"
@@ -89,23 +87,30 @@ pub(crate) fn save_pack_core_to_dir(
             .to_string(root_node)
             .into_diagnostic()
             .wrap_err("failed to serialize map data to string")?;
-        dir.create(format!("{map_id}.xml"))
+        writing_directory.create(format!("{map_id}.xml"))
             .into_diagnostic()
             .wrap_err("failed to create map xml file")?
             .write_all(map_xml.as_bytes())
             .into_diagnostic()
             .wrap_err("failed to write map data to file")?;
     }
+    Ok(())
+}
+pub(crate) fn save_pack_texture_to_dir(
+    pack_texture: &LoadedPackTexture,
+    writing_directory: &Dir,
+) -> Result<()> {
+
     // save images
-    for (img_path, img) in pack_core.textures.iter() {
+    for (img_path, img) in pack_texture.textures.iter() {
         if let Some(parent) = img_path.parent() {
-            dir.create_dir_all(parent)
+            writing_directory.create_dir_all(parent)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     miette::miette!("failed to create parent dir for an image: {img_path}")
                 })?;
         }
-        dir.create(img_path.as_str())
+        writing_directory.create(img_path.as_str())
             .into_diagnostic()
             .wrap_err_with(|| miette::miette!("failed to create file for image: {img_path}"))?
             .write(img)
@@ -115,9 +120,9 @@ pub(crate) fn save_pack_core_to_dir(
             })?;
     }
     // save tbins
-    for (tbin_path, tbin) in pack_core.tbins.iter() {
+    for (tbin_path, tbin) in pack_texture.tbins.iter() {
         if let Some(parent) = tbin_path.parent() {
-            dir.create_dir_all(parent)
+            writing_directory.create_dir_all(parent)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     miette::miette!("failed to create parent dir of tbin: {tbin_path}")
@@ -132,7 +137,7 @@ pub(crate) fn save_pack_core_to_dir(
             bytes.extend_from_slice(&node[1].to_ne_bytes());
             bytes.extend_from_slice(&node[2].to_ne_bytes());
         }
-        dir.create(tbin_path.as_str())
+        writing_directory.create(tbin_path.as_str())
             .into_diagnostic()
             .wrap_err_with(|| miette::miette!("failed to create tbin file: {tbin_path}"))?
             .write_all(&bytes)
@@ -145,10 +150,10 @@ pub(crate) fn save_pack_core_to_dir(
 fn recursive_cat_serializer(
     tree: &mut Xot,
     names: &XotAttributeNameIDs,
-    cats: &IndexMap<String, Category>,
+    cats: &IndexMap<Uuid, Category>,
     parent: Node,
 ) -> Result<()> {
-    for (cat_name, cat) in cats {
+    for (_, cat) in cats {
         let cat_node = tree.new_element(names.marker_category);
         tree.append(parent, cat_node).into_diagnostic()?;
         {
@@ -156,7 +161,7 @@ fn recursive_cat_serializer(
             ele.set_attribute(names.display_name, &cat.display_name);
             ele.set_attribute(names.guid, BASE64_ENGINE.encode(&cat.guid));
             // let cat_name = tree.add_name(cat_name);
-            ele.set_attribute(names.name, cat_name);
+            ele.set_attribute(names.name, &cat.relative_category_name);
             // no point in serializing default values
             if !cat.default_enabled {
                 ele.set_attribute(names.default_enabled, "0");

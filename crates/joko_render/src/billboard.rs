@@ -5,7 +5,7 @@ use egui_render_three_d::{
     three_d::{context::*, Context, HasContext},
     GpuTexture,
 };
-use glam::{Vec2, Vec3};
+use joko_marker_format::message::{MarkerVertex, MarkerObject, TrailObject};
 use tracing::{error, info, warn};
 
 use crate::gl_error;
@@ -14,15 +14,14 @@ const MARKER_VERTEX_STRIDE: i32 = std::mem::size_of::<MarkerVertex>() as _;
 pub struct BillBoardRenderer {
     pub markers: Vec<MarkerObject>,
     pub trails: Vec<TrailObject>,
+    pub markers_wip: Vec<MarkerObject>,//work in progress: this is where the markers are inserted
+    pub trails_wip: Vec<TrailObject>,//work in progress: this is where the markers are inserted
     marker_program: NativeProgram,
     vao: NativeVertexArray,
     vb: NativeBuffer,
     trail_buffers: Vec<NativeBuffer>,
 }
-pub struct TrailObject {
-    pub vertices: Arc<[MarkerVertex]>,
-    pub texture: u64,
-}
+
 const MARKER_VS: &str = include_str!("../shaders/marker.vs");
 
 const MARKER_FS: &str = include_str!("../shaders/marker.fs");
@@ -64,17 +63,23 @@ impl BillBoardRenderer {
             Self {
                 markers: Vec::new(),
                 marker_program,
+                markers_wip: Vec::new(),
                 vb,
                 trails: Vec::new(),
+                trails_wip: Vec::new(),
                 trail_buffers: Default::default(),
                 vao,
             }
         }
     }
-    pub fn prepare_frame(&mut self) {
-        self.markers.clear();
-        self.trails.clear();
+    
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.markers, &mut self.markers_wip);
+        std::mem::swap(&mut self.trails, &mut self.trails_wip);
+        self.markers_wip.clear();
+        self.trails_wip.clear();
     }
+
     pub fn prepare_render_data(&mut self, gl: &Context) {
         unsafe {
             gl_error!(gl);
@@ -169,26 +174,7 @@ impl BillBoardRenderer {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct MarkerVertex {
-    pub position: Vec3,
-    pub alpha: f32,
-    pub texture_coordinates: Vec2,
-    pub fade_near_far: Vec2,
-    pub color: [u8; 4],
-}
 
-pub struct MarkerObject {
-    /// The six vertices that make up the marker quad
-    pub vertices: [MarkerVertex; 6],
-    /// The (managed) texture id from egui data
-    pub texture: u64,
-    /// The distance from camera
-    /// As markers have transparency, we need to render them from far -> near order
-    /// So, we will sort them using this distance just before rendering
-    pub distance: f32,
-}
 
 /// takes in strings containing vertex/fragment shaders and returns a Shaderprogram with them attached
 #[tracing::instrument(skip(gl))]

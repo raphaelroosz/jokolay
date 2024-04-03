@@ -1,7 +1,7 @@
 
 use ordered_hash_map::OrderedHashSet;
 
-use crate::pack::RelativePath;
+use joko_core::RelativePath;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct DirtyMarker {

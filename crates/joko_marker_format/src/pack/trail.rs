@@ -5,6 +5,7 @@ use super::CommonAttributes;
 #[derive(Debug, Clone)]
 pub(crate) struct Trail {
     pub guid: Uuid,
+    pub parent: Uuid,
     pub map_id: u32,
     pub category: String,
     pub props: CommonAttributes,

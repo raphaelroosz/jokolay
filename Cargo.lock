@@ -441,19 +441,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97ba99bbc76e44242cd767689c33f5350c3646758edecdf1f8b7f4df5a8ea029"
 dependencies = [
- "cap-std 2.0.1",
- "directories-next",
- "rustix",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "cap-directories"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb706d254d585ce9ff8b716d169d948700ca7b3a4715272fd2bd1cb9a65210f1"
-dependencies = [
- "cap-std 3.0.0",
+ "cap-std",
  "directories-next",
  "rustix",
  "windows-sys 0.52.0",
@@ -477,42 +465,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "cap-primitives"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90a0b44fc796b1a84535a63753d50ba3972c4db55c7255c186f79140e63d56d0"
-dependencies = [
- "ambient-authority",
- "fs-set-times",
- "io-extras",
- "io-lifetimes",
- "ipnet",
- "maybe-owned",
- "rustix",
- "windows-sys 0.52.0",
- "winx",
-]
-
-[[package]]
 name = "cap-std"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "593db20e4c51f62d3284bae7ee718849c3214f93a3b94ea1899ad85ba119d330"
 dependencies = [
  "camino",
- "cap-primitives 2.0.1",
- "io-extras",
- "io-lifetimes",
- "rustix",
-]
-
-[[package]]
-name = "cap-std"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "266626ce180cf9709f317d0bf9754e3a5006359d87f4bf792f06c9c5f1b63c0f"
-dependencies = [
- "cap-primitives 3.0.0",
+ "cap-primitives",
  "io-extras",
  "io-lifetimes",
  "rustix",
@@ -1452,22 +1411,24 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 name = "joko_core"
 version = "0.2.1"
 dependencies = [
- "cap-directories 3.0.0",
- "cap-std 2.0.1",
+ "cap-std",
  "egui",
  "egui_extras",
  "glam",
  "indexmap",
+ "jokolink",
  "miette",
- "ordered_hash_map",
  "rayon",
  "rfd",
  "ringbuffer",
+ "scopeguard",
  "serde",
  "serde_json",
+ "smol_str",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1479,7 +1440,8 @@ name = "joko_marker_format"
 version = "0.2.1"
 dependencies = [
  "base64",
- "cap-std 2.0.1",
+ "bytemuck",
+ "cap-std",
  "cxx",
  "cxx-build",
  "data-encoding",
@@ -1489,7 +1451,7 @@ dependencies = [
  "image",
  "indexmap",
  "itertools",
- "joko_render",
+ "joko_core",
  "jokoapi",
  "jokolink",
  "miette",
@@ -1521,10 +1483,8 @@ dependencies = [
  "egui_render_three_d",
  "egui_window_glfw_passthrough",
  "glam",
+ "joko_marker_format",
  "jokolink",
- "raw-window-handle 0.5.2",
- "serde",
- "serde_json",
  "tracing",
 ]
 
@@ -1543,27 +1503,17 @@ dependencies = [
 name = "jokolay"
 version = "0.2.1"
 dependencies = [
- "cap-directories 2.0.1",
- "cap-std 2.0.1",
+ "cap-directories",
+ "cap-std",
  "egui",
- "egui_extras",
  "egui_window_glfw_passthrough",
- "glam",
- "indexmap",
  "joko_core",
  "joko_marker_format",
  "joko_render",
  "jokolink",
  "miette",
  "rayon",
- "rfd",
- "ringbuffer",
- "serde",
- "serde_json",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "url",
 ]
 
 [[package]]

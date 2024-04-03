@@ -2,18 +2,22 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, Mutex}
 };
 
+use glam::Vec3;
 use tribool::Tribool;
 use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
 use image::EncodableLayout;
 
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, trace};
 
+use joko_core::RelativePath;
 use jokolink::MumbleLink;
 use miette::{Context, IntoDiagnostic, Result};
 use uuid::Uuid;
+use crate::message::{UIToBackMessage, UIToUIMessage};
 
-use crate::manager::pack::loaded::LoadedPack;
+use crate::{message::BackToUIMessage, pack::CommonAttributes};
+use crate::manager::pack::loaded::{LoadedPackData, PackTasks, LoadedPackTexture};
 use crate::manager::pack::import::{ImportStatus, import_pack_from_zip_file_path};
 
 pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager";//name kept for compatibility purpose
@@ -30,39 +34,44 @@ pub const PACKAGES_DIRECTORY_NAME: &str = "packs";//name kept for compatibility 
 ///     3. marker's texture is uploaded or being uploaded? if not ready, we will upload or use a temporary "loading" texture
 ///     4. render that marker use joko_render  
 /// FIXME: it is a bad name, it does not manage Markers, but packages
-pub struct PackageManager {
-    /// holds data that is useful for the ui
-    ui_manager: PackageUIManager,
+#[must_use]
+pub struct PackageDataManager {
     /// marker manager directory. not useful yet, but in future we could be using this to store config files etc..
-    _marker_manager_dir: Arc<Dir>,
+    //_marker_manager_dir: Arc<Dir>,
     /// packs directory which contains marker packs. each directory inside pack directory is an individual marker pack.
     /// The name of the child directory is the name of the pack
-    marker_packs_dir: Arc<Dir>,
+    pub marker_packs_dir: Arc<Dir>,
     /// These are the marker packs
     /// The key is the name of the pack
     /// The value is a loaded pack that contains additional data for live marker packs like what needs to be saved or category selections etc..
-    packs: BTreeMap<String, LoadedPack>,
-    missing_texture: Option<TextureHandle>,
-    missing_trail: Option<TextureHandle>,
+    pub packs: BTreeMap<Uuid, LoadedPackData>,
+    tasks: PackTasks,
+    current_map_id: u32,
+    show_only_active: bool,
     /// This is the interval in number of seconds when we check if any of the packs need to be saved due to changes.
     /// This allows us to avoid saving the pack too often.
     pub save_interval: f64,
 
+    pub currently_used_files: BTreeMap<String, bool>,
+    parents: HashMap<Uuid, Uuid>,
+    loaded_elements: HashSet<Uuid>,
+    on_screen: BTreeSet<Uuid>,
+}
+#[must_use]
+pub struct PackageUIManager {
+    pub import_status: Option<Arc<Mutex<ImportStatus>>>,
+    default_marker_texture: Option<TextureHandle>,
+    default_trail_texture: Option<TextureHandle>,
+    packs: BTreeMap<Uuid, LoadedPackTexture>,
+    tasks: PackTasks,
+
+    currently_used_files: BTreeMap<String, bool>,
     all_files_tribool: Tribool,
     all_files_toggle: bool,
-    currently_used_files: BTreeMap<String, bool>,
-    on_screen: BTreeSet<Uuid>,
-    is_dirty: bool
+    show_only_active: bool,
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct PackageUIManager {
-    // tf is this type supposed to be? maybe we should have used a ECS for this reason.
-    pub import_status: Option<Arc<Mutex<ImportStatus>>>,
-    parents: HashMap<Uuid, Uuid>,
-}
-
-impl PackageManager {
+impl PackageDataManager {
     /// Creates a new instance of [MarkerManager].
     /// 1. It opens the marker manager directory
     /// 2. loads its configuration
@@ -70,68 +79,286 @@ impl PackageManager {
     /// 4. loads all the packs
     /// 5. loads all the activation data
     /// 6. returns self
-    pub fn new(jdir: &Dir) -> Result<Self> {
-        jdir.create_dir_all(PACKAGE_MANAGER_DIRECTORY_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to create marker manager directory")?;
-        let marker_manager_dir = jdir
-            .open_dir(PACKAGE_MANAGER_DIRECTORY_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to open marker manager directory")?;
-        marker_manager_dir
-            .create_dir_all(PACKAGES_DIRECTORY_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to create marker packs directory")?;
-        let marker_packs_dir = marker_manager_dir
-            .open_dir(PACKAGES_DIRECTORY_NAME)
-            .into_diagnostic()
-            .wrap_err("failed to open marker packs dir")?;
-        let mut packs: BTreeMap<String, LoadedPack> = Default::default();
+    pub fn new(packs: BTreeMap<Uuid, LoadedPackData>, marker_packs_dir: &Arc<Dir>) -> Self {
+        Self {
+            packs,
+            tasks: PackTasks::new(),
+            marker_packs_dir: marker_packs_dir.clone(),
+            //_marker_manager_dir: marker_manager_dir.into(),
+            current_map_id: 0,
+            save_interval: 0.0,
+            show_only_active: true,
+            currently_used_files: Default::default(),
+            parents: Default::default(),
+            loaded_elements: Default::default(),
+            on_screen: Default::default(),
+        }
+    }
 
+    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
+        self.currently_used_files = currently_used_files;
+    }
 
-        for entry in marker_packs_dir
-            .entries()
-            .into_diagnostic()
-            .wrap_err("failed to get entries of marker packs dir")?
-        {
-            let entry = entry.into_diagnostic()?;
-            if entry.metadata().into_diagnostic()?.is_file() {
-                continue;
-            }
-            if let Ok(name) = entry.file_name() {
-                let pack_dir = entry
-                    .open_dir()
-                    .into_diagnostic()
-                    .wrap_err("failed to open pack entry as directory")?;
-                {
-                    let span_guard = info_span!("loading pack from dir", name).entered();
-                    match LoadedPack::load_from_dir(pack_dir.into()) {
-                        Ok(lp) => {
-                            packs.insert(name, lp);
-                        }
-                        Err(e) => {
-                            error!(?e, "failed to load pack from directory");
-                        }
-                    }
-                    drop(span_guard);
-                }
+    pub fn category_set(&mut self, uuid: Uuid, status: bool) {
+        for pack in self.packs.values_mut() {
+            if pack.category_set(uuid, status) {
+                break;
             }
         }
+    }
 
-        Ok(Self {
+    pub fn category_set_all(&mut self, status: bool) {
+        for pack in self.packs.values_mut() {
+            pack.category_set_all(status);
+        }
+    }
+
+    pub fn register(&mut self, element: Uuid, parent: Uuid) {
+        self.parents.insert(element, parent);
+    }
+    pub fn get_parent(&self, element: &Uuid) -> Option<&Uuid> {
+        self.parents.get(element)
+    }
+    pub fn get_parents<'a, I>(&self, input: I) -> HashSet<Uuid>
+    where I: Iterator<Item=&'a Uuid>
+    {
+        let iter = input.into_iter();
+        let mut result: HashSet<Uuid> = HashSet::new();
+        let mut current_generation: Vec<Uuid> = Vec::new();
+        for elt in iter {
+            current_generation.push(*elt)
+        }
+        //info!("starts with {}", current_generation.len());
+        loop {
+            if current_generation.is_empty() {
+                //info!("ends with {}", result.len());
+                return result;
+            }
+            let mut next_gen: Vec<Uuid> = Vec::new();
+            for elt in current_generation.iter() {
+                if let Some(p) = self.get_parent(elt) {
+                    if result.contains(p) {
+                        //avoid duplicate, redundancy or loop
+                        continue;
+                    }
+                    next_gen.push(p.clone());
+                }
+            }
+            let to_insert = std::mem::replace(&mut current_generation, next_gen);
+            result.extend(to_insert);
+        }
+        unreachable!("The loop should always return");
+    }
+
+    pub fn get_active_elements_parents(&mut self, categories_and_elements_to_be_loaded: HashSet<Uuid>) {
+        trace!("There are {} active elements", categories_and_elements_to_be_loaded.len());
+
+        //first merge the parents to iterate overit
+        let mut parents: HashMap<Uuid, Uuid> = Default::default();
+        for pack in self.packs.values_mut() {
+            parents.extend(pack.entities_parents.clone());
+        }
+        self.parents = parents;
+        //then climb up the tree of parent's categories
+        self.loaded_elements = self.get_parents(categories_and_elements_to_be_loaded.iter());
+    }
+
+    pub fn tick(
+        &mut self,
+        b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
+        loop_index: u128,
+        link: Option<&MumbleLink>,
+        choice_of_category_changed: bool,
+    ) {
+        let mut currently_used_files: BTreeMap<String, bool> = Default::default();
+        let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
+        
+        match link {
+            Some(link) => {
+                //FIXME: how to save/load the active files ?
+                //TODO: find an efficient way to propagate the file deactivation
+                let mut have_used_files_list_changed = false;
+                let map_changed = self.current_map_id != link.map_id;
+                self.current_map_id = link.map_id;
+                for pack in self.packs.values_mut() {
+                    if let Some(current_map) = pack.maps.get(&link.map_id) {
+                        for marker in current_map.markers.values() {
+                            if let Some(is_active) = pack.source_files.get(&marker.source_file_name) {
+                                currently_used_files.insert(
+                                    marker.source_file_name.clone(), 
+                                    *self.currently_used_files.get(&marker.source_file_name).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
+                                );
+                            }
+                        }
+                        for trail in current_map.trails.values() {
+                            if let Some(is_active) = pack.source_files.get(&trail.source_file_name) {
+                                currently_used_files.insert(
+                                    trail.source_file_name.clone(), 
+                                    *self.currently_used_files.get(&trail.source_file_name).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
+                                );
+                            }
+                        }
+                    }
+                }
+                for (uuid, pack) in self.packs.iter_mut() {
+                    let span_guard = info_span!("Updating package status").entered();
+                    pack.tick(
+                        &b2u_sender,
+                        loop_index,
+                        link,
+                        &currently_used_files,
+                        have_used_files_list_changed || choice_of_category_changed,
+                        map_changed,
+                        &self.tasks, 
+                        &mut categories_and_elements_to_be_loaded,
+                    );
+                    std::mem::drop(span_guard);
+                }
+                if map_changed {
+                    self.get_active_elements_parents(categories_and_elements_to_be_loaded);
+                    b2u_sender.send(BackToUIMessage::ActiveElements(self.loaded_elements.clone()));
+                }
+                if map_changed || have_used_files_list_changed || choice_of_category_changed {
+                    //there is no point in sending a new list if nothing changed
+                    b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(currently_used_files.clone()));
+                    self.currently_used_files = currently_used_files;
+                    b2u_sender.send(BackToUIMessage::TextureSwapChain);
+                }
+            },
+            None => {},
+        };
+        //TODO: state_sender.send(BackToUIMessage::ActiveElements(active_elements));
+        
+        
+        //those are the elements displayed, not the categories, one would need to keep the link between the two
+        /*if is_one_package_reloaded {
+            for pack in self.packs.values() {
+                next_loaded.extend(pack.active_elements());
+            }
+            info!("Loaded {} elements", next_loaded.len());
+            self.loaded_elements = self.update_active_elements(next_loaded);
+        }*/
+        //self.on_screen = self.update_active_elements(next_on_screen);
+    }
+
+}
+
+
+impl PackageUIManager {
+    pub fn new(packs: BTreeMap<Uuid, LoadedPackTexture>) -> Self {
+        Self {
             packs,
-            marker_packs_dir: marker_packs_dir.into(),
-            _marker_manager_dir: marker_manager_dir.into(),
-            ui_manager: PackageUIManager::new(),
-            save_interval: 0.0,
-            missing_texture: None,
-            missing_trail: None,
+            tasks: PackTasks::new(),
+            default_marker_texture: None,
+            default_trail_texture: None,
+            import_status: Default::default(),
+
             all_files_tribool: Tribool::True,
             all_files_toggle: false,
-            currently_used_files: Default::default(),
-            on_screen: Default::default(),
-            is_dirty: true,
-        })
+            show_only_active: true,
+            currently_used_files: Default::default()// UI copy to (de-)activate files
+        }
+    }
+
+    pub fn late_init(
+        &mut self,
+        etx: &egui::Context,
+    ) {
+        if self.default_marker_texture.is_none() {
+            let img = image::load_from_memory(include_bytes!("../pack/marker.png")).unwrap();
+            let size = [img.width() as _, img.height() as _];
+            self.default_marker_texture = Some(etx.load_texture(
+                "default marker",
+                ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
+                egui::TextureOptions {
+                    magnification: egui::TextureFilter::Linear,
+                    minification: egui::TextureFilter::Linear,
+                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                },
+            ));
+        }
+        if self.default_trail_texture.is_none() {
+            let img = image::load_from_memory(include_bytes!("../pack/trail_rainbow.png")).unwrap();
+            let size = [img.width() as _, img.height() as _];
+            self.default_trail_texture = Some(etx.load_texture(
+                "default trail",
+                ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
+                egui::TextureOptions {
+                    magnification: egui::TextureFilter::Linear,
+                    minification: egui::TextureFilter::Linear,
+                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                },
+            ));
+        }
+    }
+
+    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
+        self.currently_used_files = currently_used_files;
+    }
+
+    pub fn update_active_categories(&mut self, active_elements: &HashSet<Uuid>) {
+        trace!("There are {} active elements", active_elements.len());
+        for pack in self.packs.values_mut() {
+            pack.update_active_categories(active_elements);
+        }
+    }
+
+    pub fn update_pack_active_categories(&mut self, pack_uuid: Uuid, active_elements: &HashSet<Uuid>) {
+        trace!("There are {} active elements", active_elements.len());
+        for (uuid, pack) in self.packs.iter_mut() {
+            if uuid == &pack_uuid {
+                pack.update_active_categories(active_elements);
+                break;
+            }
+        }
+    }
+    pub fn swap(&mut self) {
+        for pack in self.packs.values_mut() {
+            pack.swap();
+        }
+    }
+
+    pub fn load_marker_texture(
+        &mut self, 
+        egui_context: &egui::Context, 
+        pack_uuid: Uuid, 
+        tex_path: RelativePath, 
+        marker_uuid: Uuid, 
+        position: Vec3,
+        common_attributes: CommonAttributes,
+    ) {
+        self.packs
+            .get_mut(&pack_uuid)
+            .map( |pack| {
+                pack.load_marker_texture(
+                    egui_context, 
+                    self.default_marker_texture.as_ref().unwrap(),
+                    &tex_path, 
+                    marker_uuid,
+                    position,
+                    common_attributes,
+                );
+            });
+    }
+    pub fn load_trail_texture(
+        &mut self, 
+        egui_context: &egui::Context, 
+        pack_uuid: Uuid, 
+        tex_path: RelativePath, 
+        trail_uuid: Uuid, 
+        common_attributes: CommonAttributes,
+    ) {
+        self.packs
+            .get_mut(&pack_uuid)
+            .map( |pack| {
+                pack.load_trail_texture(
+                    egui_context, 
+                    &self.default_trail_texture.as_ref().unwrap(),
+                    &tex_path, 
+                    trail_uuid,
+                    common_attributes,
+                );
+            });
     }
 
     fn pack_importer(import_status: Arc<Mutex<ImportStatus>>) {
@@ -160,109 +387,81 @@ impl PackageManager {
             }
         });
     }
+
+    fn category_set_all(&mut self, status: bool) {
+        for pack in self.packs.values_mut() {
+            pack.category_set_all(status);
+        }
+    }
+
     pub fn tick(
         &mut self,
-        etx: &egui::Context,
+        u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         timestamp: f64,
-        joko_renderer: &mut joko_render::JokoRenderer,
-        link: Option<&MumbleLink>,
+        link: &MumbleLink,
+        z_near: f32,
     ) {
-        if self.missing_texture.is_none() {
-            let img = image::load_from_memory(include_bytes!("../pack/marker.png")).unwrap();
-            let size = [img.width() as _, img.height() as _];
-            self.missing_texture = Some(etx.load_texture(
-                "default marker",
-                ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
-                egui::TextureOptions {
-                    magnification: egui::TextureFilter::Linear,
-                    minification: egui::TextureFilter::Linear,
-                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                },
-            ));
+        trace!("nb packs: {}", self.packs.len());
+        for (uuid, pack) in self.packs.iter_mut() {
+            let span_guard = info_span!("Updating package status").entered();
+            pack.tick(
+                &u2u_sender,
+                timestamp,
+                link,
+                //&mut next_on_screen,
+                z_near,
+                &self.tasks
+            );
+            std::mem::drop(span_guard);
         }
-        if self.missing_trail.is_none() {
-            let img = image::load_from_memory(include_bytes!("../pack/trail.png")).unwrap();
-            let size = [img.width() as _, img.height() as _];
-            self.missing_trail = Some(etx.load_texture(
-                "default trail",
-                ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
-                egui::TextureOptions {
-                    magnification: egui::TextureFilter::Linear,
-                    minification: egui::TextureFilter::Linear,
-                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                },
-            ));
-        }
+        u2u_sender.send(UIToUIMessage::Present);
+    }
 
-        let mut currently_used_files: BTreeMap<String, bool> = Default::default();
-        let mut next_on_screen: HashSet<Uuid> = Default::default();
-        match link {
-            Some(link) => {
-                //FIXME: how to save/load the active files ?
-                let mut is_dirty = self.is_dirty;
-                for pack in self.packs.values_mut() {
-                    if let Some(current_map) = pack.core.maps.get(&link.map_id) {
-                        for marker in current_map.markers.values() {
-                            if let Some(is_active) = pack.core.source_files.get(&marker.source_file_name) {
-                                currently_used_files.insert(
-                                    marker.source_file_name.clone(), 
-                                    *self.currently_used_files.get(&marker.source_file_name).unwrap_or_else(|| {is_dirty = true; is_active})
-                                );
-                            }
-                        }
-                        for trail in current_map.trails.values() {
-                            if let Some(is_active) = pack.core.source_files.get(&trail.source_file_name) {
-                                currently_used_files.insert(
-                                    trail.source_file_name.clone(), 
-                                    *self.currently_used_files.get(&trail.source_file_name).unwrap_or_else(|| {is_dirty = true; is_active})
-                                );
-                            }
-                        }
-                    }
-                }
-                for pack in self.packs.values_mut() {
-                    pack.tick(
-                        etx,
-                        timestamp,
-                        link,
-                        self.missing_texture.as_ref().unwrap(),
-                        self.missing_trail.as_ref().unwrap(),
-                        &currently_used_files,
-                        is_dirty
-                    );
-                    pack.render(
-                        timestamp,
-                        joko_renderer,
-                        link,
-                        &mut next_on_screen,
-                    );
-                }
-                std::mem::take(&mut self.is_dirty);
-            },
-            None => {},
-        };
-        self.currently_used_files = currently_used_files;
-        //those are the elements displayed, not the categories, one would need to keep the link between the two
-        self.on_screen = self.update_active_elements(next_on_screen);
-    }
-    fn update_active_elements(&mut self, on_screen: HashSet<Uuid>) -> BTreeSet<Uuid> {
-        let mut parents: HashMap<Uuid, Uuid> = Default::default();
-        for pack in self.packs.values() {
-            parents.extend(pack.core.entities_parents.clone());
-        }
-        self.ui_manager.parents = parents;
-        self.ui_manager.get_parents(on_screen.iter())
-    }
-    pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
-        //println!("Elements on screen: {:?}", self.on_screen);
+    pub fn menu_ui(
+        &mut self, 
+        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
+        ui: &mut egui::Ui
+    ) {
         ui.menu_button("Markers", |ui| {
-            for pack in self.packs.values_mut() {
-                pack.category_sub_menu(ui, &self.on_screen);
+            if self.show_only_active {
+                if ui.button("Show everything").clicked() {
+                    self.show_only_active = false;
+                }
+            } else {
+                if ui.button("Show only active").clicked() {
+                    self.show_only_active = true;
+                }
             }
+            if ui.button("Activate all elements").clicked() {
+                self.category_set_all(true);
+                u2b_sender.send(UIToBackMessage::CategorySetAll(true));
+            }
+            if ui.button("Deactivate all elements").clicked() {
+                self.category_set_all(false);
+                u2b_sender.send(UIToBackMessage::CategorySetAll(false));
+            }
+
+            for pack in self.packs.values_mut() {
+                //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
+                //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
+                pack.category_sub_menu(u2b_sender, u2u_sender, ui, self.show_only_active);
+            }
+            
         });
-        
+        if self.tasks.is_running() {
+            ui.spinner();
+        }
     }
-    fn gui_file_manager(&mut self, etx: &egui::Context, open: &mut bool, link: Option<&MumbleLink>) {
+
+    fn gui_file_manager(
+        &mut self, 
+        event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        etx: &egui::Context, 
+        open: &mut bool, 
+        link: Option<&MumbleLink>
+    ) {
+        let mut files_changed = false;
         Window::new("File Manager").open(open).show(etx, |ui| -> Result<()> {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui::Grid::new("link grid")
@@ -281,7 +480,7 @@ impl PackageManager {
                         for file in self.currently_used_files.iter_mut() {
                             let cb = ui.checkbox(file.1, file.0.clone());
                             if cb.changed() {
-                                self.is_dirty = true;
+                                files_changed = true;
                             }
                             if ui.button("Edit").clicked() {
                                 println!("click {}", file.0.clone());
@@ -293,40 +492,45 @@ impl PackageManager {
             });
             Ok(())
         });
+        if files_changed {
+            event_sender.send(UIToBackMessage::ActiveFiles(self.currently_used_files.clone()));
+        }
     }
-    fn gui_package_loader(&mut self, etx: &egui::Context, open: &mut bool) {
+    fn gui_package_loader(
+        &mut self, 
+        event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        etx: &egui::Context, 
+        open: &mut bool
+    ) {
         Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
             CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
                 egui::Grid::new("packs").striped(true).show(ui, |ui| {
                     let mut delete = vec![];
-                for pack in self.packs.keys() {
-                    ui.label(pack);
+                for pack in self.packs.values() {
+                    ui.label(pack.name.clone());
                     if ui.button("delete").clicked() {
-                        delete.push(pack.clone());
+                        delete.push(pack.uuid);
                     }
                 }
-                for pack_name in delete {
-                    self.packs.remove(&pack_name);
-                    if let Err(e) = self.marker_packs_dir.remove_dir_all(&pack_name) {
-                        error!(?e, pack_name,"failed to remove pack");
-                    } else {
-                        info!("deleted marker pack: {pack_name}");
-                    }
+                if !delete.is_empty() {
+                    //TODO: send message to background thread, UIToBackMessage::DeletePack
+                    event_sender.send(UIToBackMessage::DeletePacks(delete));
                 }
             });
             });
 
-            if self.ui_manager.import_status.is_some() {
+            if self.import_status.is_some() {
                 if ui.button("clear").on_hover_text(
                     "This will cancel any pack import in progress. If import is already finished, then it wil simply clear the import status").clicked() {
-                    self.ui_manager.import_status = None;
+                    self.import_status = None;
                 }
             } else if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
+                //TODO: send message to background thread, UIToBackMessage::ImportPack
                 let import_status = Arc::new(Mutex::default());
-                self.ui_manager.import_status = Some(import_status.clone());
+                self.import_status = Some(import_status.clone());
                 Self::pack_importer(import_status);
             }
-            if let Some(import_status) = self.ui_manager.import_status.as_ref() {
+            if let Some(import_status) = self.import_status.as_ref() {
                 if let Ok(mut status) = import_status.lock() {
                     match &mut *status {
                         ImportStatus::UnInitialized => {
@@ -347,36 +551,8 @@ impl PackageManager {
                                     ui.label("choose a pack name: ");    
                                     ui.text_edit_singleline(name);
                                 });
-                                let name = name.as_str();
                                 if ui.button("save").clicked() {
-
-                                    if self.marker_packs_dir.exists(name) {
-                                        self.marker_packs_dir
-                                            .remove_dir_all(name)
-                                            .into_diagnostic()?;
-                                    }
-                                    if let Err(e) = self.marker_packs_dir.create_dir_all(name) {
-                                        error!(?e, "failed to create directory for pack");
-
-                                    }
-                                    match self.marker_packs_dir.open_dir(name) {
-                                        Ok(dir) => {
-                                            let core = std::mem::take(pack);
-                                            let mut loaded_pack = LoadedPack::new(core, dir.into());
-                                            match loaded_pack.save_all() {
-                                                Ok(_) => {
-                                                    self.packs.insert(name.to_string(), loaded_pack);
-                                                    *saved = true;
-                                                },
-                                                Err(e) => {
-                                                    error!(?e, "failed to save marker pack");
-                                                },
-                                            }
-                                        },
-                                        Err(e) => {
-                                            error!(?e, "failed to open marker pack directory to save pack");
-                                        }
-                                    };
+                                    event_sender.send(UIToBackMessage::SavePack(name.clone(), pack.clone()));
                                 }
                             } else {
                                 ui.colored_label(egui::Color32::GREEN, "pack is saved. press click `clear` button to remove this message");
@@ -397,61 +573,16 @@ impl PackageManager {
     }
     pub fn gui(
         &mut self, 
+        event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context, 
         is_marker_open: &mut bool, 
         is_file_open: &mut bool, 
         timestamp: f64,
-        joko_renderer: &mut joko_render::JokoRenderer,
         link: Option<&MumbleLink>
     ) {
-        self.gui_package_loader(etx, is_marker_open);
-        self.gui_file_manager(etx, is_file_open, link);
-}
+        self.gui_package_loader(event_sender, etx, is_marker_open);
+        self.gui_file_manager(event_sender, etx, is_file_open, link);
+    }
 }
 
-impl PackageUIManager {
-    pub fn new() -> Self {
-        Self{
-            import_status: Default::default(),
-            parents: Default::default()
-        }
-    }
-    
-    pub fn register(&mut self, element: Uuid, parent: Uuid) {
-        self.parents.insert(element, parent);
-    }
-    pub fn get_parent(&self, element: &Uuid) -> Option<&Uuid> {
-        self.parents.get(element)
-    }
-    pub fn get_parents<'a, I>(&self, input: I) -> BTreeSet<Uuid>
-    where I: Iterator<Item=&'a Uuid>
-    {
-        let iter = input.into_iter();
-        let mut result: BTreeSet<Uuid> = BTreeSet::new();
-        let mut current_generation: Vec<Uuid> = Vec::new();
-        for elt in iter {
-            current_generation.push(*elt)
-        }
-        //info!("starts with {}", current_generation.len());
-        loop {
-            if current_generation.is_empty() {
-                //info!("ends with {}", result.len());
-                return result;
-            }
-            let mut next_gen: Vec<Uuid> = Vec::new();
-            for elt in current_generation.iter() {
-                if let Some(p) = self.get_parent(elt) {
-                    if result.contains(p) {
-                        //avoid duplicate, redundancy or loop
-                        continue;
-                    }
-                    next_gen.push(p.clone());
-                }
-            }
-            let to_insert = std::mem::replace(&mut current_generation, next_gen);
-            result.extend(to_insert);
-        }
-        unreachable!("The loop should always return");
-    }
-}
 

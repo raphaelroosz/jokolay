@@ -60,9 +60,8 @@ impl JokolayTracingLayer {
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::exact(40.0))
-            .column(Column::initial(100.0).range(40.0..=300.0).clip(true))
-            .column(Column::exact(40.0))
-            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(200.0).range(40.0..=300.0).clip(true))
+            .column(Column::initial(400.0).clip(true))
             .min_scrolled_height(0.0)
             .header(20.0, |mut header| {
                 header.col(|ui| {
@@ -70,9 +69,6 @@ impl JokolayTracingLayer {
                 });
                 header.col(|ui| {
                     ui.strong("target");
-                });
-                header.col(|ui| {
-                    ui.strong("line");
                 });
                 header.col(|ui| {
                     ui.strong("message");

@@ -8,7 +8,7 @@ mod error;
 mod serialize;
 
 pub(crate) use deserialize::{get_pack_from_taco_zip, load_pack_core_from_dir};
-pub(crate) use serialize::save_pack_core_to_dir;
+pub(crate) use serialize::{save_pack_data_to_dir, save_pack_texture_to_dir};
 pub(crate) struct XotAttributeNameIDs {
     // xml tags
     pub overlay_data: NameId,

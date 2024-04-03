@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cap-directories = { version = "*" }
 cap-std = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [
@@ -26,4 +25,8 @@ serde_json = { workspace = true }
 indexmap = { workspace = true }
 rfd = { workspace = true }
 glam = { workspace = true }
-ordered_hash_map = { workspace = true }
+scopeguard = "1.2.0"
+smol_str = { workspace = true }
+uuid = { workspace = true }
+
+jokolink = { path = "../jokolink" }

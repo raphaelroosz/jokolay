@@ -1,13 +1,16 @@
+use std::collections::HashSet;
+
 use ordered_hash_map::OrderedHashMap;
 
 use egui::TextureHandle;
 use glam::{vec2, Vec2, Vec3};
 use indexmap::IndexMap;
-use joko_render::billboard::{MarkerObject, MarkerVertex, TrailObject};
+use crate::message::{MarkerObject, MarkerVertex, TrailObject};
 use uuid::Uuid;
 
+use joko_core::RelativePath;
 use crate::{
-    pack::{CommonAttributes, RelativePath},
+    pack::CommonAttributes,
     INCHES_PER_METER,
 };
 use jokolink::MumbleLink;
@@ -17,12 +20,14 @@ use jokolink::MumbleLink;
 - category activation data -> track and changes to propagate to markers of this map
 - current active markers, which will keep track of their original marker, so as to propagate any changes easily
 */
+#[derive(Clone)]
 pub struct ActiveTrail {
     pub trail_object: TrailObject,
     pub texture_handle: TextureHandle,
 }
 /// This is an active marker.
 /// It stores all the info that we need to scan every frame
+#[derive(Clone)]
 pub(crate) struct ActiveMarker {
     /// texture id from managed textures
     pub texture_id: u64,
@@ -34,7 +39,7 @@ pub(crate) struct ActiveMarker {
     pub max_pixel_size: f32,
     /// billboard must not be smaller than this size in pixels
     pub min_pixel_size: f32,
-    pub attrs: CommonAttributes,
+    pub common_attributes: CommonAttributes,
 }
 
 pub const _BILLBOARD_MAX_VISIBILITY_DISTANCE: f32 = 10000.0;
@@ -44,7 +49,7 @@ impl ActiveMarker {
         let Self {
             texture_id,
             pos,
-            attrs,
+            common_attributes: attrs,
             _texture,
             max_pixel_size,
             min_pixel_size,
@@ -267,16 +272,19 @@ impl ActiveTrail {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct CurrentMapData {
     /// the map to which the current map data belongs to
     pub map_id: u32,
+    //pub active_elements: HashSet<Uuid>,
     /// The textures that are being used by the markers, so must be kept alive by this hashmap
     pub active_textures: OrderedHashMap<RelativePath, TextureHandle>,
     /// The key is the index of the marker in the map markers
     /// Their position in the map markers serves as their "id" as uuids can be duplicates.
     pub active_markers: IndexMap<Uuid, ActiveMarker>,
+    pub wip_markers: IndexMap<Uuid, ActiveMarker>,
     /// The key is the position/index of this trail in the map trails. same as markers
     pub active_trails: IndexMap<Uuid, ActiveTrail>,
+    pub wip_trails: IndexMap<Uuid, ActiveTrail>,
 }
 

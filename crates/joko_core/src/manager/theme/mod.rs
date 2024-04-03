@@ -209,6 +209,7 @@ impl ThemeManager {
             error!(%self.config.default_theme, "failed to find the default theme in the loaded themes :(");
         }
     }
+    
     pub fn gui(&mut self, etx: &egui::Context, open: &mut bool) {
         egui::Window::new("Theme Manager")
             .open(open)

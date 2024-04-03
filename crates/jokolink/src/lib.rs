@@ -9,7 +9,7 @@
 //!
 
 mod mumble;
-use egui::{DragValue};
+use egui::DragValue;
 use enumflags2::BitFlags;
 use glam::IVec2;
 use jokoapi::end_point::mounts::Mount;
@@ -138,11 +138,21 @@ impl MumbleManager {
         if self.link.client_size != client_size {
             changes.insert(MumbleChanges::WindowSize);
         }
+        let cam_pos = cml.f_camera_position.into();
+        if self.link.cam_pos != cam_pos {
+            changes.insert(MumbleChanges::Camera);
+        }
+
+        let player_pos = cml.f_avatar_position.into();
+        if self.link.player_pos != player_pos {
+            changes.insert(MumbleChanges::Position);
+        }
+
         self.link = MumbleLink {
             ui_tick: cml.ui_tick,
-            player_pos: cml.f_avatar_position.into(),
+            player_pos,
             f_avatar_front: cml.f_avatar_front.into(),
-            cam_pos: cml.f_camera_position.into(),
+            cam_pos,
             f_camera_front: cml.f_camera_front.into(),
             name: identity.name,
             map_id: cml.context.map_id,
@@ -181,22 +191,23 @@ impl MumbleManager {
             Some(&self.link)
         })
     }
-    pub fn gui(&mut self, etx: &egui::Context, open: &mut bool) {
-        egui::Window::new("Mumble Manager")
-            .open(open)
-            .show(etx, |ui| {
-                if !self.is_alive() {
-                    ui.label(
-                        egui::RichText::new("Mumble is not initialized, display dummy link instead.")
-                        .color(egui::Color32::RED)
-                    );
-                    editable_mumble_ui(ui, &mut self.link);
-                } else {
-                    let link: MumbleLink = self.link.clone();
-                    mumble_ui(ui, link);
-                }
-            });
-    }
+}
+
+pub fn mumble_gui(etx: &egui::Context, open: &mut bool, is_alive: bool, link: &mut MumbleLink) {
+    egui::Window::new("Mumble Manager")
+        .open(open)
+        .show(etx, |ui| {
+            if !is_alive {
+                ui.label(
+                    egui::RichText::new("Mumble is not initialized, display dummy link instead.")
+                    .color(egui::Color32::RED)
+                );
+                editable_mumble_ui(ui, link);
+            } else {
+                let link: MumbleLink = link.clone();
+                mumble_ui(ui, link);
+            }
+        });
 }
 
 fn mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {

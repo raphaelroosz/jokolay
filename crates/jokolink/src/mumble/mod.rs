@@ -126,6 +126,8 @@ pub enum MumbleChanges {
     Character = 1 << 2,
     WindowPosition = 1 << 3,
     WindowSize = 1 << 4,
+    Camera = 1 << 5,
+    Position = 1 << 6,
 }
 
 /// represents the ui scale set in settings -> graphics options -> interface size

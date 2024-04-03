@@ -12,6 +12,9 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+#https://docs.rs/tracing/latest/tracing/level_filters/index.html
+
+bytemuck = { version = "1", features = ["derive"] }
 tracing = { version = "0.1", features = ["max_level_trace", "release_max_level_info"] }
 ringbuffer = { version = "0.14" }
 egui = { version = "0.26" }
@@ -23,12 +26,7 @@ miette = { version = "*", features = ["fancy"] }
 url = { version = "*", features = ["serde"] }
 serde_json = { version = "*" }
 rayon = { version = "*" }
-# tokio = { version = "*", default-features = false, features = [
-#     "rt-multi-thread",
-#     "sync",
-#     "time",
-#     "parking_lot"
-# ]}
+paste = { version = "*" }
 glam = { version = "*", features = ["fast-math"] }
 time = { version = "*" }
 ureq = { version = "*" }
@@ -36,6 +34,7 @@ enumflags2 = { version = "*" }
 indexmap = { version = "2" }
 rfd = { version = "*" }
 smol_str = { version = "*" }
+uuid = { version = "*" }
 itertools = { version = "*" }
 ordered_hash_map = { version = "*", features= ["serde"] }
 

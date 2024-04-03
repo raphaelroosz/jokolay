@@ -6,41 +6,37 @@ edition = "2021"
 [dependencies]
 # jmf deps
 # for marker packs 
-xot = { version = "0.16.0" }
-# to keep the order of files inside zip. markers packs rely on some files like aaa.xml being read first for marker category order# for representing the paths of files inside xml pack zip
-indexmap = { workspace = true, features = ["serde"]}
-uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
-
-
-# for easier extraction to folers and compression of folders into zip files (.taco format alias)
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
-# for dealing with png files in marker packs. 
-image = { version = "0.24", default-features = false, features = ["png"] }
-# for rapid xml bindings
-cxx = { version = "1.0", features = ["std"] }
 base64 = "0.21.2"
-data-encoding = "2.4.0"
-enumflags2 = { workspace = true }
+bytemuck = { workspace = true }
 cap-std = { workspace = true }
-tracing = { workspace = true }
-miette = { workspace = true }
-glam = { workspace = true }
+cxx = { version = "1.0", features = ["std"] } # for rapid xml bindings
+data-encoding = "2.4.0"
 egui = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-url = { workspace = true }
+enumflags2 = { workspace = true }
+glam = { workspace = true }
+image = { version = "0.24", default-features = false, features = ["png"] } # for dealing with png files in marker packs. 
+indexmap = { workspace = true, features = ["serde"]} # to keep the order of files inside zip. markers packs rely on some files like aaa.xml being read first for marker category order# for representing the paths of files inside xml pack zip
+itertools = { workspace = true }
+joko_core = { path = "../joko_core" }
+jokoapi = { path = "../jokoapi" }
+jokolink = { path = "../jokolink" }
+miette = { workspace = true }
+ordered_hash_map = { workspace = true }
+paste = { workspace = true }
+phf = { version = "*", features = ["macros"] }
 rayon = { workspace = true }
 rfd = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 smol_str = { workspace = true }
-itertools = { workspace = true }
 time = { workspace = true , features = ["serde"]}
-phf = { version = "*", features = ["macros"] }
-paste = { version = "*" }
-ordered_hash_map = { workspace = true }
-joko_render = { path = "../joko_render" }
-jokolink = { path = "../jokolink" }
-jokoapi = { path = "../jokoapi" }
+tracing = { workspace = true }
 tribool = "0.3.0"
+url = { workspace = true }
+uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+xot = { version = "0.16.0" }
+zip = { version = "0.6", default-features = false, features = ["deflate"] } # for easier extraction to folers and compression of folders into zip files (.taco format alias)
+
 
 
 [dev-dependencies]

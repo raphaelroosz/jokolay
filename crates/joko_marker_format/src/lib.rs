@@ -5,8 +5,10 @@
 pub(crate) mod io;
 pub(crate) mod manager;
 pub(crate) mod pack;
+pub mod message;
 
-pub use manager::PackageManager;
+pub use manager::{PackageDataManager, PackageUIManager, LoadedPackData, LoadedPackTexture, load_all_from_dir, build_from_core};
+
 // for compile time build info like pkg version or build timestamp or git hash etc..
 // shadow_rs::shadow!(build);
 

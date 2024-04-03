@@ -1,7 +1,5 @@
 pub mod billboard;
 use billboard::BillBoardRenderer;
-use billboard::MarkerObject;
-use billboard::TrailObject;
 use egui_render_three_d::three_d;
 use egui_render_three_d::three_d::context::COLOR_BUFFER_BIT;
 use egui_render_three_d::three_d::context::DEPTH_BUFFER_BIT;
@@ -16,6 +14,9 @@ use egui_window_glfw_passthrough::GlfwBackend;
 use glam::Mat4;
 use jokolink::MumbleLink;
 use three_d::prelude::*;
+
+
+use joko_marker_format::message::{MarkerObject, TrailObject};
 
 #[macro_export]
 macro_rules! gl_error {
@@ -76,11 +77,14 @@ impl JokoRenderer {
             cam_pos: Default::default(),
         }
     }
-    pub fn get_z_near(&self) -> f32 {
+    pub fn get_z_near() -> f32 {
         1.0
     }
-    pub fn get_z_far(&self) -> f32 {
+    pub fn get_z_far() -> f32 {
         1000.0
+    }
+    pub fn swap(&mut self) {
+        self.billboard_renderer.swap();
     }
     pub fn tick(&mut self, link: Option<&MumbleLink>) {
         if let Some(link) = link {
@@ -91,16 +95,16 @@ impl JokoRenderer {
                 center.to_array().into(),
                 Vector3::unit_y(),
                 Rad(link.fov),
-                self.get_z_near(),
-                self.get_z_far(),
+                Self::get_z_near(),
+                Self::get_z_far(),
             );
             self.camera = camera;
             let view = Mat4::look_at_lh(link.cam_pos, center, glam::Vec3::Y);
             let proj = Mat4::perspective_lh(
                 link.fov,
                 self.viewport.aspect(),
-                self.get_z_near(),
-                self.get_z_far(),
+                Self::get_z_near(),
+                Self::get_z_far(),
             );
             self.view_proj = proj * view;
             self.cam_pos = link.cam_pos;
@@ -109,14 +113,22 @@ impl JokoRenderer {
             self.has_link = false;
         }
     }
+    pub fn set_billboard(&mut self, marker_objects: Vec<MarkerObject>) {
+        self.billboard_renderer.markers_wip = marker_objects;
+    }
     pub fn add_billboard(&mut self, marker_object: MarkerObject) {
-        self.billboard_renderer.markers.push(marker_object);
+        self.billboard_renderer.markers_wip.push(marker_object);
+    }
+
+    pub fn set_trail(&mut self, trail_objects: Vec<TrailObject>) {
+        self.billboard_renderer.trails_wip = trail_objects;
     }
     pub fn add_trail(&mut self, trail_object: TrailObject) {
-        self.billboard_renderer.trails.push(trail_object);
+        self.billboard_renderer.trails_wip.push(trail_object);
     }
+    
     pub fn prepare_frame(&mut self, latest_framebuffer_size_getter: impl FnMut() -> [u32; 2]) {
-        self.billboard_renderer.prepare_frame();
+        //FIXME: have a double buffering
         self.gl.prepare_frame(latest_framebuffer_size_getter);
         unsafe {
             let gl = self.gl.context.clone();

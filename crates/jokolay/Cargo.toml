@@ -17,28 +17,15 @@ joko_core = { path = "../joko_core" }
 joko_render = { path = "../joko_render" }
 jmf = { path = "../joko_marker_format", package = "joko_marker_format" }
 jokolink = { path = "../jokolink" }
-url = { workspace = true, features = ["serde"] }
 egui_window_glfw_passthrough = { version = "0.8" }
 # we use this instead of cap-dirs because we want to debug/show the jokolay path to users
 # and `Dir` from cap-dirs doesn't allow us to get the path.
 cap-directories = { workspace = true }
 cap-std = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { version = "0.3", features = [
-    "env-filter",
-    "time",
-] } # for ErrorLayer
-tracing-appender = { version = "*" }
 miette = { workspace = true }
 
 egui = { workspace = true, features = ["serde"] }
-egui_extras = { workspace = true }
 
-ringbuffer = { workspace = true }
 rayon = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-indexmap = { workspace = true }
-rfd = { workspace = true }
-glam = { workspace = true }
-# sea-orm ={ version = "*", features = ["sqlx-sqlite"]}
+

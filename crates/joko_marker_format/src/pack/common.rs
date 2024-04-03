@@ -378,7 +378,7 @@ macro_rules! setters_for_bool_attributes {
 common_attributes_struct_macro!(
     /// the struct we use for inheritance from category/other markers.
     #[derive(Debug, Clone, Default)]
-    pub(crate) struct CommonAttributes {
+    pub struct CommonAttributes {
         /// An ID for an achievement from the GW2 API. Markers with the corresponding achievement ID will be hidden if the ID is marked as "done" for the API key that's entered in TacO.
         achievement_id: u32,
         /// This is similar to achievementId, but works for partially completed achievements as well, if the achievement has "bits", they can be individually referenced with this.
