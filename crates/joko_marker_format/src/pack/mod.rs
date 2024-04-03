@@ -92,7 +92,6 @@ impl PackCore {
         let mut entities_parents: HashMap<Uuid, Uuid> = Default::default();
         let mut all_categories: HashMap<String, Uuid> = Default::default();
         Self::recursive_register_categories(&mut entities_parents, &self.categories, &mut all_categories);
-        info!("Catepories registered: {}", all_categories.len());
         self.entities_parents.extend(entities_parents);
         self.all_categories = all_categories;
     }

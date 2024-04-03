@@ -88,7 +88,9 @@ pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
             trace!("file ignored: {name}")
         }
     }
-    info!("Entities registered: {}", pack.entities_parents.len());
+    info!("Entities registered (category + markers): {}", pack.entities_parents.len());
+    info!("Categories registered: {}", pack.all_categories.len());
+    info!("Markers registered: {}", pack.entities_parents.len() - pack.all_categories.len());
     info!("Maps registered: {}", pack.maps.len());
     info!("Textures registered: {}", pack.textures.len());
     info!("Trail binaries registered: {}", pack.tbins.len());

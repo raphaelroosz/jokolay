@@ -574,7 +574,7 @@ impl LoadedPackTexture {
                 marker_objects.push(mo);
             }
         }
-        tracing::info!("LoadedPackTexture.tick: {}, markers {}", self.name, marker_objects.len());
+        tracing::trace!("LoadedPackTexture.tick: {}, markers {}", self.name, marker_objects.len());
         u2u_sender.send(UIToUIMessage::BulkMarkerObject(marker_objects));
         let mut trail_objects = Vec::new();
         for (uuid, trail) in self.current_map_data.active_trails.iter() {
@@ -584,7 +584,7 @@ impl LoadedPackTexture {
             });
             //next_on_screen.insert(*uuid);
         }
-        tracing::info!("LoadedPackTexture.tick: {}, trails {}", self.name, trail_objects.len());
+        tracing::trace!("LoadedPackTexture.tick: {}, trails {}", self.name, trail_objects.len());
         u2u_sender.send(UIToUIMessage::BulkTrailObject(trail_objects));
     }
 

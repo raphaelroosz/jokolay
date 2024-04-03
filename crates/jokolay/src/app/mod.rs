@@ -264,11 +264,11 @@ impl Jokolay {
     ) {
         match msg {
             UIToUIMessage::BulkMarkerObject(marker_objects) => {
-                tracing::info!("Handling of UIToUIMessage::BulkMarkerObject {}", marker_objects.len());
+                tracing::debug!("Handling of UIToUIMessage::BulkMarkerObject {}", marker_objects.len());
                 gui.joko_renderer.extend_markers(marker_objects);
             }
             UIToUIMessage::BulkTrailObject(trail_objects) => {
-                tracing::info!("Handling of UIToUIMessage::BulkTrailObject {}", trail_objects.len());
+                tracing::debug!("Handling of UIToUIMessage::BulkTrailObject {}", trail_objects.len());
                 gui.joko_renderer.extend_trails(trail_objects);
             }
             UIToUIMessage::MarkerObject(mo) => {
@@ -280,7 +280,7 @@ impl Jokolay {
                 gui.joko_renderer.add_trail(to);
             }
             UIToUIMessage::RenderSwapChain => {
-                tracing::info!("Handling of UIToUIMessage::RenderSwapChain");
+                tracing::debug!("Handling of UIToUIMessage::RenderSwapChain");
                 gui.joko_renderer.swap();
             }
             _ => {
@@ -332,7 +332,7 @@ impl Jokolay {
                 gui.package_manager.update_pack_active_categories(pack_uuid, &active_elements);
             }
             BackToUIMessage::TextureSwapChain => {
-                tracing::info!("Handling of BackToUIMessage::TextureSwapChain");
+                tracing::debug!("Handling of BackToUIMessage::TextureSwapChain");
                 gui.package_manager.swap();
                 local_state.list_of_textures_changed = true;
             }
