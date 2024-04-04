@@ -49,6 +49,7 @@ pub enum BackToUIMessage {
     MarkerTexture(Uuid, RelativePath, Uuid, Vec3, CommonAttributes),
     MumbleLink(Option<MumbleLink>),
     MumbleLinkChanged,//tell there is a need to resize
+    NbTasksRunning(i32),//tell the number of taks running in background
     PackageActiveElements(Uuid, HashSet<Uuid>),// first is the package reference, second is the list of active elements in the package.
     TextureSwapChain,// The list of texture to load was changed, will be soon followed by a RenderSwapChain
     TrailTexture(Uuid, RelativePath, Uuid, CommonAttributes),

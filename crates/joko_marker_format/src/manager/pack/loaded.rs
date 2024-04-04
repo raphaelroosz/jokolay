@@ -30,11 +30,12 @@ use crate::manager::pack::category_selection::CategorySelection;
 use crate::manager::package::{PACKAGES_DIRECTORY_NAME, PACKAGE_MANAGER_DIRECTORY_NAME};
 
 
+//TODO: separate in front and back tasks
 pub (crate) struct PackTasks {
     //an object that can handle such tasks should be passed as argument of any function that may required an async action
     save_texture_task: AsyncTask<LoadedPackTexture, Result<()>>,
     save_data_task: AsyncTask<LoadedPackData, Result<()>>,
-    load_pack_task: AsyncTask<Arc<Dir>, Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>>
+    load_all_packs_task: AsyncTask<Arc<Dir>, Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>>
 }
 
 #[derive(Clone)]
@@ -46,9 +47,9 @@ pub struct LoadedPackData {
     //pub core: PackCore,
     pub categories: IndexMap<Uuid, Category>,
     pub all_categories: HashMap<String, Uuid>,
-    pub source_files: OrderedHashMap<String, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
-    pub maps: OrderedHashMap<u32, MapData>,
-    selected_files: OrderedHashMap<String, bool>,
+    pub source_files: BTreeMap<String, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
+    pub maps: HashMap<u32, MapData>,
+    selected_files: BTreeMap<String, bool>,
     _is_dirty: bool,//there was an edition in the package itself
 
     // loca copy in the data side of what is exposed in UI
@@ -67,8 +68,8 @@ pub struct LoadedPackTexture {
     /// Files related to Jokolay thought will have to be stored directly inside this directory, to keep the xml subdirectory clean.
     /// eg: Active categories, activation data etc..
     pub dir: Arc<Dir>,
-    pub tbins: OrderedHashMap<RelativePath, TBin>,
-    pub textures: OrderedHashMap<RelativePath, Vec<u8>>,
+    pub tbins: HashMap<RelativePath, TBin>,
+    pub textures: HashMap<RelativePath, Vec<u8>>,
 
     /// The selection of categories which are "enabled" and markers belonging to these may be rendered
     selectable_categories: OrderedHashMap<String, CategorySelection>,
@@ -84,24 +85,20 @@ impl PackTasks {
         Self {
             save_texture_task: AsyncTaskGuard::new(PackTasks::async_save_texture),
             save_data_task: AsyncTaskGuard::new(PackTasks::async_save_data),
-            load_pack_task: AsyncTaskGuard::new(load_all_from_dir),
+            load_all_packs_task: AsyncTaskGuard::new(load_all_from_dir),
         }
     }
     pub fn is_running(&self) -> bool {
         self.save_texture_task.lock().unwrap().is_running() ||
         self.save_data_task.lock().unwrap().is_running()
     }
-    pub fn status_as_color(&self) -> egui::Color32 {
-        //we can choose whatever color code we want to focus on load, save, network queries, anything.
-        let max_nb_saving = 2;
-        let nb_saving = 
-            self.save_texture_task.lock().unwrap().is_running() as u8
-            + self.save_data_task.lock().unwrap().is_running() as u8
-        ;
-        let color_saving = nb_saving * 0xff / max_nb_saving;
-        egui::Color32::from_rgb(color_saving, 0, 0)
+    pub fn count(&self) -> i32 {
+        0
+        + self.save_texture_task.lock().unwrap().count()
+        + self.save_data_task.lock().unwrap().count()
+        + self.load_all_packs_task.lock().unwrap().count()
     }
-
+    
     pub fn save_texture(&self, texture_pack: &mut LoadedPackTexture, status: bool) {
         if status {
             std::mem::take(&mut texture_pack._is_dirty);
@@ -118,6 +115,14 @@ impl PackTasks {
                 data_pack.clone()
             );
         }
+    }
+    pub fn load_all_packs(&self, jokolay_dir: Arc<Dir>) {
+        self.load_all_packs_task.lock().unwrap().send(
+            jokolay_dir
+        );
+    }
+    pub fn wait_for_load_all_packs(&self) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)> {
+        self.load_all_packs_task.lock().unwrap().recv().unwrap()
     }
 
     fn change_map(
@@ -245,8 +250,11 @@ impl LoadedPackData {
             .open_dir(Self::CORE_PACK_DIR_NAME)
             .into_diagnostic()
             .wrap_err("failed to open core pack directory")?;
+        let start = std::time::SystemTime::now();
         let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
-
+        let elaspsed = start.elapsed().unwrap_or_default();
+        tracing::info!("Loading of package from disk {} took {} ms", name, elaspsed.as_millis());
+    
         //FIXME: Since categories have randomly generated uuids (and not saved), one need to build from those, all the time.
         //let selectable_categories = CategorySelection::default_from_pack_core(&core);
         let selectable_categories = Self::load_selectable_categories(&pack_dir, &core);
@@ -708,8 +716,12 @@ fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<(LoadedPackData, L
         .open_dir(LoadedPackData::CORE_PACK_DIR_NAME)
         .into_diagnostic()
         .wrap_err("failed to open core pack directory")?;
+    let start = std::time::SystemTime::now();
     let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
-    Ok(build_from_core(name, pack_dir, core))
+    let elaspsed = start.elapsed().unwrap_or_default();
+    tracing::info!("Loading of package from disk {} took {} ms", name, elaspsed.as_millis());
+    let res = build_from_core(name.clone(), pack_dir, core);
+    Ok(res)
 }
 
 

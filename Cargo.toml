@@ -38,6 +38,17 @@ uuid = { version = "*" }
 itertools = { version = "*" }
 ordered_hash_map = { version = "*", features= ["serde"] }
 
+
+#https://corrode.dev/blog/tips-for-faster-rust-compile-times/#use-cargo-check-instead-of-cargo-build
+[profile.dev]
+split-debuginfo = "unpacked"
+
+[profile.dev.build-override]
+opt-level = 3
+
+
 [profile.release]
 strip = "symbols"
-lto = true
+
+#lto make the build very slow
+#lto = true

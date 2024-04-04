@@ -14,7 +14,7 @@ use joko_core::RelativePath;
 use jokolink::MumbleLink;
 use miette::{Context, IntoDiagnostic, Result};
 use uuid::Uuid;
-use crate::message::{UIToBackMessage, UIToUIMessage};
+use crate::{load_all_from_dir, message::{UIToBackMessage, UIToUIMessage}};
 
 use crate::{message::BackToUIMessage, pack::CommonAttributes};
 use crate::manager::pack::loaded::{LoadedPackData, PackTasks, LoadedPackTexture};
@@ -205,6 +205,7 @@ impl PackageDataManager {
                 let mut tasks = &self.tasks;
                 for (uuid, pack) in self.packs.iter_mut() {
                     let span_guard = info_span!("Updating package status").entered();
+                    b2u_sender.send(BackToUIMessage::NbTasksRunning(tasks.count()));
                     tasks.save_data(pack, pack.is_dirty());
                     pack.tick(
                         &b2u_sender,
@@ -238,7 +239,7 @@ impl PackageDataManager {
             self.packs.remove(&uuid);
         }
     }
-    pub fn save(&mut self, mut data_pack: LoadedPackData) {
+    pub fn save(&mut self, mut data_pack: LoadedPackData) -> Uuid {
         let mut to_delete: Vec<Uuid> = Vec::new();
         for (uuid, pack) in self.packs.iter() {
             if pack.name == data_pack.name {
@@ -247,7 +248,34 @@ impl PackageDataManager {
         }
         self.delete_packs(to_delete);
         self.tasks.save_data(&mut data_pack, true);
-        self.packs.insert(data_pack.uuid, data_pack);
+        let mut uuid_to_insert = data_pack.uuid.clone();
+        while self.packs.contains_key(&uuid_to_insert) {//collision avoidance
+            trace!("Uuid collision detected for {} for package {}", uuid_to_insert, data_pack.name);
+            uuid_to_insert = Uuid::new_v4();
+        }
+        data_pack.uuid = uuid_to_insert;
+        self.packs.insert(uuid_to_insert, data_pack);
+        uuid_to_insert
+    }
+
+    pub fn load_all(
+        &mut self,
+        jokolay_dir: Arc<Dir>,
+        b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
+    ) {
+        // Called only once at application start.
+        b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
+        self.tasks.load_all_packs(jokolay_dir);
+        if let Ok((data_packages, texture_packages)) = self.tasks.wait_for_load_all_packs() {
+            for (uuid, data_pack) in data_packages {
+                self.packs.insert(uuid, data_pack);
+            }
+            for (uuid, texture_pack) in texture_packages {
+                b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack));
+            }
+            b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
+        }
+        
     }
 
 }
@@ -436,7 +464,9 @@ impl PackageUIManager {
         &mut self, 
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
-        ui: &mut egui::Ui
+        ui: &mut egui::Ui,
+        nb_running_tasks_on_back: i32,
+        nb_running_tasks_on_network: i32,
     ) {
         ui.menu_button("Markers", |ui| {
             if self.show_only_active {
@@ -464,10 +494,40 @@ impl PackageUIManager {
             }
             
         });
-        if self.tasks.is_running() {
-            let sp = egui::Spinner::new().color(self.tasks.status_as_color());
+        if self.tasks.is_running() || nb_running_tasks_on_back > 0 || nb_running_tasks_on_network > 0{
+            let sp = egui::Spinner::new().color(self.status_as_color(nb_running_tasks_on_back, nb_running_tasks_on_network));
             ui.add(sp);
         }
+    }
+    pub fn status_as_color(&self, nb_running_tasks_on_back: i32, nb_running_tasks_on_network: i32) -> egui::Color32 {
+        //we can choose whatever color code we want to focus on load, save, network queries, anything.
+        let nb_running_tasks_on_ui = self.tasks.count();
+        //Integer overflow avoidance example: value * 0x80 / 4 <=> value * 0x20
+        let color_ui = if nb_running_tasks_on_ui > 0 {
+            let nb_ui_tasks = nb_running_tasks_on_ui.clamp(0, 1) as u8;
+            let res = nb_ui_tasks * 0x80;
+            res + 0x7f
+        } else {
+            0
+        };
+        
+        let color_back = if nb_running_tasks_on_back > 0 {
+            let nb_bask_tasks = nb_running_tasks_on_back.clamp(0, 1) as u8;
+            let res = nb_bask_tasks * 0x80;
+            res + 0x7f
+        } else {
+            0
+        };
+        
+        let color_network = if nb_running_tasks_on_network > 0 {
+            let nb_network_tasks = nb_running_tasks_on_network.clamp(0, 1) as u8;
+            let res = nb_network_tasks * 0x80;
+            res + 0x7f
+        } else {
+            0
+        };
+
+        egui::Color32::from_rgb(color_ui, color_back, color_network)
     }
 
     fn gui_file_manager(

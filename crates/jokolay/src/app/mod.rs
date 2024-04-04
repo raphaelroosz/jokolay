@@ -1,9 +1,15 @@
-use std::{ops::DerefMut, sync::{mpsc::channel, Arc, Mutex}, thread};
+use std::{
+    collections::BTreeMap,
+    ops::DerefMut, 
+    sync::{Arc, Mutex}, 
+    thread
+};
 
 use cap_std::fs_utf8::Dir;
 use egui_window_glfw_passthrough::{glfw::Context as _, GlfwBackend, GlfwConfig};
 mod init;
 mod wm;
+use uuid::Uuid;
 use init::get_jokolay_dir;
 use jmf::{message::{UIToBackMessage, UIToUIMessage}, PackageDataManager, PackageUIManager};
 //use jmf::FileManager;
@@ -20,7 +26,9 @@ struct JokolayState {
     link: Option<MumbleLink>,
     window_changed: bool,
     choice_of_category_changed: bool,//Meant as an optimisation to only update when there is a change in UI
-    list_of_textures_changed: bool//Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
+    list_of_textures_changed: bool,//Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
+    nb_running_tasks_on_back: i32,// store the number of running tasks in background thread
+    nb_running_tasks_on_network: i32,// store the number of running tasks (requests) in progress
 }
 struct JokolayApp {
     mumble_manager: MumbleManager,
@@ -38,7 +46,7 @@ struct JokolayGui {
 }
 #[allow(unused)]
 pub struct Jokolay {
-    jdir: Arc<Dir>,
+    jokolay_dir: Arc<Dir>,
     gui: Arc<Mutex<JokolayGui>>,
     app: Arc<Mutex<Box<JokolayApp>>>,
     state: JokolayState,
@@ -55,7 +63,8 @@ impl Jokolay {
         let mumble_ui_manager =
             MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
             
-        let (data_packages, texture_packages) = load_all_from_dir(Arc::clone(&jokolay_dir)).wrap_err("failed to load packages")?;
+        let data_packages: BTreeMap<Uuid, LoadedPackData> = Default::default();
+        let texture_packages: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
         let mut package_data_manager = PackageDataManager::new(data_packages, Arc::clone(&jokolay_dir))?;
         let mut package_ui_manager = PackageUIManager::new(texture_packages);
         let mut theme_manager = ThemeManager::new(Arc::clone(&jokolay_dir)).wrap_err("failed to create theme manager")?;
@@ -90,7 +99,7 @@ impl Jokolay {
 
         package_ui_manager.late_init(&egui_context);
         Ok(Self {
-            jdir: jokolay_dir,
+            jokolay_dir,
             gui: Arc::new(Mutex::new(JokolayGui {
                 frame_stats,
                 joko_renderer,
@@ -110,18 +119,30 @@ impl Jokolay {
                 window_changed: true,
                 choice_of_category_changed: false,
                 list_of_textures_changed: false,
+                nb_running_tasks_on_back: 0,
+                nb_running_tasks_on_network: 0,
             }
         })
     }
 
     fn start_background_loop(
+        jokolay_dir: Arc<Dir>,
         app: Arc<Mutex<Box<JokolayApp>>>, 
         state: JokolayState,
         b2u_sender: std::sync::mpsc::Sender<BackToUIMessage>,
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
         let background_thread = std::thread::spawn(move || {
-            //TODO here, load the directory with packages
+            // Load the directory with packages in the background process
+            {
+                //TODO: lazy loading to load maps only when on it
+                let mut app = app.lock().unwrap();
+                let JokolayApp {
+                    mumble_manager,
+                    package_manager
+                } = &mut app.deref_mut().as_mut();
+                package_manager.load_all(Arc::clone(&jokolay_dir), &b2u_sender);
+            }
             Self::background_loop(Arc::clone(&app), state, b2u_sender, u2b_receiver);
         });
     }
@@ -188,9 +209,9 @@ impl Jokolay {
                 }
                 match package_manager.marker_packs_dir.open_dir(name) {
                     Ok(dir) => {
-                        let (mut data_pack, texture_pack) = build_from_core(name.to_string(), dir.into(), pack);
+                        let (mut data_pack, mut texture_pack) = build_from_core(name.to_string(), dir.into(), pack);
                         tracing::trace!("Package loaded into data and texture");
-                        package_manager.save(data_pack);
+                        texture_pack.uuid = package_manager.save(data_pack);
                         b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack));
                     },
                     Err(e) => {
@@ -240,7 +261,7 @@ impl Jokolay {
                 }
             };
             while let Ok(msg) = u2b_receiver.try_recv() {
-                Self::handle_u2b_message(package_manager, &mut local_state,&b2u_sender,  msg);
+                Self::handle_u2b_message(package_manager, &mut local_state, &b2u_sender, msg);
                 nb_messages += 1;
             }
             tracing::trace!("choice_of_category_changed: {}", local_state.choice_of_category_changed);
@@ -330,6 +351,10 @@ impl Jokolay {
                 //too verbose to trace
                 local_state.window_changed = true;
             }
+            BackToUIMessage::NbTasksRunning(nb_tasks) => {
+                tracing::trace!("Handling of BackToUIMessage::NbTasksRunning");
+                local_state.nb_running_tasks_on_back = nb_tasks;
+            }
             BackToUIMessage::PackageActiveElements(pack_uuid, active_elements) => {
                 tracing::trace!("Handling of BackToUIMessage::PackageActiveElements");
                 gui.package_manager.update_pack_active_categories(pack_uuid, &active_elements);
@@ -353,7 +378,7 @@ impl Jokolay {
         let (b2u_sender, b2u_receiver) = std::sync::mpsc::channel();
         let (u2b_sender, u2b_receiver) = std::sync::mpsc::channel();
         let (u2u_sender, u2u_receiver) = std::sync::mpsc::channel();
-        Self::start_background_loop(Arc::clone(&self.app), self.state.clone(), b2u_sender, u2b_receiver);
+        Self::start_background_loop(Arc::clone(&self.jokolay_dir), Arc::clone(&self.app), self.state.clone(), b2u_sender, u2b_receiver);
 
         tracing::info!("entering glfw event loop");
         let span_guard = info_span!("glfw event loop").entered();
@@ -534,7 +559,13 @@ impl Jokolay {
                                 }
                             },
                         );
-                        package_manager.menu_ui(&u2b_sender, &u2u_sender, ui);
+                        package_manager.menu_ui(
+                            &u2b_sender, 
+                            &u2u_sender, 
+                            ui, 
+                            local_state.nb_running_tasks_on_back,
+                            local_state.nb_running_tasks_on_network,
+                        );
                     });
                 }
             );

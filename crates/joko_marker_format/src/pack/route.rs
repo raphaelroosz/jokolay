@@ -1,5 +1,10 @@
+use joko_core::RelativePath;
 use uuid::Uuid;
 use glam::Vec3;
+
+use crate::pack::CommonAttributes;
+
+use super::{TBin, Trail};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Route {

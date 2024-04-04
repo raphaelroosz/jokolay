@@ -66,6 +66,9 @@ where
         self.result_receiver.recv()
     }
 
+    pub fn count(&self) -> i32 {
+        self.nb.load(std::sync::atomic::Ordering::Relaxed)
+    }
     pub fn is_running(&self) -> bool {
         let nb = self.nb.load(std::sync::atomic::Ordering::Relaxed);
         nb != 0

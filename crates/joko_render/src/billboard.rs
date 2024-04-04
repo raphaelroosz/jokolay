@@ -6,7 +6,7 @@ use egui_render_three_d::{
     GpuTexture,
 };
 use joko_marker_format::message::{MarkerVertex, MarkerObject, TrailObject};
-use tracing::{error, info, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::gl_error;
 
@@ -74,7 +74,7 @@ impl BillBoardRenderer {
     }
     
     pub fn swap(&mut self) {
-        info!("swap UI to display {} markers, {} trails", 
+        trace!("swap UI to display {} markers, {} trails", 
             self.markers_wip.len(), 
             self.trails_wip.len()
         );

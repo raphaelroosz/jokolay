@@ -28,4 +28,5 @@ miette = { workspace = true }
 egui = { workspace = true, features = ["serde"] }
 
 rayon = { workspace = true }
+uuid = { workspace = true }
 
