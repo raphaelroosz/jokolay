@@ -196,10 +196,10 @@ impl PackCore {
         Ok(())
     }
 
-    pub(crate) fn register_route(&mut self, full_category_name: String , mut route: Route) -> Result<(), miette::Error> {
+    pub(crate) fn register_route(&mut self, mut route: Route) -> Result<(), miette::Error> {
         let file_name = format!("data/dynamic_trails/{}.trl", &route.guid);
         let tbin_path: RelativePath = file_name.parse().unwrap();
-        let uuid_to_insert = self.register_uuid(&full_category_name, &route.guid)?;
+        let uuid_to_insert = self.register_uuid(&route.category, &route.guid)?;
         route.guid = uuid_to_insert;
         let trail = route_to_trail(&route, &tbin_path);
         let tbin = route_to_tbin(&route);

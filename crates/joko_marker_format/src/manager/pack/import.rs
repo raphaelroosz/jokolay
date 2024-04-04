@@ -13,6 +13,7 @@ pub enum ImportStatus {
     UnInitialized,
     WaitingForFileChooser,
     LoadingPack(std::path::PathBuf),
+    WaitingLoading(std::path::PathBuf),
     PackDone(String, PackCore, bool),
     PackError(miette::Report),
 }

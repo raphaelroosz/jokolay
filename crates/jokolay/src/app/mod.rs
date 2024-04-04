@@ -20,15 +20,20 @@ use jokolink::{MumbleChanges, MumbleLink, MumbleManager, mumble_gui};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{error, info, info_span, span};
 use jmf::{LoadedPackData, LoadedPackTexture, load_all_from_dir, build_from_core};
+use jmf::{ImportStatus, import_pack_from_zip_file_path};
 
 #[derive(Clone)]
-struct JokolayState {
+struct JokolayUIState {
     link: Option<MumbleLink>,
     window_changed: bool,
-    choice_of_category_changed: bool,//Meant as an optimisation to only update when there is a change in UI
     list_of_textures_changed: bool,//Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
     nb_running_tasks_on_back: i32,// store the number of running tasks in background thread
     nb_running_tasks_on_network: i32,// store the number of running tasks (requests) in progress
+    import_status: Arc<Mutex<ImportStatus>>,
+}
+
+struct JokolayBackState {
+    choice_of_category_changed: bool,//Meant as an optimisation to only update when there is a change in UI
 }
 struct JokolayApp {
     mumble_manager: MumbleManager,
@@ -49,7 +54,8 @@ pub struct Jokolay {
     jokolay_dir: Arc<Dir>,
     gui: Arc<Mutex<JokolayGui>>,
     app: Arc<Mutex<Box<JokolayApp>>>,
-    state: JokolayState,
+    state_ui: JokolayUIState,
+    state_back: JokolayBackState,
 }
 
 
@@ -94,8 +100,8 @@ impl Jokolay {
         let frame_stats = wm::WindowStatistics::new(glfw_backend.glfw.get_time() as _);
         
         let mut menu_panel = MenuPanel::default();
-        menu_panel.show_theme_window = true;
-        menu_panel.show_package_manager_window = true;
+        //menu_panel.show_theme_window = true;
+        //menu_panel.show_package_manager_window = true;
 
         package_ui_manager.late_init(&egui_context);
         Ok(Self {
@@ -114,13 +120,16 @@ impl Jokolay {
                 mumble_manager: mumble_data_manager,
                 package_manager: package_data_manager,
             }))),
-            state: JokolayState{
+            state_ui: JokolayUIState {
                 link: None,
                 window_changed: true,
-                choice_of_category_changed: false,
                 list_of_textures_changed: false,
                 nb_running_tasks_on_back: 0,
                 nb_running_tasks_on_network: 0,
+                import_status: Default::default(),
+            },
+            state_back: JokolayBackState {
+                choice_of_category_changed: false,
             }
         })
     }
@@ -128,17 +137,17 @@ impl Jokolay {
     fn start_background_loop(
         jokolay_dir: Arc<Dir>,
         app: Arc<Mutex<Box<JokolayApp>>>, 
-        state: JokolayState,
+        state: JokolayBackState,
         b2u_sender: std::sync::mpsc::Sender<BackToUIMessage>,
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
-        let background_thread = std::thread::spawn(move || {
+        let _background_thread = std::thread::spawn(move || {
             // Load the directory with packages in the background process
             {
                 //TODO: lazy loading to load maps only when on it
                 let mut app = app.lock().unwrap();
                 let JokolayApp {
-                    mumble_manager,
+                    mumble_manager: _,
                     package_manager
                 } = &mut app.deref_mut().as_mut();
                 package_manager.load_all(Arc::clone(&jokolay_dir), &b2u_sender);
@@ -149,7 +158,7 @@ impl Jokolay {
 
     fn handle_u2b_message(
         package_manager: &mut PackageDataManager, 
-        local_state: &mut JokolayState,
+        local_state: &mut JokolayBackState,
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         msg: UIToBackMessage
     ) {
@@ -185,8 +194,19 @@ impl Jokolay {
                 }
                 b2u_sender.send(BackToUIMessage::DeletedPacks(deleted));
             }
-            UIToBackMessage::ImportPack => {
-                unimplemented!("Handling of UIToBackMessage::ImportPack has not been implemented yet");
+            UIToBackMessage::ImportPack(file_path) => {
+                tracing::trace!("Handling of UIToBackMessage::ImportPack");
+                b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
+                let result = import_pack_from_zip_file_path(file_path);
+                match result {
+                    Ok((file_name, pack)) => {
+                        b2u_sender.send(BackToUIMessage::ImportedPack(file_name, pack));
+                    }
+                    Err(e) => {
+                        b2u_sender.send(BackToUIMessage::ImportFailure(e));
+                    }
+                }
+                b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
             }
             UIToBackMessage::ReloadPack => {
                 unimplemented!("Handling of UIToBackMessage::ReloadPack has not been implemented yet");
@@ -226,7 +246,7 @@ impl Jokolay {
     }
     fn background_loop(
         mut app: Arc<Mutex<Box<JokolayApp>>>, 
-        mut local_state: JokolayState,
+        mut local_state: JokolayBackState,
         b2u_sender: std::sync::mpsc::Sender<BackToUIMessage>,
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
@@ -281,7 +301,7 @@ impl Jokolay {
 
     fn handle_u2u_message(
         gui: &mut JokolayGui, 
-        state: &mut JokolayState,
+        state: &mut JokolayUIState,
         msg: UIToUIMessage
     ) {
         match msg {
@@ -312,7 +332,7 @@ impl Jokolay {
     }
     fn handle_b2u_message(
         gui: &mut JokolayGui, 
-        local_state: &mut JokolayState,
+        local_state: &mut JokolayUIState,
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         msg: BackToUIMessage
     ) {
@@ -330,14 +350,20 @@ impl Jokolay {
                 tracing::trace!("Handling of BackToUIMessage::DeletedPacks");
                 gui.package_manager.delete_packs(to_delete);
             }
+            BackToUIMessage::ImportedPack(file_name, pack) => {
+                tracing::trace!("Handling of BackToUIMessage::ImportedPack");
+                *local_state.import_status.lock().unwrap() = ImportStatus::PackDone(file_name, pack, false);
+            }
+            BackToUIMessage::ImportFailure(error) => {
+                tracing::trace!("Handling of BackToUIMessage::ImportFailure");
+                *local_state.import_status.lock().unwrap() = ImportStatus::PackError(error);
+
+            }
             BackToUIMessage::LoadedPack(pack_texture) => {
                 tracing::trace!("Handling of BackToUIMessage::LoadedPack");
                 gui.package_manager.save(pack_texture);
-                gui.package_manager.import_status = None;
+                local_state.import_status = Default::default();
                 u2b_sender.send(UIToBackMessage::CategoryActivationStatusChanged);
-            }
-            BackToUIMessage::Loading => {
-                unimplemented!("Handling of BackToUIMessage::Loading has not been implemented yet");
             }
             BackToUIMessage::MarkerTexture(pack_uuid, tex_path, marker_uuid, position, common_attributes) => {
                 tracing::trace!("Handling of BackToUIMessage::MarkerTexture");
@@ -378,11 +404,11 @@ impl Jokolay {
         let (b2u_sender, b2u_receiver) = std::sync::mpsc::channel();
         let (u2b_sender, u2b_receiver) = std::sync::mpsc::channel();
         let (u2u_sender, u2u_receiver) = std::sync::mpsc::channel();
-        Self::start_background_loop(Arc::clone(&self.jokolay_dir), Arc::clone(&self.app), self.state.clone(), b2u_sender, u2b_receiver);
+        Self::start_background_loop(Arc::clone(&self.jokolay_dir), Arc::clone(&self.app), self.state_back, b2u_sender, u2b_receiver);
 
         tracing::info!("entering glfw event loop");
         let span_guard = info_span!("glfw event loop").entered();
-        let mut local_state = self.state.clone();
+        let mut local_state = self.state_ui;
         let mut nb_frames: u128 = 0;
         let mut nb_messages: u128 = 0;
         let max_nb_messages_per_loop: u128 = 100;
@@ -391,6 +417,16 @@ impl Jokolay {
             {
                 let mut nb_message_on_curent_loop: u128 = 0;
                 tracing::trace!("glfw event loop, {} frames, {} messages", nb_frames, nb_messages);
+
+                if let Ok(mut import_status) = local_state.import_status.lock() {
+                    match &mut *import_status {
+                        ImportStatus::LoadingPack(file_path) => {
+                            u2b_sender.send(UIToBackMessage::ImportPack(file_path.clone()));
+                            *import_status = ImportStatus::WaitingLoading(file_path.clone());
+                        }
+                        _ => {}
+                    }
+                }
                 //untested and might crash due to .unwrap()
                 let mut gui = self.gui.lock().unwrap();
                 while let Ok(msg) = u2u_receiver.try_recv() {
@@ -578,6 +614,7 @@ impl Jokolay {
                 &u2b_sender,
                 &etx, 
                 &mut menu_panel.show_package_manager_window,
+                &local_state.import_status,
                 &mut menu_panel.show_file_manager_window,
                 latest_time,
                 link

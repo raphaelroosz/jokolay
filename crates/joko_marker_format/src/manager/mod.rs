@@ -21,3 +21,4 @@ mod pack;
 
 pub use package::{PackageDataManager, PackageUIManager};
 pub use pack::loaded::{LoadedPackData, LoadedPackTexture, load_all_from_dir, build_from_core};
+pub use pack::import::{ImportStatus, import_pack_from_zip_file_path};

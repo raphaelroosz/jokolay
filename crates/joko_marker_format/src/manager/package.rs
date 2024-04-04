@@ -60,7 +60,6 @@ pub struct PackageDataManager {
 }
 #[must_use]
 pub struct PackageUIManager {
-    pub import_status: Option<Arc<Mutex<ImportStatus>>>,
     default_marker_texture: Option<TextureHandle>,
     default_trail_texture: Option<TextureHandle>,
     packs: BTreeMap<Uuid, LoadedPackTexture>,
@@ -288,7 +287,6 @@ impl PackageUIManager {
             tasks: PackTasks::new(),
             default_marker_texture: None,
             default_trail_texture: None,
-            import_status: Default::default(),
 
             all_files_tribool: Tribool::True,
             all_files_toggle: false,
@@ -403,26 +401,18 @@ impl PackageUIManager {
             });
     }
 
-    fn pack_importer(import_status: Arc<Mutex<ImportStatus>>) {
+    fn pack_importer(
+        import_status: Arc<Mutex<ImportStatus>>,
+    ) {
         //called when a new pack is imported
-        rayon::spawn(move || {
+        rayon::spawn( move || {
             *import_status.lock().unwrap() = ImportStatus::WaitingForFileChooser;
 
             if let Some(file_path) = rfd::FileDialog::new()
                 .add_filter("taco", &["zip", "taco"])
                 .pick_file()
             {
-                *import_status.lock().unwrap() = ImportStatus::LoadingPack(file_path.clone());
-
-                let result = import_pack_from_zip_file_path(file_path);
-                match result {
-                    Ok((name, pack)) => {
-                        *import_status.lock().unwrap() = ImportStatus::PackDone(name, pack, false);
-                    }
-                    Err(e) => {
-                        *import_status.lock().unwrap() = ImportStatus::PackError(e);
-                    }
-                }
+                *import_status.lock().unwrap() = ImportStatus::LoadingPack(file_path);
             } else {
                 *import_status.lock().unwrap() =
                     ImportStatus::PackError(miette::miette!("file chooser was cancelled"));
@@ -574,8 +564,9 @@ impl PackageUIManager {
     }
     fn gui_package_loader(
         &mut self, 
-        event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context, 
+        import_status: &Arc<Mutex<ImportStatus>>,
         open: &mut bool
     ) {
         Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
@@ -587,58 +578,58 @@ impl PackageUIManager {
                         if ui.button("delete").clicked() {
                             to_delete.push(pack.uuid);
                         }
+                        if ui.button("Details").clicked() {
+                            //TODO
+                        }
+                        ui.end_row();
                     }
                     if !to_delete.is_empty() {
-                        event_sender.send(UIToBackMessage::DeletePacks(to_delete));
+                        u2b_sender.send(UIToBackMessage::DeletePacks(to_delete));
                     }
                 });
             });
 
-            if self.import_status.is_some() {
-                if ui.button("clear").on_hover_text(
-                    "This will cancel any pack import in progress. If import is already finished, then it wil simply clear the import status").clicked() {
-                    self.import_status = None;
-                }
-            } else if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
-                //TODO: send message to background thread, UIToBackMessage::ImportPack instead of a rayon thread ?
-                let import_status = Arc::new(Mutex::default());
-                self.import_status = Some(import_status.clone());
-                Self::pack_importer(import_status);
-            }
-            if let Some(import_status) = self.import_status.as_ref() {
-                if let Ok(mut status) = import_status.lock() {
-                    match &mut *status {
-                        ImportStatus::UnInitialized => {
-                            ui.label("import not started yet");
+            if let Ok(mut status) = import_status.lock() {
+                match &mut *status {
+                    ImportStatus::UnInitialized => {
+                        if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
+                            //TODO: send message to background thread, UIToBackMessage::ImportPack instead of a rayon thread ?
+                            //let import_status = import_status.lock().unwrap();
+                            Self::pack_importer(Arc::clone(import_status));
                         }
-                        ImportStatus::WaitingForFileChooser => {
-                            ui.label(
-                                "wailting for the file dialog. choose a taco/zip file to import",
-                            );
-                        }
-                        ImportStatus::LoadingPack(p) => {
-                            ui.label(format!("pack is being imported from {p:?}"));
-                        }
-                        ImportStatus::PackDone(name, pack, saved) => {
-
-                            if !*saved {
-                                ui.horizontal(|ui| {
-                                    ui.label("choose a pack name: ");    
-                                    ui.text_edit_singleline(name);
-                                });
-                                if ui.button("save").clicked() {
-                                    event_sender.send(UIToBackMessage::SavePack(name.clone(), pack.clone()));
-                                }
-                            } else {
-                                ui.colored_label(egui::Color32::GREEN, "pack is saved. press click `clear` button to remove this message");
+                        ui.label("import not started yet");
+                    }
+                    ImportStatus::WaitingForFileChooser => {
+                        ui.label(
+                            "wailting for the file dialog. choose a taco/zip file to import",
+                        );
+                    }
+                    ImportStatus::LoadingPack(p) | ImportStatus::WaitingLoading(p) => {
+                        ui.label(format!("pack is being imported from {p:?}"));
+                    }
+                    ImportStatus::PackDone(name, pack, saved) => {
+                        if *saved {
+                            ui.colored_label(egui::Color32::GREEN, "pack is saved. press click `clear` button to remove this message");
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label("choose a pack name: ");    
+                                ui.text_edit_singleline(name);
+                            });
+                            if ui.button("save").clicked() {
+                                u2b_sender.send(UIToBackMessage::SavePack(name.clone(), pack.clone()));
                             }
                         }
-                        ImportStatus::PackError(e) => {
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                format!("failed to import pack due to error: {e:#?}"),
-                            );
+                    }
+                    ImportStatus::PackError(e) => {
+                        let error_msg = format!("failed to import pack due to error: {e:#?}");
+                        if ui.button("clear").on_hover_text(
+                            "This will cancel any pack import in progress. If import is already finished, then it wil simply clear the import status").clicked() {
+                                *status = ImportStatus::UnInitialized;
                         }
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            error_msg,
+                        );
                     }
                 }
             }
@@ -648,15 +639,16 @@ impl PackageUIManager {
     }
     pub fn gui(
         &mut self, 
-        event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context, 
         is_marker_open: &mut bool, 
+        import_status: &Arc<Mutex<ImportStatus>>,
         is_file_open: &mut bool, 
         timestamp: f64,
         link: Option<&MumbleLink>
     ) {
-        self.gui_package_loader(event_sender, etx, is_marker_open);
-        self.gui_file_manager(event_sender, etx, is_file_open, link);
+        self.gui_package_loader(u2b_sender, etx, import_status, is_marker_open);
+        self.gui_file_manager(u2b_sender, etx, is_file_open, link);
     }
 
     pub fn save(&mut self, mut texture_pack: LoadedPackTexture) {

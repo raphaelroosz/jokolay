@@ -12,7 +12,7 @@ use tracing::{debug, error, info, info_span};
 use uuid::Uuid;
 
 use crate::{
-    io::{load_pack_core_from_dir, save_pack_data_to_dir, save_pack_texture_to_dir}, manager::pack::{category_selection::SelectedCategoryManager, file_selection::SelectedFileManager}, message::{UIToBackMessage, UIToUIMessage}, pack::{Category, CommonAttributes, MapData, PackCore, TBin}
+    io::{load_pack_core_from_dir, save_pack_data_to_dir, save_pack_texture_to_dir,}, manager::pack::{category_selection::SelectedCategoryManager, file_selection::SelectedFileManager}, message::{UIToBackMessage, UIToUIMessage}, pack::{Category, CommonAttributes, MapData, PackCore, TBin}
 };
 use jokolink::MumbleLink;
 use joko_core::{

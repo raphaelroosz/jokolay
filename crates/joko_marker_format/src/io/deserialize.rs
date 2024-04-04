@@ -445,112 +445,116 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
                 .get_attribute(names.category)
                 .unwrap_or_default()
                 .to_lowercase();
-            if full_category_name.is_empty() {
-                panic!("full_category_name is empty {:?} {:?}", map_xml_str, child_element);
-            }
+            
             let span_guard = info_span!("category", full_category_name).entered();
-
-            let raw_uid = child_element.get_attribute(names.guid);
-            if raw_uid.is_none() {
-                info!("This POI is either invalid or inside a Route {:?}", child_element);
-                span_guard.exit();
-                continue;
-            }
+            
             let source_file_name = child_element.get_attribute(names._source_file_name).unwrap_or_default().to_string();
             target.source_files.insert(source_file_name.clone(), true);
 
-            //FIXME: this needs to be changed for partial load
-            let category_uuid = target.get_category_uuid(&full_category_name).unwrap().clone();//categories MUST exist, they have already been parsed
-            let guid = raw_uid.and_then(|guid| {
-                    let mut buffer = [0u8; 20];
-                    BASE64_ENGINE
-                        .decode_slice(guid, &mut buffer)
-                        .ok()
-                        .and_then(|_| Uuid::from_slice(&buffer[..16]).ok())
-                })
-                .ok_or_else(|| miette::miette!("invalid guid {:?}", raw_uid))?;
-            
-
             if child_element.name() == names.route {
                 debug!("Found a route in core pack {:?}", child_element);
-                let route = parse_route(&names, &tree, &poi_node, child_element, &full_category_name, &category_uuid, source_file_name.clone());
-                if let Some(route) = route {
-                    target.register_route(full_category_name, route);
+                let route = parse_route(&names, &tree, &poi_node, child_element, &full_category_name, source_file_name.clone());
+                if let Some(mut route) = route {
+                    //TODO: make sure there is no "very late" discovery
+                    //let category_uuid = target.get_or_create_category_uuid(&route.category);
+                    //route.parent = category_uuid;
+                    target.register_route(route)?;
                 } else {
                     info!("Could not parse route {:?}", child_element);
                 }
-            }
-            else if child_element.name() == names.poi {
-                debug!("Found a POI in core pack {:?}", child_element);
-                if child_element
-                    .get_attribute(names.map_id)
-                    .and_then(|map_id| map_id.parse::<u32>().ok())
-                    .ok_or_else(|| miette::miette!("invalid mapid"))?
-                    != map_id
-                {
-                    bail!("mapid doesn't match the file name");
+            } else {
+                if full_category_name.is_empty() {
+                    panic!("full_category_name is empty {:?} {:?}", map_xml_str, child_element);
                 }
-                let xpos = child_element
-                    .get_attribute(names.xpos)
-                    .unwrap_or_default()
-                    .parse::<f32>()
-                    .into_diagnostic()?;
-                let ypos = child_element
-                    .get_attribute(names.ypos)
-                    .unwrap_or_default()
-                    .parse::<f32>()
-                    .into_diagnostic()?;
-                let zpos = child_element
-                    .get_attribute(names.zpos)
-                    .unwrap_or_default()
-                    .parse::<f32>()
-                    .into_diagnostic()?;
-                let mut ca = CommonAttributes::default();
-                ca.update_common_attributes_from_element(child_element, &names);
-
-                target.register_uuid(&full_category_name, &guid);
-                let marker = Marker {
-                    position: [xpos, ypos, zpos].into(),
-                    map_id,
-                    category: full_category_name,
-                    parent: category_uuid.clone(),
-                    attrs: ca,
-                    guid,
-                    source_file_name
-                };
-
-                if !target.maps.contains_key(&map_id) {
-                    target.maps.insert(map_id, MapData::default());
+                let raw_uid = child_element.get_attribute(names.guid);
+                if raw_uid.is_none() {
+                    info!("This POI is either invalid or inside a Route {:?}", child_element);
+                    span_guard.exit();
+                    continue;
                 }
-                target.maps.get_mut(&map_id).unwrap().markers.insert(marker.guid, marker);
-            } else if child_element.name() == names.trail {
-                debug!("Found a trail in core pack {:?}", child_element);
-                if child_element
-                    .get_attribute(names.map_id)
-                    .and_then(|map_id| map_id.parse::<u32>().ok())
-                    .ok_or_else(|| miette::miette!("invalid mapid"))?
-                    != map_id
-                {
-                    bail!("mapid doesn't match the file name");
-                }
-                let mut ca = CommonAttributes::default();
-                ca.update_common_attributes_from_element(child_element, &names);
-
-                target.register_uuid(&full_category_name, &guid);
-                let trail = Trail {
-                    category: full_category_name,
-                    parent: category_uuid.clone(),
-                    map_id,
-                    props: ca,
-                    guid,
-                    dynamic: false,
-                    source_file_name
-                };
+                //FIXME: this needs to be changed for partial load
+                let category_uuid = target.get_category_uuid(&full_category_name).unwrap().clone();//categories MUST exist, they have already been parsed
+                let guid = raw_uid.and_then(|guid| {
+                        let mut buffer = [0u8; 20];
+                        BASE64_ENGINE
+                            .decode_slice(guid, &mut buffer)
+                            .ok()
+                            .and_then(|_| Uuid::from_slice(&buffer[..16]).ok())
+                    })
+                    .ok_or_else(|| miette::miette!("invalid guid {:?}", raw_uid))?;
                 
-                if !target.maps.contains_key(&map_id) {
-                    target.maps.insert(map_id, MapData::default());
+                if child_element.name() == names.poi {
+                    debug!("Found a POI in core pack {:?}", child_element);
+                    if child_element
+                        .get_attribute(names.map_id)
+                        .and_then(|map_id| map_id.parse::<u32>().ok())
+                        .ok_or_else(|| miette::miette!("invalid mapid"))?
+                        != map_id
+                    {
+                        bail!("mapid doesn't match the file name");
+                    }
+                    let xpos = child_element
+                        .get_attribute(names.xpos)
+                        .unwrap_or_default()
+                        .parse::<f32>()
+                        .into_diagnostic()?;
+                    let ypos = child_element
+                        .get_attribute(names.ypos)
+                        .unwrap_or_default()
+                        .parse::<f32>()
+                        .into_diagnostic()?;
+                    let zpos = child_element
+                        .get_attribute(names.zpos)
+                        .unwrap_or_default()
+                        .parse::<f32>()
+                        .into_diagnostic()?;
+                    let mut ca = CommonAttributes::default();
+                    ca.update_common_attributes_from_element(child_element, &names);
+
+                    target.register_uuid(&full_category_name, &guid);
+                    let marker = Marker {
+                        position: [xpos, ypos, zpos].into(),
+                        map_id,
+                        category: full_category_name,
+                        parent: category_uuid.clone(),
+                        attrs: ca,
+                        guid,
+                        source_file_name
+                    };
+
+                    if !target.maps.contains_key(&map_id) {
+                        target.maps.insert(map_id, MapData::default());
+                    }
+                    target.maps.get_mut(&map_id).unwrap().markers.insert(marker.guid, marker);
+                } else if child_element.name() == names.trail {
+                    debug!("Found a trail in core pack {:?}", child_element);
+                    if child_element
+                        .get_attribute(names.map_id)
+                        .and_then(|map_id| map_id.parse::<u32>().ok())
+                        .ok_or_else(|| miette::miette!("invalid mapid"))?
+                        != map_id
+                    {
+                        bail!("mapid doesn't match the file name");
+                    }
+                    let mut ca = CommonAttributes::default();
+                    ca.update_common_attributes_from_element(child_element, &names);
+
+                    target.register_uuid(&full_category_name, &guid);
+                    let trail = Trail {
+                        category: full_category_name,
+                        parent: category_uuid.clone(),
+                        map_id,
+                        props: ca,
+                        guid,
+                        dynamic: false,
+                        source_file_name
+                    };
+                    
+                    if !target.maps.contains_key(&map_id) {
+                        target.maps.insert(map_id, MapData::default());
+                    }
+                    target.maps.get_mut(&map_id).unwrap().trails.insert(trail.guid, trail);
                 }
-                target.maps.get_mut(&map_id).unwrap().trails.insert(trail.guid, trail);
             }
             span_guard.exit();
         }
@@ -836,18 +840,28 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
         };
 
         for child_node in tree.children(pois) {
-            let child = match tree.element(child_node) {
+            let child_element = match tree.element(child_node) {
                 Some(ele) => ele,
                 None => continue,
             };
-            let full_category_name = child
+            let mut full_category_name = child_element
                 .get_attribute(names.category)
                 .unwrap_or_default()
                 .to_lowercase();
             if full_category_name.is_empty() {
-                //ignore it silently since it might be a Route
-                //info!("full_category_name is empty {:?}", child);
-                continue;
+                if child_element.name() == names.route {
+                    // If route, take the first element inside
+                    if let Some(category) = parse_route_category(&names, &tree, &child_node, child_element) {
+                        if category.is_empty() {
+                            continue;
+                        }
+                        full_category_name = category;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
             }
             if !pack.category_exists(&full_category_name) && ! first_pass_categories.contains_key(&full_category_name) {
                 let category_uuid = Uuid::new_v4();
@@ -929,37 +943,41 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
                 .get_attribute(names.category)
                 .unwrap_or_default()
                 .to_lowercase();
-            if full_category_name.is_empty() {
-                info!("full_category_name is empty {:?}", child_element);
-                continue;
-            }
-            if ! pack.category_exists(&full_category_name) {
-                panic!("Missing category {}, previous pass should have taken care of this", full_category_name);
-            }
-            let category_uuid = pack.get_or_create_category_uuid(&full_category_name);
 
             debug!("import element: {:?}", child_element);
-            if child_element.name() == names.poi {
-                if let Some(marker) = parse_marker(&mut pack, &names, child_element, &full_category_name, &category_uuid, source_file_name.clone()) {
-                    pack.register_marker(full_category_name, marker)?;
-                } else {
-                    debug!("Could not parse POI");
-                }
-            } else if child_element.name() == names.trail {
-                if let Some(trail) = parse_trail(&mut pack, &names, child_element, &full_category_name, &category_uuid, source_file_name.clone()) {
-                    pack.register_trail(full_category_name, trail)?;
-                } else {
-                    debug!("Could not parse Trail");
-                }
-            } else if child_element.name() == names.route {
-                let route = parse_route(&names, &tree, &child_node, child_element, &full_category_name, &category_uuid, source_file_name.clone());
-                if let Some(route) = route {
-                    pack.register_route(full_category_name, route)?;
+            if child_element.name() == names.route {
+                let route = parse_route(&names, &tree, &child_node, child_element, &full_category_name, source_file_name.clone());
+                if let Some(mut route) = route {
+                    //one must not create category anymore
+                    route.parent = pack.get_category_uuid(&route.category).unwrap().clone();
+                    pack.register_route(route)?;
                 } else {
                     info!("Could not parse route {:?}", child_element);
                 }
             } else {
-                info!("unknown element: {:?}", child_element);
+                if full_category_name.is_empty() {
+                    info!("full_category_name is empty {:?}", child_element);
+                    continue;
+                }
+                if ! pack.category_exists(&full_category_name) {
+                    panic!("Missing category {}, previous pass should have taken care of this", full_category_name);
+                }
+                let category_uuid = pack.get_or_create_category_uuid(&full_category_name);
+                if child_element.name() == names.poi {
+                    if let Some(marker) = parse_marker(&mut pack, &names, child_element, &full_category_name, &category_uuid, source_file_name.clone()) {
+                        pack.register_marker(full_category_name, marker)?;
+                    } else {
+                        debug!("Could not parse POI");
+                    }
+                } else if child_element.name() == names.trail {
+                    if let Some(trail) = parse_trail(&mut pack, &names, child_element, &full_category_name, &category_uuid, source_file_name.clone()) {
+                        pack.register_trail(full_category_name, trail)?;
+                    } else {
+                        debug!("Could not parse Trail");
+                    }
+                } else {
+                    info!("unknown element: {:?}", child_element);
+                }
             }
         }
 
@@ -970,7 +988,8 @@ pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
     Ok(pack)
 }
 
-fn parse_guid(names: &XotAttributeNameIDs, child: &Element) -> Uuid{
+
+fn parse_optional_guid(names: &XotAttributeNameIDs, child: &Element) -> Option<Uuid> {
     child
     .get_attribute(names.guid)
     .and_then(|guid| {
@@ -984,7 +1003,9 @@ fn parse_guid(names: &XotAttributeNameIDs, child: &Element) -> Uuid{
                 None
             })
     })
-    .unwrap_or_else(Uuid::new_v4)
+}
+fn parse_guid(names: &XotAttributeNameIDs, child: &Element) -> Uuid{
+    parse_optional_guid(names, child).unwrap_or_else(Uuid::new_v4)
 }
 
 fn parse_marker(pack: &mut PackCore, names: &XotAttributeNameIDs, poi_element: &Element, category_name: &String, category_uuid: &Uuid, source_file_name: String) -> Option<Marker> {
@@ -1050,13 +1071,34 @@ fn parse_position(names: &XotAttributeNameIDs, poi_element: &Element) -> Vec3 {
     Vec3{x, y, z}
 }
 
+
+fn parse_route_category(
+    names: &XotAttributeNameIDs,
+    tree: &Xot, 
+    route_node: &Node, 
+    route_element: &Element, 
+) -> Option<String> {
+    for child_node in tree.children(*route_node) {
+        let child = match tree.element(child_node) {
+            Some(ele) => ele,
+            None => continue,
+        };
+        if child.name() == names.poi {
+            if let Some(cat) = child.get_attribute(names.category) {
+                return Some(cat.to_string());
+            }
+        }
+    }
+    info!("Could not find a category for route element: {route_element:?}");
+    None
+}
+
 fn parse_route(
     names: &XotAttributeNameIDs,
     tree: &Xot, 
     route_node: &Node, 
     route_element: &Element, 
     category_name: &String, 
-    category_uuid: &Uuid, 
     source_file_name: String
 ) -> Option<Route> {
     
@@ -1085,6 +1127,7 @@ fn parse_route(
         return None;
     }
     let mut category: String = category_name.clone();
+    let mut category_uuid: Option<Uuid> = parse_optional_guid(names, route_element);
     let mut map_id: Option<u32> = route_element.get_attribute(names.map_id)
         .and_then(|map_id| map_id.parse::<u32>().ok());
     for child_node in tree.children(*route_node) {
@@ -1095,10 +1138,13 @@ fn parse_route(
         if child.name() == names.poi {
             let marker = parse_position(&names, child);
             path.push(marker);
-            if let Some(cat) = child.get_attribute(names.category) {
-                if category.is_empty() {
+            if category.is_empty() {
+                if let Some(cat) = child.get_attribute(names.category) {
                     category = cat.to_string();
                 }
+            }
+            if category_uuid.is_none() {
+                category_uuid = parse_optional_guid(names, &child)
             }
             if map_id.is_none() {
                 if let Some(node_map_id) = child
@@ -1118,11 +1164,15 @@ fn parse_route(
         info!("Could not find a map_id for route element: {route_element:?}");
         return None;
     }
+    if category_uuid.is_none() {
+        info!("Could not find a uuid for route element: {route_element:?}");
+        return None;
+    }
     debug!("found route with {:?} elements {route_element:?}", path.len());
 
     Some(Route {
         category,
-        parent: category_uuid.clone(), 
+        parent: category_uuid.unwrap(), 
         path,
         reset_position,
         reset_range: reset_range.unwrap_or(0.0),

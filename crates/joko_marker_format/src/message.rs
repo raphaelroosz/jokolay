@@ -1,4 +1,3 @@
-use std::hash::Hash;
 use std::sync::Arc;
 use std::collections::{BTreeMap, HashSet};
 
@@ -45,7 +44,8 @@ pub enum BackToUIMessage {
     CurrentlyUsedFiles(BTreeMap<String, bool>),//when there is a change in map or anything else, the list of files is sent to ui for display
     LoadedPack(LoadedPackTexture),//push a loaded pack to UI
     DeletedPacks(Vec<Uuid>),//push a deleted set of packs to UI
-    Loading,
+    ImportedPack(String, PackCore),
+    ImportFailure(miette::Report),
     MarkerTexture(Uuid, RelativePath, Uuid, Vec3, CommonAttributes),
     MumbleLink(Option<MumbleLink>),
     MumbleLinkChanged,//tell there is a need to resize
@@ -61,7 +61,7 @@ pub enum UIToBackMessage {
     CategoryActivationStatusChanged,//something happened that needs to reload the whole set
     CategorySetAll(bool),//signal all categories should be now at this status
     DeletePacks(Vec<Uuid>),//uuid of the pack to delete
-    ImportPack,
+    ImportPack(std::path::PathBuf),
     ReloadPack,
     SavePack(String, PackCore),
 }
