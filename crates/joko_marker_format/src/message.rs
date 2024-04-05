@@ -57,7 +57,8 @@ pub enum BackToUIMessage {
 
 pub enum UIToBackMessage {
     ActiveFiles(BTreeMap<String, bool>),//when there is a change of files activated, send whole list to data for save.
-    CategoryActivationStatusChange(Uuid, bool),//sent each time there is a category whose activation status has been changed. With uuid being the reference of the category and bool the status.
+    CategoryActivationElementStatusChange(Uuid, bool),//sent each time there is a category whose activation status has been changed. With uuid being the reference of the category and bool the status.
+    CategoryActivationBranchStatusChange(Uuid, bool),//same, for a whole branch
     CategoryActivationStatusChanged,//something happened that needs to reload the whole set
     CategorySetAll(bool),//signal all categories should be now at this status
     DeletePacks(Vec<Uuid>),//uuid of the pack to delete

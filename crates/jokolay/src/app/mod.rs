@@ -167,9 +167,13 @@ impl Jokolay {
                 tracing::trace!("Handling of UIToBackMessage::ActiveFiles");
                 package_manager.set_currently_used_files(currently_used_files);
             }
-            UIToBackMessage::CategoryActivationStatusChange(category_uuid, status) => {
-                tracing::trace!("Handling of UIToBackMessage::CategoryActivationStatusChange");
+            UIToBackMessage::CategoryActivationElementStatusChange(category_uuid, status) => {
+                tracing::trace!("Handling of UIToBackMessage::CategoryActivationElementStatusChange");
                 package_manager.category_set(category_uuid, status);
+            }
+            UIToBackMessage::CategoryActivationBranchStatusChange(category_uuid, status) => {
+                tracing::trace!("Handling of UIToBackMessage::CategoryActivationBranchStatusChange");
+                package_manager.category_branch_set(category_uuid, status);
             }
             UIToBackMessage::CategoryActivationStatusChanged => {
                 tracing::trace!("Handling of UIToBackMessage::CategoryActivationStatusChanged");

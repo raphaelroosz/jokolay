@@ -108,6 +108,14 @@ impl PackageDataManager {
         }
     }
 
+    pub fn category_branch_set(&mut self, uuid: Uuid, status: bool) {
+        for pack in self.packs.values_mut() {
+            if pack.category_branch_set(uuid, status) {
+                break;
+            }
+        }
+    }
+
     pub fn category_set_all(&mut self, status: bool) {
         for pack in self.packs.values_mut() {
             pack.category_set_all(status);

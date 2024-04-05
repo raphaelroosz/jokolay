@@ -89,6 +89,21 @@ impl CategorySelection {
             }
         }
     }
+    pub fn get(selection: &mut OrderedHashMap<String, CategorySelection>, uuid: Uuid) -> Option<&mut CategorySelection> {
+        if selection.is_empty() {
+            return None;
+        } else {
+            for cat in selection.values_mut() {
+                if cat.uuid == uuid {
+                    return Some(cat);
+                }
+                if let Some(res) = Self::get(&mut cat.children, uuid) {
+                    return Some(res);
+                }
+            }    
+            return None;
+        }
+    }
     pub fn recursive_populate_guids(
         selection: &mut OrderedHashMap<String, CategorySelection>,
         entities_parents: &mut HashMap<Uuid, Uuid>,
@@ -176,6 +191,25 @@ impl CategorySelection {
         return is_active;
     }
 
+    fn context_menu(
+        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        cs: &mut CategorySelection, 
+        ui: &mut egui::Ui
+    ) {
+        if ui.button("Activate branch").clicked() {
+            cs.is_selected = true;
+            CategorySelection::recursive_set_all(&mut cs.children, true);
+            u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, true));
+            ui.close_menu();
+        }
+        if ui.button("Deactivate branch").clicked() {
+            CategorySelection::recursive_set_all(&mut cs.children, false);
+            cs.is_selected = false;
+            u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, false));
+            ui.close_menu();
+        }
+    }
+
     pub fn recursive_selection_ui(
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
@@ -199,7 +233,7 @@ impl CategorySelection {
                     } else {
                         let cb = ui.checkbox(&mut cat.is_selected, "");
                         if cb.changed() {
-                            u2b_sender.send(UIToBackMessage::CategoryActivationStatusChange(cat.uuid, cat.is_selected));
+                            u2b_sender.send(UIToBackMessage::CategoryActivationElementStatusChange(cat.uuid, cat.is_selected));
                             *is_dirty = true;
                         }
                     }
@@ -225,7 +259,7 @@ impl CategorySelection {
                                 show_only_active, 
                                 late_discovery_categories
                             );
-                        });
+                        }).response.context_menu(|ui| Self::context_menu(u2b_sender, cat, ui));
                     }
                 });
             }

@@ -284,6 +284,16 @@ impl LoadedPackData {
             false
         }
     }
+    pub fn category_branch_set(&mut self, uuid: Uuid, status: bool) -> bool {
+        if let Some(cs) = CategorySelection::get(&mut self.selectable_categories, uuid) {
+            cs.is_selected = status;
+            self._is_dirty = true;
+            if CategorySelection::recursive_set(&mut cs.children, uuid, status) {
+                return true;
+            }
+        }
+        false
+    }
     pub fn category_set_all(&mut self, status: bool) {
         CategorySelection::recursive_set_all(&mut self.selectable_categories, status);
         self._is_dirty = true;
