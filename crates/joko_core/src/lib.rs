@@ -1,9 +1,7 @@
 use std::str::FromStr;
 
 use smol_str::SmolStr;
-use uuid::Uuid;
 
-pub mod manager;
 /*
 each manager must have
 1. a main thread struct
@@ -14,10 +12,6 @@ each manager must have
 */
 
 pub mod task;
-
-
-use glam::{Vec2, Vec3};
-use jokolink::MumbleLink;
 
 
 /// This newtype is used to represents relative paths in marker packs

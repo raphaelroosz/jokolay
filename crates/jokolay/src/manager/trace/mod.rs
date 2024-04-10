@@ -11,24 +11,46 @@ pub struct JokolayTracingLayer;
 static JKL_TRACING_DATA: OnceLock<Mutex<GlobalTracingData>> = OnceLock::new();
 
 impl JokolayTracingLayer {
-    pub fn install_tracing(
-        jokolay_dir: &Dir,
+    pub fn install_tracing<'l> (
+        jokolay_dir: &'l Dir,
     ) -> Result<tracing_appender::non_blocking::WorkerGuard> {
         use tracing_subscriber::prelude::*;
         use tracing_subscriber::{fmt, EnvFilter};
+
+        std::panic::set_hook(Box::new(|info: &std::panic::PanicInfo| {
+            use std::fs::File;
+            use std::io::Write;
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            let output = 
+            if let Some(string) = info.payload().downcast_ref::<String>() {
+                format!("{string}")
+            } else if let Some(str) = info.payload().downcast_ref::<&'static str>() {
+                format!("{str}")
+            } else {
+                format!("{info:?}")
+            };
+            eprintln!("{output}");
+            eprintln!("Backtrace: {backtrace:}");
+            let mut w = File::create("jokolay.errror").unwrap();
+            writeln!(&mut w, "{output}").unwrap();
+            writeln!(&mut w, "Backtrace: {backtrace:}").unwrap();
+        }));
+
+        
         // get the log level
         let filter_layer = EnvFilter::try_from_env("JOKOLAY_LOG")
             .or_else(|_| EnvFilter::try_new("info,wgpu=warn,naga=warn"))
             .into_diagnostic()
             .wrap_err("failed to parse log filter levels from env")?;
         // create log file in the data dir. This will also serve as a check that the directory is "writeable" by us
-        let writer = std::io::BufWriter::new(
+        let log_writer = std::io::BufWriter::new(
             jokolay_dir
                 .create("jokolay.log")
                 .into_diagnostic()
                 .wrap_err("failed to create jokolay.log file")?,
         );
-        let (nb, guard) = tracing_appender::non_blocking(writer);
+
+        let (nb, guard) = tracing_appender::non_blocking(log_writer);
         let fmt_layer = fmt::layer()
             .with_ansi(false)
             .with_target(false)

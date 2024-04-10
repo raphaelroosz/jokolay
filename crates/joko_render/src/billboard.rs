@@ -1,11 +1,12 @@
-use std::sync::Arc;
-
 use egui::ahash::HashMap;
 use egui_render_three_d::{
     three_d::{context::*, Context, HasContext},
     GpuTexture,
 };
-use joko_marker_format::message::{MarkerVertex, MarkerObject, TrailObject};
+use joko_render_models::{
+    marker::{MarkerVertex, MarkerObject}, 
+    trail::TrailObject
+};
 use tracing::{error, info, trace, warn};
 
 use crate::gl_error;

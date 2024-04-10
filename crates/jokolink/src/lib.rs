@@ -12,7 +12,7 @@ mod mumble;
 use egui::DragValue;
 use enumflags2::BitFlags;
 use glam::IVec2;
-use jokoapi::end_point::mounts::Mount;
+//use jokoapi::end_point::{mounts::Mount, races::Race};
 use miette::{IntoDiagnostic, Result, WrapErr};
 pub use mumble::*;
 use serde_json::from_str;
@@ -56,6 +56,7 @@ impl MumbleManager {
     pub fn is_alive(&self) -> bool {
         self.backend.is_alive()
     }
+
     pub fn tick(&mut self) -> Result<Option<&MumbleLink>> {
         if let Err(e) = self.backend.tick() {
             error!(?e, "mumble backend tick error");
@@ -70,9 +71,11 @@ impl MumbleManager {
         }
         // backend is alive and tick is successful. time to get link
         let cml: ctypes::CMumbleLink = self.backend.get_cmumble_link();
-        if cml.ui_tick == 0 && self.link.ui_tick != 0 {
-            self.link = Default::default();
-        }
+        let mut new_link = if cml.ui_tick == 0 && self.link.ui_tick != 0 {
+            Default::default()
+        } else {
+            self.link.clone()
+        };
 
         if cml.ui_tick == 0 || cml.context.client_pos_size == [0; 4] {
             return Ok(None);
@@ -98,31 +101,15 @@ impl MumbleManager {
         } else {
             std::net::Ipv4Addr::UNSPECIFIED.into()
         };
-        if self.link.ui_tick != cml.ui_tick {
+        if new_link.ui_tick != cml.ui_tick {
             changes.insert(MumbleChanges::UiTick);
         }
-        if self.link.name != identity.name {
+        if new_link.name != identity.name {
             changes.insert(MumbleChanges::Character);
         }
-        if self.link.map_id != cml.context.map_id {
+        if new_link.map_id != cml.context.map_id {
             changes.insert(MumbleChanges::Map);
         }
-        // let window_pos = IVec2::new(
-        //     cml.context.window_pos_size[0],
-        //     cml.context.window_pos_size[1],
-        // );
-        // let window_size = IVec2::new(
-        //     cml.context.window_pos_size[2],
-        //     cml.context.window_pos_size[3],
-        // );
-        // let window_pos_without_borders = IVec2::new(
-        //     cml.context.window_pos_size_without_borders[0],
-        //     cml.context.window_pos_size_without_borders[1],
-        // );
-        // let window_size_without_borders = IVec2::new(
-        //     cml.context.window_pos_size_without_borders[2],
-        //     cml.context.window_pos_size_without_borders[3],
-        // );
         let client_pos = IVec2::new(
             cml.context.client_pos_size[0],
             cml.context.client_pos_size[1],
@@ -132,23 +119,24 @@ impl MumbleManager {
             cml.context.client_pos_size[3],
         );
 
-        if self.link.client_pos != client_pos {
+        if new_link.client_pos != client_pos {
             changes.insert(MumbleChanges::WindowPosition);
         }
-        if self.link.client_size != client_size {
+        if new_link.client_size != client_size {
             changes.insert(MumbleChanges::WindowSize);
         }
         let cam_pos = cml.f_camera_position.into();
-        if self.link.cam_pos != cam_pos {
+        if new_link.cam_pos != cam_pos {
             changes.insert(MumbleChanges::Camera);
         }
 
         let player_pos = cml.f_avatar_position.into();
-        if self.link.player_pos != player_pos {
+        if new_link.player_pos != player_pos {
             changes.insert(MumbleChanges::Position);
         }
+        //let player_race = Self::get_race(identity.race);
 
-        self.link = MumbleLink {
+        new_link = MumbleLink {
             ui_tick: cml.ui_tick,
             player_pos,
             f_avatar_front: cml.f_avatar_front.into(),
@@ -172,7 +160,7 @@ impl MumbleManager {
             shard_id: cml.context.shard_id,
             instance: cml.context.instance,
             build_id: cml.context.build_id,
-            ui_state: cml.context.ui_state,
+            ui_state: cml.context.get_ui_state(),
             compass_width: cml.context.compass_width,
             compass_height: cml.context.compass_height,
             compass_rotation: cml.context.compass_rotation,
@@ -182,9 +170,11 @@ impl MumbleManager {
             map_center_y: cml.context.map_center_y,
             map_scale: cml.context.map_scale,
             process_id: cml.context.process_id,
-            mount: Mount::try_from_mumble_link(cml.context.mount_index),
+            mount: cml.context.mount_index,
+            race: identity.race,
         };
-        //self.link = link.clone();
+        self.link = new_link;
+
         Ok(if self.link.ui_tick == 0 {
             None
         } else {
@@ -193,17 +183,23 @@ impl MumbleManager {
     }
 }
 
-pub fn mumble_gui(etx: &egui::Context, open: &mut bool, is_alive: bool, link: &mut MumbleLink) {
+pub fn mumble_gui(etx: &egui::Context, open: &mut bool, editable_mumble: &mut bool, link: &mut MumbleLink) {
     egui::Window::new("Mumble Manager")
         .open(open)
         .show(etx, |ui| {
-            if !is_alive {
+            if *editable_mumble {
+                if ui.button("back to live").clicked() {
+                    *editable_mumble = false;
+                }
                 ui.label(
                     egui::RichText::new("Mumble is not initialized, display dummy link instead.")
                     .color(egui::Color32::RED)
                 );
                 editable_mumble_ui(ui, link);
             } else {
+                if ui.button("go to edit mode").clicked() {
+                    *editable_mumble = true;
+                }
                 let link: MumbleLink = link.clone();
                 mumble_ui(ui, link);
             }
@@ -246,6 +242,21 @@ fn mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {
                 ui.add(DragValue::new(&mut link.f_camera_front.z));
             });
             ui.end_row();
+            ui.label("ui state");
+            if let Some(ui_state) = link.ui_state {
+                ui.label(ui_state.to_string());
+            } else {
+                ui.label("None");
+            }
+            
+            ui.end_row();
+            ui.label("compass");
+            ui.horizontal(|ui|{
+                ui.add(DragValue::new(&mut link.compass_height));
+                ui.add(DragValue::new(&mut link.compass_width));
+                ui.add(DragValue::new(&mut link.compass_rotation));
+            });
+            ui.end_row();
 
             ui.label("fov");
             ui.add(DragValue::new(&mut link.fov));
@@ -256,14 +267,26 @@ fn mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {
             ui.add(DragValue::new(&mut ratio));
             ui.end_row();
             ui.label("character");
-            ui.label(&link.name);
+            ui.horizontal(|ui|{
+                ui.label(&link.name);
+                ui.label(format!("{:?}", link.race));
+            });
             ui.end_row();
+
             ui.label("map id");
             ui.add(DragValue::new(&mut link.map_id));
             ui.end_row();
             ui.label("map type");
             ui.add(DragValue::new(&mut link.map_type));
             ui.end_row();
+            ui.label("world position");
+            ui.horizontal(|ui|{
+                ui.add(DragValue::new(&mut link.map_center_x));
+                ui.add(DragValue::new(&mut link.map_center_y));
+                ui.add(DragValue::new(&mut link.map_scale));
+            });
+            ui.end_row();
+
             ui.label("address");
             ui.label(format!("{}", link.server_address));
             ui.end_row();
@@ -332,6 +355,22 @@ fn editable_mumble_ui(ui: &mut egui::Ui, dummy_link: &mut MumbleLink) {
                 ui.add(DragValue::new(&mut dummy_link.f_camera_front.x));
                 ui.add(DragValue::new(&mut dummy_link.f_camera_front.y));
                 ui.add(DragValue::new(&mut dummy_link.f_camera_front.z));
+            });
+            ui.end_row();
+
+            ui.label("ui state");
+            if let Some(ui_state) = dummy_link.ui_state {
+                ui.label(ui_state.to_string());
+            } else {
+                ui.label("None");
+            }
+            
+            ui.end_row();
+            ui.label("compass");
+            ui.horizontal(|ui|{
+                ui.add(DragValue::new(&mut dummy_link.compass_height));
+                ui.add(DragValue::new(&mut dummy_link.compass_width));
+                ui.add(DragValue::new(&mut dummy_link.compass_rotation));
             });
             ui.end_row();
 

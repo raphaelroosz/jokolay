@@ -5,7 +5,6 @@ use std::net::IpAddr;
 
 use enumflags2::{bitflags, BitFlags};
 use glam::{IVec2, Vec3};
-use jokoapi::end_point::mounts::Mount;
 use num_derive::FromPrimitive;
 use num_derive::ToPrimitive;
 use serde::Deserialize;
@@ -38,7 +37,7 @@ pub struct MumbleLink {
     /// The rest of the data from here is what gw2 provides for the benefit of addons.
     /// This is the current UI state of the game. refer to [UIState]
     /// // Bitmask: Bit 1 = IsMapOpen, Bit 2 = IsCompassTopRight, Bit 3 = DoesCompassHaveRotationEnabled, Bit 4 = Game has focus, Bit 5 = Is in Competitive game mode, Bit 6 = Textbox has focus, Bit 7 = Is in Combat
-    pub ui_state: u32,
+    pub ui_state: Option<BitFlags<UIState>>,
     pub compass_width: u16,    // pixels
     pub compass_height: u16,   // pixels
     pub compass_rotation: f32, // radians
@@ -55,7 +54,10 @@ pub struct MumbleLink {
     pub process_id: u32,
     /// refers to [Mount]
     /// Identifies whether the character is currently mounted, if so, identifies the specific mount. does not match gw2 api
-    pub mount: Option<Mount>,
+    //pub mount: Option<Mount>,
+    //pub race: Race,
+    pub mount: u8,
+    pub race: u32,
 
     /// Vertical field-of-view
     pub fov: f32,
@@ -106,6 +108,7 @@ impl Default for MumbleLink {
             map_scale: Default::default(),
             process_id: Default::default(),
             mount: Default::default(),
+            race: u32::MAX,
             fov: 2.0,
             uisz: Default::default(),
             dpi: Default::default(),

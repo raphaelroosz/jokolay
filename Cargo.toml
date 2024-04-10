@@ -2,7 +2,8 @@
 [workspace]
 members = [
     "crates/joko_render",
-    "crates/joko_marker_format",
+    "crates/joko_render_models",
+    "crates/joko_package",
     "crates/jokolink",
     "crates/jokoapi",
     "crates/jokolay",
@@ -37,6 +38,11 @@ smol_str = { version = "*" }
 uuid = { version = "*" }
 itertools = { version = "*" }
 ordered_hash_map = { version = "*", features= ["serde"] }
+tracing-appender = { version = "*" }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "time",
+] } # for ErrorLayer
 
 
 #https://corrode.dev/blog/tips-for-faster-rust-compile-times/#use-cargo-check-instead-of-cargo-build

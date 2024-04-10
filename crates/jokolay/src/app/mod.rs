@@ -13,18 +13,19 @@ use uuid::Uuid;
 use init::get_jokolay_dir;
 use jmf::{message::{UIToBackMessage, UIToUIMessage}, PackageDataManager, PackageUIManager};
 //use jmf::FileManager;
-use joko_core::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
+use crate::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
 use jmf::message::BackToUIMessage;
-use joko_render::JokoRenderer;
+use joko_render::renderer::JokoRenderer;
 use jokolink::{MumbleChanges, MumbleLink, MumbleManager, mumble_gui};
 use miette::{Context, IntoDiagnostic, Result};
-use tracing::{error, info, info_span, span};
-use jmf::{LoadedPackData, LoadedPackTexture, load_all_from_dir, build_from_core};
+use tracing::{error, info, info_span};
+use jmf::{LoadedPackData, LoadedPackTexture, build_from_core};
 use jmf::{ImportStatus, import_pack_from_zip_file_path};
 
 #[derive(Clone)]
 struct JokolayUIState {
     link: Option<MumbleLink>,
+    editable_mumble: bool,
     window_changed: bool,
     list_of_textures_changed: bool,//Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
     nb_running_tasks_on_back: i32,// store the number of running tasks in background thread
@@ -34,6 +35,8 @@ struct JokolayUIState {
 
 struct JokolayBackState {
     choice_of_category_changed: bool,//Meant as an optimisation to only update when there is a change in UI
+    read_ui_link: bool,
+    copy_of_ui_link: Option<MumbleLink>,
 }
 struct JokolayApp {
     mumble_manager: MumbleManager,
@@ -121,7 +124,8 @@ impl Jokolay {
                 package_manager: package_data_manager,
             }))),
             state_ui: JokolayUIState {
-                link: None,
+                link: Some(MumbleLink::default()),
+                editable_mumble: false,
                 window_changed: true,
                 list_of_textures_changed: false,
                 nb_running_tasks_on_back: 0,
@@ -130,6 +134,8 @@ impl Jokolay {
             },
             state_back: JokolayBackState {
                 choice_of_category_changed: false,
+                read_ui_link: false,
+                copy_of_ui_link: Default::default(),
             }
         })
     }
@@ -212,6 +218,18 @@ impl Jokolay {
                 }
                 b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
             }
+            UIToBackMessage::MumbleLinkAutonomous => {
+                tracing::trace!("Handling of UIToBackMessage::MumbleLinkAutonomous");
+                local_state.read_ui_link = false;
+            }
+            UIToBackMessage::MumbleLinkBindedOnUI => {
+                tracing::trace!("Handling of UIToBackMessage::MumbleLinkBindedOnUI");
+                local_state.read_ui_link = true;
+            }
+            UIToBackMessage::MumbleLink(link) => {
+                tracing::trace!("Handling of UIToBackMessage::MumbleLink");
+                local_state.copy_of_ui_link = link;
+            }
             UIToBackMessage::ReloadPack => {
                 unimplemented!("Handling of UIToBackMessage::ReloadPack has not been implemented yet");
             }
@@ -265,29 +283,24 @@ impl Jokolay {
                 mumble_manager,
                 package_manager
             } = &mut app.deref_mut().as_mut();
-            //very first thing to do is to read the mumble link
-            let link = match mumble_manager.tick() {
-                Ok(ml) => {
-                    //let link_clone = ml.cloned();
-                    //b2u_sender.send(BackToUIMessage::MumbleLink(link_clone));
-                    if let Some(link) = ml {
-                        if link.changes.contains(MumbleChanges::WindowPosition)
-                            || link.changes.contains(MumbleChanges::WindowSize)
-                        {
-                            b2u_sender.send(BackToUIMessage::MumbleLinkChanged);
-                        }
-                    }
-                    ml
-                },
-                Err(e) => {
-                    error!(?e, "mumble manager tick error");
-                    None
-                }
-            };
+
             while let Ok(msg) = u2b_receiver.try_recv() {
                 Self::handle_u2b_message(package_manager, &mut local_state, &b2u_sender, msg);
                 nb_messages += 1;
             }
+            let link = if local_state.read_ui_link {
+                local_state.copy_of_ui_link.as_ref()
+            }else {
+                match mumble_manager.tick() {
+                    Ok(ml) => {
+                        ml
+                    },
+                    Err(e) => {
+                        error!(?e, "mumble manager tick error");
+                        None
+                    }
+                }
+            };
             tracing::trace!("choice_of_category_changed: {}", local_state.choice_of_category_changed);
             package_manager.tick(
                 &b2u_sender, 
@@ -372,14 +385,6 @@ impl Jokolay {
             BackToUIMessage::MarkerTexture(pack_uuid, tex_path, marker_uuid, position, common_attributes) => {
                 tracing::trace!("Handling of BackToUIMessage::MarkerTexture");
                 gui.package_manager.load_marker_texture(&gui.egui_context, pack_uuid, tex_path, marker_uuid, position, common_attributes);
-            }
-            BackToUIMessage::MumbleLink(link) => {
-                tracing::trace!("Handling of BackToUIMessage::MumbleLink");
-                local_state.link = link;
-            }
-            BackToUIMessage::MumbleLinkChanged => {
-                //too verbose to trace
-                local_state.window_changed = true;
             }
             BackToUIMessage::NbTasksRunning(nb_tasks) => {
                 tracing::trace!("Handling of BackToUIMessage::NbTasksRunning");
@@ -512,26 +517,36 @@ impl Jokolay {
             
             // do all the non-gui stuff first
             frame_stats.tick(latest_time);
-            let link = match mumble_manager.tick() {
-                Ok(ml) => {
-                    if let Some(link) = ml {
-                        if link.changes.contains(MumbleChanges::WindowPosition)
-                            || link.changes.contains(MumbleChanges::WindowSize)
-                        {
-                            local_state.window_changed = true;
+            if local_state.editable_mumble {
+                local_state.window_changed = true;
+                local_state.link.as_mut().unwrap().changes = enumflags2::BitFlags::all();
+                //TODO: at some point update the changes
+                u2b_sender.send(UIToBackMessage::MumbleLink(local_state.link.clone()));
+                u2b_sender.send(UIToBackMessage::MumbleLinkBindedOnUI);
+            } else {
+                u2b_sender.send(UIToBackMessage::MumbleLinkAutonomous);
+                let is_mumble_alive = mumble_manager.is_alive();
+                match mumble_manager.tick() {
+                    Ok(ml) => {
+                        if let Some(link) = ml {
+                            if link.changes.contains(MumbleChanges::WindowPosition)
+                                || link.changes.contains(MumbleChanges::WindowSize)
+                            {
+                                local_state.window_changed = true;
+                            }
+                            if is_mumble_alive {
+                                local_state.link = Some(link.clone());
+                            }
                         }
-                        local_state.link = Some(link.clone());
+                    },
+                    Err(e) => {
+                        error!(?e, "mumble manager tick error");
                     }
-                    ml
-                },
-                Err(e) => {
-                    error!(?e, "mumble manager tick error");
-                    None
                 }
-            };
+            }
             
             // check if we need to change window position or size.
-            if let Some(link) = link {
+            if let Some(link) = local_state.link.as_ref() {
                 if local_state.window_changed {
                     glfw_backend
                         .window
@@ -539,9 +554,11 @@ impl Jokolay {
                     // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
                     // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
                     // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
+                    let client_size_x = 1024.max(link.client_size.x);
+                    let client_size_y = 768.max(link.client_size.y);
                     glfw_backend
                         .window
-                        .set_size(link.client_size.x - 1, link.client_size.y - 1);
+                        .set_size(client_size_x - 1, client_size_y - 1);
                 }
                 if local_state.list_of_textures_changed || link.changes.contains(MumbleChanges::Position) || link.changes.contains(MumbleChanges::Map) {
                     package_manager.tick(
@@ -555,8 +572,8 @@ impl Jokolay {
                 local_state.window_changed = false;
             }
             
-            joko_renderer.tick(link);
-            menu_panel.tick(&etx, link);
+            joko_renderer.tick(local_state.link.as_ref());
+            menu_panel.tick(&etx, local_state.link.as_ref());
             
             // do the gui stuff now
             egui::Area::new("menu panel")
@@ -612,7 +629,8 @@ impl Jokolay {
             
             if let Some(link) = local_state.link.as_mut() {
                 //updates need to be sent to the background state
-                mumble_gui(&etx, &mut menu_panel.show_mumble_manager_window, true, link);
+                //TODO: editable link need to trigger a map reload
+                mumble_gui(&etx, &mut menu_panel.show_mumble_manager_window, &mut local_state.editable_mumble, link);
             };
             package_manager.gui(
                 &u2b_sender,
@@ -621,7 +639,7 @@ impl Jokolay {
                 &local_state.import_status,
                 &mut menu_panel.show_file_manager_window,
                 latest_time,
-                link
+                local_state.link.as_ref()
             );
             JokolayTracingLayer::gui(&etx, &mut menu_panel.show_tracing_window);
             theme_manager.gui(&etx, &mut menu_panel.show_theme_window);
@@ -649,6 +667,7 @@ impl Jokolay {
             glfw_backend
                 .window
                 .set_mouse_passthrough(!(etx.wants_keyboard_input() || etx.wants_pointer_input()));
+            //TODO: view when map is open
             joko_renderer.render_egui(
                 etx.tessellate(shapes, etx.pixels_per_point()),
                 textures_delta,
@@ -773,8 +792,8 @@ impl MenuPanel {
 
             let min_width = 1024.0 * gw2_scale;
             let min_height = 768.0 * gw2_scale;
-            let gw2_width = link.client_size.x as f32;
-            let gw2_height = link.client_size.y as f32;
+            let gw2_width = link.client_size.x.max(1024) as f32;
+            let gw2_height = link.client_size.y.max(768) as f32;
             let min_width_ratio = min_width.min(gw2_width) / min_width;
             let min_height_ratio = min_height.min(gw2_height) / min_height;
 

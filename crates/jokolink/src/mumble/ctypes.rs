@@ -1,5 +1,4 @@
 use enumflags2::BitFlags;
-use jokoapi::end_point::{mounts::Mount, races::Race};
 use miette::bail;
 use serde::{Deserialize, Serialize};
 
@@ -242,22 +241,6 @@ impl CMumbleContext {
         ]);
         Ok(ip)
     }
-
-    pub fn get_mount(&self) -> Option<Mount> {
-        Some(match self.mount_index {
-            1 => Mount::Jackal,
-            2 => Mount::Griffon,
-            3 => Mount::Springer,
-            4 => Mount::Skimmer,
-            5 => Mount::Raptor,
-            6 => Mount::RollerBeetle,
-            7 => Mount::Warclaw,
-            8 => Mount::Skyscale,
-            9 => Mount::Skiff,
-            10 => Mount::SiegeTurtle,
-            _ => return None,
-        })
-    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
@@ -296,16 +279,6 @@ impl CIdentity {
             1 => UISize::Normal,
             2 => UISize::Large,
             3 => UISize::Larger,
-            _ => return None,
-        })
-    }
-    pub fn get_race(&self) -> Option<Race> {
-        Some(match self.race {
-            0 => Race::ASURA,
-            1 => Race::CHARR,
-            2 => Race::HUMAN,
-            3 => Race::NORN,
-            4 => Race::SYLVARI,
             _ => return None,
         })
     }

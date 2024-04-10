@@ -28,7 +28,7 @@ where
         let (th_result_sender, result_receiver) = std::sync::mpsc::channel();
         let (nb_sender, nb_receiver) = std::sync::mpsc::channel();
         let nb = Arc::new(std::sync::atomic::AtomicI32::new(0));
-        let mut res = Arc::new(Mutex::new(Self {
+        let res = Arc::new(Mutex::new(Self {
             task_sender,
             result_receiver,
             thread_task: None,

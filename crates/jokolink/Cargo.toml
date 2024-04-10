@@ -12,9 +12,6 @@ crate-type = ["cdylib", "lib"]
 widestring = { version = "1", default-features = false, features = ["std"] }
 num-derive = { version = "0", default-features = false }
 num-traits = { version = "0", default-features = false }
-tracing-appender = { version = "0" }
-tracing-subscriber = { version = "*" }
-jokoapi = { path = "../jokoapi" }
 enumflags2 = { workspace = true }
 time = { workspace = true }
 miette = { workspace = true }
@@ -23,7 +20,6 @@ egui = { workspace = true }
 serde = { workspace = true }
 glam = { workspace = true }
 serde_json = { workspace = true }
-notify = { version = "*", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 x11rb = { version = "0.12", default-features = false, features = [] }

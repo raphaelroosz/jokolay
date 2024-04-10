@@ -13,9 +13,10 @@ path = "src/main.rs"
 wayland = ["egui_window_glfw_passthrough/wayland"]
 
 [dependencies]
-joko_core = { path = "../joko_core" }
+enumflags2 = { workspace = true }
+#joko_core = { path = "../joko_core" }
 joko_render = { path = "../joko_render" }
-jmf = { path = "../joko_marker_format", package = "joko_marker_format" }
+jmf = { path = "../joko_package", package = "joko_package" }
 jokolink = { path = "../jokolink" }
 egui_window_glfw_passthrough = { version = "0.8" }
 # we use this instead of cap-dirs because we want to debug/show the jokolay path to users
@@ -23,10 +24,23 @@ egui_window_glfw_passthrough = { version = "0.8" }
 cap-directories = { workspace = true }
 cap-std = { workspace = true }
 tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
 miette = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+ringbuffer = { workspace = true }
 
-egui = { workspace = true, features = ["serde"] }
 
 rayon = { workspace = true }
+serde = { workspace = true }
+rfd = { workspace = true }
+glam = { workspace = true }
+scopeguard = "1.2.0"
+smol_str = { workspace = true }
+
+egui = { workspace = true, features = ["serde"] }
+egui_extras = { workspace = true }
+
 uuid = { workspace = true }
 

@@ -1,7 +1,7 @@
 # Define all structures that can be sent through asynchronous messages
 
 [package]
-name = "joko_render"
+name = "joko_render_models"
 version = "0.2.1"
 edition = "2021"
 
@@ -10,12 +10,4 @@ edition = "2021"
 [dependencies]
 bytemuck = { workspace = true }
 glam = { workspace = true, features = ["bytemuck"] }
-tracing = { workspace = true }
-egui = { workspace = true }
-egui_render_three_d = { version = "*" }
-egui_window_glfw_passthrough = { version = "0.8" }
-
-
-jokolink = { path = "../jokolink" }
-joko_render_models = { path = "../joko_render_models" }
 
