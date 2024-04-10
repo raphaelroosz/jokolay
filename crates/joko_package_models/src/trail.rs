@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
-use super::CommonAttributes;
+use crate::attributes::CommonAttributes;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Trail {
+pub struct Trail {
     pub guid: Uuid,
     pub parent: Uuid,
     pub map_id: u32,
@@ -14,13 +14,13 @@ pub(crate) struct Trail {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TBin {
+pub struct TBin {
     pub map_id: u32,
     pub version: u32,
     pub nodes: Vec<glam::Vec3>,
 }
 #[derive(Debug, Clone)]
-pub(crate) struct TBinStatus {
+pub struct TBinStatus {
     pub tbin: TBin,
     pub iso_x: bool,
     pub iso_y: bool,

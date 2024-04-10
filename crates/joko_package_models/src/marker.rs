@@ -1,10 +1,10 @@
-use super::CommonAttributes;
+use crate::attributes::CommonAttributes;
 use glam::Vec3;
 use uuid::Uuid;
 
 
 #[derive(Debug, Clone)]
-pub(crate) struct Marker {
+pub struct Marker {
     pub guid: Uuid,
     pub parent: Uuid,
     pub position: Vec3,

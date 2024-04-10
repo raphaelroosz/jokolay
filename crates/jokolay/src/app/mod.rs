@@ -9,14 +9,17 @@ use cap_std::fs_utf8::Dir;
 use egui_window_glfw_passthrough::{glfw::Context as _, GlfwBackend, GlfwConfig};
 mod init;
 mod wm;
+mod mumble;
 use uuid::Uuid;
 use init::get_jokolay_dir;
 use jmf::{message::{UIToBackMessage, UIToUIMessage}, PackageDataManager, PackageUIManager};
 //use jmf::FileManager;
 use crate::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
+use crate::app::mumble::mumble_gui;
+
 use jmf::message::BackToUIMessage;
 use joko_render::renderer::JokoRenderer;
-use jokolink::{MumbleChanges, MumbleLink, MumbleManager, mumble_gui};
+use jokolink::{MumbleChanges, MumbleLink, MumbleManager};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{error, info, info_span};
 use jmf::{LoadedPackData, LoadedPackTexture, build_from_core};
@@ -64,9 +67,11 @@ pub struct Jokolay {
 
 impl Jokolay {
     pub fn new(jokolay_dir: Arc<Dir>) -> Result<Self> {
-        //We have two mumble_managers, one for UI, one for backend, each keeping its own copy
-        //this avoid transmition between threads to read same data from system
-        //TODO: if we want to be able to edit the link, one need to put a "form submission" logic.
+        /*
+            We have two mumble_managers, one for UI, one for backend, each keeping its own copy
+            this avoid transmition between threads to read same data from system
+            It happens anyway when the UI start the edit mode of the mumble link.
+        */
         let mumble_data_manager =
             MumbleManager::new("MumbleLink", None).wrap_err("failed to create mumble manager")?;
         let mumble_ui_manager =
@@ -172,6 +177,7 @@ impl Jokolay {
             UIToBackMessage::ActiveFiles(currently_used_files) => {
                 tracing::trace!("Handling of UIToBackMessage::ActiveFiles");
                 package_manager.set_currently_used_files(currently_used_files);
+                local_state.choice_of_category_changed = true;
             }
             UIToBackMessage::CategoryActivationElementStatusChange(category_uuid, status) => {
                 tracing::trace!("Handling of UIToBackMessage::CategoryActivationElementStatusChange");
@@ -520,11 +526,8 @@ impl Jokolay {
             if local_state.editable_mumble {
                 local_state.window_changed = true;
                 local_state.link.as_mut().unwrap().changes = enumflags2::BitFlags::all();
-                //TODO: at some point update the changes
                 u2b_sender.send(UIToBackMessage::MumbleLink(local_state.link.clone()));
-                u2b_sender.send(UIToBackMessage::MumbleLinkBindedOnUI);
             } else {
-                u2b_sender.send(UIToBackMessage::MumbleLinkAutonomous);
                 let is_mumble_alive = mumble_manager.is_alive();
                 match mumble_manager.tick() {
                     Ok(ml) => {
@@ -628,9 +631,7 @@ impl Jokolay {
             );
             
             if let Some(link) = local_state.link.as_mut() {
-                //updates need to be sent to the background state
-                //TODO: editable link need to trigger a map reload
-                mumble_gui(&etx, &mut menu_panel.show_mumble_manager_window, &mut local_state.editable_mumble, link);
+                mumble_gui(&u2b_sender, &etx, &mut menu_panel.show_mumble_manager_window, &mut local_state.editable_mumble, link);
             };
             package_manager.gui(
                 &u2b_sender,

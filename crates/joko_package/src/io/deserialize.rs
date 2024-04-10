@@ -1,8 +1,8 @@
 use joko_core::RelativePath;
+use joko_package_models::{attributes::{CommonAttributes, XotAttributeNameIDs}, category::{prefix_parent, Category, RawCategory}, map::MapData, marker::Marker, package::PackCore, route::Route, trail::{TBin, TBinStatus, Trail}};
 use miette::{bail, Context, IntoDiagnostic, Result};
 
 use crate::{
-    pack::{prefix_parent, Category, CommonAttributes, MapData, Marker, PackCore, RawCategory, Route, TBin, TBinStatus, Trail},
     BASE64_ENGINE,
 };
 use base64::Engine;
@@ -15,7 +15,6 @@ use tracing::{debug, info, info_span, instrument, trace, warn};
 use uuid::Uuid;
 use xot::{Node, Xot, Element};
 
-use super::XotAttributeNameIDs;
 
 pub(crate) fn load_pack_core_from_dir(dir: &Dir) -> Result<PackCore> {
     //called from already parsed data
@@ -455,9 +454,6 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
                 debug!("Found a route in core pack {:?}", child_element);
                 let route = parse_route(&names, &tree, &poi_node, child_element, &full_category_name, source_file_name.clone());
                 if let Some(route) = route {
-                    //TODO: make sure there is no "very late" discovery
-                    //let category_uuid = target.get_or_create_category_uuid(&route.category);
-                    //route.parent = category_uuid;
                     target.register_route(route)?;
                 } else {
                     info!("Could not parse route {:?}", child_element);

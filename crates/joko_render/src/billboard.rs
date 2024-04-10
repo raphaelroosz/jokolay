@@ -84,6 +84,9 @@ impl BillBoardRenderer {
     }
 
     pub fn prepare_render_data(&mut self, gl: &Context) {
+        //TODO: trim down the trails too far
+        // fatten them ?
+        // what about view from above (map view)
         unsafe {
             gl_error!(gl);
         }

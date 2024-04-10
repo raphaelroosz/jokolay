@@ -1,11 +1,12 @@
 use std::collections::{HashSet, HashMap};
+use joko_package_models::{attributes::CommonAttributes, category::Category, package::PackCore};
 use ordered_hash_map::OrderedHashMap;
 
 use indexmap::IndexMap;
 use uuid::Uuid;
 
 use crate::{
-    message::{UIToBackMessage, UIToUIMessage}, pack::{Category, CommonAttributes, PackCore}
+    message::{UIToBackMessage, UIToUIMessage}
 };
 use serde::{Deserialize, Serialize};
 

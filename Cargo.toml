@@ -4,6 +4,7 @@ members = [
     "crates/joko_render",
     "crates/joko_render_models",
     "crates/joko_package",
+    "crates/joko_package_models",
     "crates/jokolink",
     "crates/jokoapi",
     "crates/jokolay",

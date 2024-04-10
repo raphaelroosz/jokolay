@@ -1,18 +1,17 @@
 use crate::{
-    pack::{Category, Marker, Trail, Route},
     manager::{LoadedPackData, LoadedPackTexture},
     BASE64_ENGINE,
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
 use indexmap::IndexMap;
+use joko_package_models::{attributes::XotAttributeNameIDs, category::Category, marker::Marker, route::Route, trail::Trail};
 use miette::{Context, IntoDiagnostic, Result};
 use std::io::Write;
 use tracing::info;
 use uuid::Uuid;
 use xot::{Element, Node, SerializeOptions, Xot};
 
-use super::XotAttributeNameIDs;
 /// Save the pack core as xml pack using the given directory as pack root path.
 pub(crate) fn save_pack_data_to_dir(
     pack_data: &LoadedPackData,

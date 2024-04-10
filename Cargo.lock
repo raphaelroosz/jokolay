@@ -1404,6 +1404,7 @@ dependencies = [
  "indexmap",
  "itertools",
  "joko_core",
+ "joko_package_models",
  "joko_render_models",
  "jokoapi",
  "jokolink",
@@ -1426,6 +1427,35 @@ dependencies = [
  "uuid",
  "xot",
  "zip",
+]
+
+[[package]]
+name = "joko_package_models"
+version = "0.2.1"
+dependencies = [
+ "base64",
+ "bytemuck",
+ "cxx-build",
+ "data-encoding",
+ "enumflags2",
+ "glam",
+ "indexmap",
+ "itertools",
+ "joko_core",
+ "jokoapi",
+ "miette",
+ "ordered_hash_map",
+ "paste",
+ "phf",
+ "rstest",
+ "serde",
+ "serde_json",
+ "similar-asserts",
+ "smol_str",
+ "tracing",
+ "url",
+ "uuid",
+ "xot",
 ]
 
 [[package]]
@@ -1495,7 +1525,6 @@ name = "jokolink"
 version = "0.2.1"
 dependencies = [
  "arcdps",
- "egui",
  "enumflags2",
  "glam",
  "miette",

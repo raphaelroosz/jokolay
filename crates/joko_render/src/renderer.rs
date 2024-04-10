@@ -113,7 +113,7 @@ impl JokoRenderer {
         1.0
     }
     pub fn get_z_far() -> f32 {
-        1000.0
+        1000.0 //TODO: should match the distance for marker exclusion
     }
     pub fn swap(&mut self) {
         self.billboard_renderer.swap();

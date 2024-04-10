@@ -3,6 +3,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
+use joko_package_models::{attributes::{Behavior, CommonAttributes}, category::Category, map::MapData, package::PackCore, trail::TBin};
 use ordered_hash_map::OrderedHashMap;
 
 use cap_std::fs_utf8::Dir;
@@ -12,7 +13,7 @@ use tracing::{debug, error, info, info_span};
 use uuid::Uuid;
 
 use crate::{
-    io::{load_pack_core_from_dir, save_pack_data_to_dir, save_pack_texture_to_dir,}, manager::pack::{category_selection::SelectedCategoryManager, file_selection::SelectedFileManager}, message::{UIToBackMessage, UIToUIMessage}, pack::{Category, CommonAttributes, MapData, PackCore, TBin}
+    io::{load_pack_core_from_dir, save_pack_data_to_dir, save_pack_texture_to_dir,}, manager::pack::{category_selection::SelectedCategoryManager, file_selection::SelectedFileManager}, message::{UIToBackMessage, UIToUIMessage}
 };
 use jokolink::MumbleLink;
 use joko_core::{
@@ -363,7 +364,6 @@ impl LoadedPackData {
                     common_attributes.inherit_if_attr_none(category_attributes);
                     let key = &marker.guid;
                     if let Some(behavior) = common_attributes.get_behavior() {
-                        use crate::pack::Behavior;
                         if match behavior {
                             Behavior::AlwaysVisible => false,
                             Behavior::ReappearOnMapChange

@@ -4,7 +4,6 @@
 
 pub(crate) mod io;
 pub(crate) mod manager;
-pub(crate) mod pack;
 pub mod message;
 
 pub use manager::{

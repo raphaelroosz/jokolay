@@ -4,14 +4,193 @@ use enumflags2::{bitflags, BitFlags};
 use glam::Vec3;
 use itertools::Itertools;
 use tracing::info;
-use xot::Element;
+use xot::{Element, NameId, Xot};
 
-use crate::io::XotAttributeNameIDs;
 
-use super::RelativePath;
+use joko_core::RelativePath;
 use jokoapi::end_point::mounts::Mount;
 use jokoapi::end_point::races::Race;
 use smol_str::SmolStr;
+
+
+pub struct XotAttributeNameIDs {
+    // xml tags
+    pub overlay_data: NameId,
+    pub marker_category: NameId,
+    pub pois: NameId,
+    pub poi: NameId,
+    pub trail: NameId,
+    pub route: NameId,
+    // marker specific attributes
+    pub category: NameId,
+    pub guid: NameId,
+    pub map_id: NameId,
+    pub xpos: NameId,
+    pub ypos: NameId,
+    pub zpos: NameId,
+    // marker category specific attributes
+    pub default_enabled: NameId,
+    pub display_name: NameId,
+    pub name: NameId,
+    pub capital_name: NameId,//same than "name" but with a starting capital letter
+    pub separator: NameId,
+    // inheritable attributes
+    pub achievement_id: NameId,
+    pub achievement_bit: NameId,
+    pub alpha: NameId,
+    pub anim_speed: NameId,
+    pub auto_trigger: NameId,
+    pub behavior: NameId,
+    pub bounce: NameId,
+    pub bounce_delay: NameId,
+    pub bounce_duration: NameId,
+    pub bounce_height: NameId,
+    pub can_fade: NameId,
+    pub color: NameId,
+    pub copy: NameId,
+    pub copy_message: NameId,
+    pub cull: NameId,
+    pub fade_far: NameId,
+    pub fade_near: NameId,
+    pub festival: NameId,
+    pub has_countdown: NameId,
+    pub height_offset: NameId,
+    pub hide: NameId,
+    pub icon_file: NameId,
+    pub icon_size: NameId,
+    pub in_game_visibility: NameId,
+    pub info: NameId,
+    pub info_range: NameId,
+    pub invert_behavior: NameId,
+    pub is_wall: NameId,
+    pub keep_on_map_edge: NameId,
+    pub map_display_size: NameId,
+    pub map_fade_out_scale_level: NameId,
+    pub map_type: NameId,
+    pub map_visibility: NameId,
+    pub max_size: NameId,
+    pub min_size: NameId,
+    pub mini_map_visibility: NameId,
+    pub mount: NameId,
+    pub profession: NameId,
+    pub race: NameId,
+    pub reset_length: NameId,
+    pub reset_offset: NameId,
+    pub rotate: NameId,
+    pub rotate_x: NameId,
+    pub rotate_y: NameId,
+    pub rotate_z: NameId,
+    pub scale_on_map_with_zoom: NameId,
+    pub show: NameId,
+    pub specialization: NameId,
+    pub text: NameId,
+    pub texture: NameId,
+    pub tip_name: NameId,
+    pub tip_description: NameId,
+    pub title: NameId,
+    pub title_color: NameId,
+    pub toggle_category: NameId,
+    pub trail_data: NameId,
+    pub trail_scale: NameId,
+    pub trigger_range: NameId,
+    pub reset_range: NameId,
+    pub resetposx: NameId,
+    pub resetposy: NameId,
+    pub resetposz: NameId,
+    pub _source_file_name: NameId,
+}
+impl XotAttributeNameIDs {
+    pub fn register_with_xot(tree: &mut Xot) -> Self {
+        Self {
+            // tags
+            overlay_data: tree.add_name("OverlayData"),
+            marker_category: tree.add_name("MarkerCategory"),
+            pois: tree.add_name("POIs"),
+            poi: tree.add_name("POI"),
+            trail: tree.add_name("Trail"),
+            route: tree.add_name("Route"),
+            // non inheritable attributes
+            category: tree.add_name("type"),
+            xpos: tree.add_name("xpos"),
+            ypos: tree.add_name("ypos"),
+            zpos: tree.add_name("zpos"),
+            map_id: tree.add_name("MapID"),
+            guid: tree.add_name("GUID"),
+
+            // marker category specific attrs
+            separator: tree.add_name("IsSeparator"),
+            default_enabled: tree.add_name("defaulttoggle"),
+            display_name: tree.add_name("DisplayName"),
+            name: tree.add_name("name"),
+            capital_name: tree.add_name("Name"),
+            // inheritable attributes
+            achievement_id: tree.add_name("achievementId"),
+            achievement_bit: tree.add_name("achievementBit"),
+            alpha: tree.add_name("alpha"),
+            anim_speed: tree.add_name("animSpeed"),
+            auto_trigger: tree.add_name("autotrigger"),
+            behavior: tree.add_name("behavior"),
+            color: tree.add_name("color"),
+            copy: tree.add_name("copy"),
+            copy_message: tree.add_name("copy-message"),
+            fade_near: tree.add_name("fadeNear"),
+            fade_far: tree.add_name("fadeFar"),
+            festival: tree.add_name("festival"),
+            has_countdown: tree.add_name("hasCountdown"),
+            height_offset: tree.add_name("heightOffset"),
+            icon_file: tree.add_name("iconFile"),
+            icon_size: tree.add_name("iconSize"),
+            in_game_visibility: tree.add_name("inGameVisibility"),
+            info: tree.add_name("info"),
+            info_range: tree.add_name("infoRange"),
+            map_display_size: tree.add_name("mapDisplaySize"),
+            map_visibility: tree.add_name("mapVisibility"),
+            max_size: tree.add_name("maxSize"),
+            min_size: tree.add_name("minSize"),
+            mini_map_visibility: tree.add_name("miniMapVisibility"),
+            mount: tree.add_name("mount"),
+            profession: tree.add_name("profession"),
+            race: tree.add_name("race"),
+            reset_length: tree.add_name("resetLength"),
+            reset_offset: tree.add_name("resetOffset"),
+            scale_on_map_with_zoom: tree.add_name("scaleOnMapWithZoom"),
+            tip_name: tree.add_name("tip-name"),
+            tip_description: tree.add_name("tip-description"),
+            toggle_category: tree.add_name("togglecateogry"),
+            texture: tree.add_name("texture"),
+            trail_data: tree.add_name("trailData"),
+            trail_scale: tree.add_name("trailScale"),
+            trigger_range: tree.add_name("triggerRange"),
+            bounce_delay: tree.add_name("bounce-delay"),
+            bounce_duration: tree.add_name("bounce-duration"),
+            bounce_height: tree.add_name("bounce-height"),
+            can_fade: tree.add_name("canfade"),
+            cull: tree.add_name("cull"),
+            hide: tree.add_name("hide"),
+            is_wall: tree.add_name("iswall"),
+            invert_behavior: tree.add_name("invertbehavior"),
+            map_type: tree.add_name("maptype"),
+            rotate: tree.add_name("rotate"),
+            rotate_x: tree.add_name("rotate-x"),
+            rotate_y: tree.add_name("rotate-y"),
+            rotate_z: tree.add_name("rotate-z"),
+            show: tree.add_name("show"),
+            specialization: tree.add_name("specialization"),
+            title: tree.add_name("title"),
+            title_color: tree.add_name("title-color"),
+            text: tree.add_name("text"),
+            bounce: tree.add_name("bounce"),
+            keep_on_map_edge: tree.add_name("keepOnMapEdge"),
+            map_fade_out_scale_level: tree.add_name("mapFadeoutScaleLevel"),
+            reset_range: tree.add_name("resetrange"),
+            resetposx: tree.add_name("resetposx"),
+            resetposy: tree.add_name("resetposy"),
+            resetposz: tree.add_name("resetposz"),
+            _source_file_name: tree.add_name("_source_file_name"),
+        }
+    }
+}
+
 /// This is a onetime macro to reduce code duplication
 /// It basically takes the CommmonAttributes struct, adds the active_attributes and bool_attributes fields to it.
 /// Then, it creates a method call `inherit_if_attr_none`, which will clone fields from other struct, if its own fields are not active (set)
@@ -482,7 +661,7 @@ impl CommonAttributes {
         mini_map_visibility,
         scale_on_map_with_zoom
     ]);
-    pub(crate) fn update_common_attributes_from_element(
+    pub fn update_common_attributes_from_element(
         &mut self,
         ele: &Element,
         names: &XotAttributeNameIDs,
@@ -635,7 +814,7 @@ impl CommonAttributes {
         );
     }
 
-    pub(crate) fn serialize_to_element(&self, ele: &mut Element, names: &XotAttributeNameIDs) {
+    pub fn serialize_to_element(&self, ele: &mut Element, names: &XotAttributeNameIDs) {
         // color arrays
         if self.active_attributes.contains(ActiveAttributes::color) {
             ele.set_attribute(names.color, data_encoding::HEXLOWER.encode(&self.color));

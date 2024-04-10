@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
+use joko_package_models::{attributes::CommonAttributes, package::PackCore};
 use uuid::Uuid;
 
 use glam::Vec3;
@@ -11,7 +12,7 @@ use joko_render_models::{
     trail::TrailObject
 };
 
-use crate::{pack::{CommonAttributes, PackCore}, LoadedPackTexture};
+use crate::LoadedPackTexture;
 
 pub enum BackToUIMessage {
     ActiveElements(HashSet<Uuid>),//list of all elements that are loaded for current map

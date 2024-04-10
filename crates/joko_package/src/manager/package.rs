@@ -3,6 +3,7 @@ use std::{
 };
 
 use glam::Vec3;
+use joko_package_models::attributes::CommonAttributes;
 use tribool::Tribool;
 use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
@@ -16,7 +17,7 @@ use miette::Result;
 use uuid::Uuid;
 use crate::message::{UIToBackMessage, UIToUIMessage};
 
-use crate::{message::BackToUIMessage, pack::CommonAttributes};
+use crate::{message::BackToUIMessage};
 use crate::manager::pack::loaded::{LoadedPackData, PackTasks, LoadedPackTexture};
 use crate::manager::pack::import::ImportStatus;
 
@@ -309,7 +310,7 @@ impl PackageUIManager {
         etx: &egui::Context,
     ) {
         if self.default_marker_texture.is_none() {
-            let img = image::load_from_memory(include_bytes!("../pack/marker.png")).unwrap();
+            let img = image::load_from_memory(include_bytes!("../../images/marker.png")).unwrap();
             let size = [img.width() as _, img.height() as _];
             self.default_marker_texture = Some(etx.load_texture(
                 "default marker",
@@ -322,7 +323,7 @@ impl PackageUIManager {
             ));
         }
         if self.default_trail_texture.is_none() {
-            let img = image::load_from_memory(include_bytes!("../pack/trail_rainbow.png")).unwrap();
+            let img = image::load_from_memory(include_bytes!("../../images/trail_rainbow.png")).unwrap();
             let size = [img.width() as _, img.height() as _];
             self.default_trail_texture = Some(etx.load_texture(
                 "default trail",

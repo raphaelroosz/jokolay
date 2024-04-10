@@ -1,3 +1,4 @@
+use joko_package_models::attributes::CommonAttributes;
 use jokoapi::end_point::mounts::Mount;
 use ordered_hash_map::OrderedHashMap;
 
@@ -8,7 +9,6 @@ use uuid::Uuid;
 
 use joko_core::RelativePath;
 use crate::{
-    pack::CommonAttributes,
     INCHES_PER_METER,
 };
 use jokolink::MumbleLink;
@@ -44,7 +44,7 @@ pub(crate) struct ActiveMarker {
     pub common_attributes: CommonAttributes,
 }
 
-pub const _BILLBOARD_MAX_VISIBILITY_DISTANCE: f32 = 10000.0;
+pub const BILLBOARD_MAX_VISIBILITY_DISTANCE_IN_GAME: f32 = 20000.0;// in game metric, for GW2, inches
 
 impl ActiveMarker {
     pub fn get_vertices_and_texture(&self, link: &MumbleLink, z_near: f32) -> Option<MarkerObject> {
@@ -73,7 +73,7 @@ impl ActiveMarker {
         }
         let height_offset = attrs.get_height_offset().copied().unwrap_or(1.5); // default taco height offset
         let fade_near = attrs.get_fade_near().copied().unwrap_or(-1.0) / INCHES_PER_METER;
-        let fade_far = attrs.get_fade_far().copied().unwrap_or(-1.0) / INCHES_PER_METER;
+        let fade_far = attrs.get_fade_far().copied().unwrap_or(BILLBOARD_MAX_VISIBILITY_DISTANCE_IN_GAME) / INCHES_PER_METER;
         let icon_size = attrs.get_icon_size().copied().unwrap_or(1.0);
         let player_distance = pos.distance(link.player_pos);
         let camera_distance = pos.distance(link.cam_pos);
@@ -195,7 +195,7 @@ impl ActiveTrail {
         }
         let alpha = attrs.get_alpha().copied().unwrap_or(1.0);
         let fade_near = attrs.get_fade_near().copied().unwrap_or(-1.0) / INCHES_PER_METER;
-        let fade_far = attrs.get_fade_far().copied().unwrap_or(-1.0) / INCHES_PER_METER;
+        let fade_far = attrs.get_fade_far().copied().unwrap_or(BILLBOARD_MAX_VISIBILITY_DISTANCE_IN_GAME) / INCHES_PER_METER;
         let fade_near_far = Vec2::new(fade_near, fade_far);
         let color = attrs.get_color().copied().unwrap_or([0u8; 4]);
         // default taco width
