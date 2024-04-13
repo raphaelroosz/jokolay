@@ -4,7 +4,7 @@ use crate::{
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
-use joko_package_models::{attributes::XotAttributeNameIDs, category::Category, marker::Marker, route::Route, trail::Trail};
+use joko_package_models::{attributes::XotAttributeNameIDs, category::Category, marker::Marker, package::PackCore, route::Route, trail::Trail};
 use miette::{Context, IntoDiagnostic, Result};
 use ordered_hash_map::OrderedHashMap;
 use std::io::Write;
@@ -12,9 +12,18 @@ use tracing::info;
 use uuid::Uuid;
 use xot::{Element, Node, SerializeOptions, Xot};
 
+pub(crate) fn export_package_v2(
+    pack: &PackCore,
+    writing_directory: &Dir,
+    name: String,
+) -> Result<()> {
+    Ok(())
+}
+
 /// Save the pack core as xml pack using the given directory as pack root path.
-pub(crate) fn save_pack_data_to_dir(
+pub(crate) fn export_package_v1(
     pack_data: &LoadedPackData,
+    pack_textures: &LoadedPackData,
     writing_directory: &Dir,
 ) -> Result<()> {
     // save categories

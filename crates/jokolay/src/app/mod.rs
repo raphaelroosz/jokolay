@@ -25,15 +25,24 @@ use tracing::{error, info, info_span};
 use jmf::{LoadedPackData, LoadedPackTexture, build_from_core};
 use jmf::{ImportStatus, import_pack_from_zip_file_path};
 
+
+const MINIMAL_WINDOW_WIDTH: i32 = 640;
+const MINIMAL_WINDOW_HEIGHT: i32 = 480;
+const MINIMAL_WINDOW_POSITION_X: i32 = 0;
+const MINIMAL_WINDOW_POSITION_Y: i32 = 0;
+
 #[derive(Clone)]
 struct JokolayUIState {
     link: Option<MumbleLink>,
     editable_mumble: bool,
     window_changed: bool,
     list_of_textures_changed: bool,//Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
+    first_load_done: bool,
     nb_running_tasks_on_back: i32,// store the number of running tasks in background thread
     nb_running_tasks_on_network: i32,// store the number of running tasks (requests) in progress
     import_status: Arc<Mutex<ImportStatus>>,
+    maximal_window_width: i32,
+    maximal_window_height: i32,
 }
 
 struct JokolayBackState {
@@ -79,7 +88,7 @@ impl Jokolay {
             
         let data_packages: BTreeMap<Uuid, LoadedPackData> = Default::default();
         let texture_packages: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
-        let mut package_data_manager = PackageDataManager::new(data_packages, Arc::clone(&jokolay_dir))?;
+        let package_data_manager = PackageDataManager::new(data_packages, Arc::clone(&jokolay_dir))?;
         let mut package_ui_manager = PackageUIManager::new(texture_packages);
         let mut theme_manager = ThemeManager::new(Arc::clone(&jokolay_dir)).wrap_err("failed to create theme manager")?;
         
@@ -102,14 +111,20 @@ impl Jokolay {
             window_title: "Jokolay".to_string(),
             ..Default::default()
         });
+        let screen_physical_size = glfw_backend.glfw.with_primary_monitor(|_, m| {
+            if let Some(m) = m {
+                Some(m.get_physical_size())
+            } else {
+                None
+            }
+        });
+        info!("Monitor physical size: {:?}", screen_physical_size);
         glfw_backend.window.set_floating(true);
         glfw_backend.window.set_decorated(false);
         let joko_renderer = JokoRenderer::new(&mut glfw_backend, Default::default());
         let frame_stats = wm::WindowStatistics::new(glfw_backend.glfw.get_time() as _);
         
-        let mut menu_panel = MenuPanel::default();
-        //menu_panel.show_theme_window = true;
-        //menu_panel.show_package_manager_window = true;
+        let menu_panel = MenuPanel::default();
 
         package_ui_manager.late_init(&egui_context);
         Ok(Self {
@@ -133,9 +148,12 @@ impl Jokolay {
                 editable_mumble: false,
                 window_changed: true,
                 list_of_textures_changed: false,
+                first_load_done: false,
                 nb_running_tasks_on_back: 0,
                 nb_running_tasks_on_network: 0,
                 import_status: Default::default(),
+                maximal_window_width: screen_physical_size.unwrap().0,
+                maximal_window_height: screen_physical_size.unwrap().1,
             },
             state_back: JokolayBackState {
                 choice_of_category_changed: false,
@@ -200,29 +218,33 @@ impl Jokolay {
                 tracing::trace!("Handling of UIToBackMessage::DeletePacks");
                 let mut deleted = Vec::new();
                 for pack_uuid in to_delete {
-                    let pack = package_manager.packs.remove(&pack_uuid).unwrap();
-                    if let Err(e) = package_manager.marker_packs_dir.remove_dir_all(&pack.name) {
-                        error!(?e, pack.name,"failed to remove pack");
-                    } else {
-                        info!("deleted marker pack: {}", pack.name);
-                        deleted.push(pack_uuid);
+                    if let Some(pack) = package_manager.packs.remove(&pack_uuid) {
+                        if let Err(e) = package_manager.marker_packs_dir.remove_dir_all(&pack.name) {
+                            error!(?e, pack.name,"failed to remove pack");
+                        } else {
+                            info!("deleted marker pack: {}", pack.name);
+                            deleted.push(pack_uuid);
+                        }
                     }
                 }
-                b2u_sender.send(BackToUIMessage::DeletedPacks(deleted));
+                let _ = b2u_sender.send(BackToUIMessage::DeletedPacks(deleted));
             }
             UIToBackMessage::ImportPack(file_path) => {
                 tracing::trace!("Handling of UIToBackMessage::ImportPack");
-                b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
+                let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
+                let start = std::time::SystemTime::now();
                 let result = import_pack_from_zip_file_path(file_path);
+                let elaspsed = start.elapsed().unwrap_or_default();
+                tracing::info!("Loading of taco package from disk took {} ms", elaspsed.as_millis());
                 match result {
                     Ok((file_name, pack)) => {
-                        b2u_sender.send(BackToUIMessage::ImportedPack(file_name, pack));
+                        let _ = b2u_sender.send(BackToUIMessage::ImportedPack(file_name, pack));
                     }
                     Err(e) => {
-                        b2u_sender.send(BackToUIMessage::ImportFailure(e));
+                        let _ = b2u_sender.send(BackToUIMessage::ImportFailure(e));
                     }
                 }
-                b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
+                let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
             }
             UIToBackMessage::MumbleLinkAutonomous => {
                 tracing::trace!("Handling of UIToBackMessage::MumbleLinkAutonomous");
@@ -257,10 +279,12 @@ impl Jokolay {
                 }
                 match package_manager.marker_packs_dir.open_dir(name) {
                     Ok(dir) => {
-                        let (mut data_pack, mut texture_pack) = build_from_core(name.to_string(), dir.into(), pack);
+                        let (data_pack, mut texture_pack, mut report) = build_from_core(name.to_string(), dir.into(), pack);
                         tracing::trace!("Package loaded into data and texture");
-                        texture_pack.uuid = package_manager.save(data_pack);
-                        b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack));
+                        let uuid_of_insertion = package_manager.save(data_pack, report.clone());
+                        report.uuid = uuid_of_insertion;
+                        texture_pack.uuid = uuid_of_insertion;
+                        let _ = b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack, report));
                     },
                     Err(e) => {
                         error!(?e, "failed to open marker pack directory to save pack {:?} {}", package_manager.marker_packs_dir, name);
@@ -273,7 +297,7 @@ impl Jokolay {
         }
     }
     fn background_loop(
-        mut app: Arc<Mutex<Box<JokolayApp>>>, 
+        app: Arc<Mutex<Box<JokolayApp>>>, 
         mut local_state: JokolayBackState,
         b2u_sender: std::sync::mpsc::Sender<BackToUIMessage>,
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
@@ -319,12 +343,12 @@ impl Jokolay {
             thread::sleep(std::time::Duration::from_millis(10));
             loop_index += 1;
         }
+        unreachable!("Program broke out a never ending loop !");
         drop(span_guard);
     }
 
     fn handle_u2u_message(
         gui: &mut JokolayGui, 
-        state: &mut JokolayUIState,
         msg: UIToUIMessage
     ) {
         match msg {
@@ -373,6 +397,9 @@ impl Jokolay {
                 tracing::trace!("Handling of BackToUIMessage::DeletedPacks");
                 gui.package_manager.delete_packs(to_delete);
             }
+            BackToUIMessage::FirstLoadDone => {
+                local_state.first_load_done = true;
+            }
             BackToUIMessage::ImportedPack(file_name, pack) => {
                 tracing::trace!("Handling of BackToUIMessage::ImportedPack");
                 *local_state.import_status.lock().unwrap() = ImportStatus::PackDone(file_name, pack, false);
@@ -382,11 +409,11 @@ impl Jokolay {
                 *local_state.import_status.lock().unwrap() = ImportStatus::PackError(error);
 
             }
-            BackToUIMessage::LoadedPack(pack_texture) => {
+            BackToUIMessage::LoadedPack(pack_texture, report) => {
                 tracing::trace!("Handling of BackToUIMessage::LoadedPack");
-                gui.package_manager.save(pack_texture);
+                gui.package_manager.save(pack_texture, report);
                 local_state.import_status = Default::default();
-                u2b_sender.send(UIToBackMessage::CategoryActivationStatusChanged);
+                let _ = u2b_sender.send(UIToBackMessage::CategoryActivationStatusChanged);
             }
             BackToUIMessage::MarkerTexture(pack_uuid, tex_path, marker_uuid, position, common_attributes) => {
                 tracing::trace!("Handling of BackToUIMessage::MarkerTexture");
@@ -415,7 +442,7 @@ impl Jokolay {
         }
     }
 
-    pub fn enter_event_loop(mut self) {
+    pub fn enter_event_loop(self) {
         let (b2u_sender, b2u_receiver) = std::sync::mpsc::channel();
         let (u2b_sender, u2b_receiver) = std::sync::mpsc::channel();
         let (u2u_sender, u2u_receiver) = std::sync::mpsc::channel();
@@ -436,7 +463,7 @@ impl Jokolay {
                 if let Ok(mut import_status) = local_state.import_status.lock() {
                     match &mut *import_status {
                         ImportStatus::LoadingPack(file_path) => {
-                            u2b_sender.send(UIToBackMessage::ImportPack(file_path.clone()));
+                            let _ = u2b_sender.send(UIToBackMessage::ImportPack(file_path.clone()));
                             *import_status = ImportStatus::WaitingLoading(file_path.clone());
                         }
                         _ => {}
@@ -446,7 +473,7 @@ impl Jokolay {
                 let mut gui = self.gui.lock().unwrap();
                 while let Ok(msg) = u2u_receiver.try_recv() {
                     nb_messages += 1;
-                    Self::handle_u2u_message(gui.deref_mut(), &mut local_state, msg);
+                    Self::handle_u2u_message(gui.deref_mut(), msg);
                     nb_message_on_curent_loop += 1;
                     if nb_message_on_curent_loop == max_nb_messages_per_loop {
                         break;
@@ -526,7 +553,7 @@ impl Jokolay {
             if local_state.editable_mumble {
                 local_state.window_changed = true;
                 local_state.link.as_mut().unwrap().changes = enumflags2::BitFlags::all();
-                u2b_sender.send(UIToBackMessage::MumbleLink(local_state.link.clone()));
+                let _ = u2b_sender.send(UIToBackMessage::MumbleLink(local_state.link.clone()));
             } else {
                 let is_mumble_alive = mumble_manager.is_alive();
                 match mumble_manager.tick() {
@@ -553,12 +580,12 @@ impl Jokolay {
                 if local_state.window_changed {
                     glfw_backend
                         .window
-                        .set_pos(link.client_pos.x, link.client_pos.y);
+                        .set_pos(link.client_pos.x.max(MINIMAL_WINDOW_POSITION_X), link.client_pos.y.max(MINIMAL_WINDOW_POSITION_Y));
                     // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
                     // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
                     // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
-                    let client_size_x = 1024.max(link.client_size.x);
-                    let client_size_y = 768.max(link.client_size.y);
+                    let client_size_x = MINIMAL_WINDOW_WIDTH.max(link.client_size.x);
+                    let client_size_y = MINIMAL_WINDOW_HEIGHT.max(link.client_size.y);
                     glfw_backend
                         .window
                         .set_size(client_size_x - 1, client_size_y - 1);
@@ -639,6 +666,7 @@ impl Jokolay {
                 &mut menu_panel.show_package_manager_window,
                 &local_state.import_status,
                 &mut menu_panel.show_file_manager_window,
+                local_state.first_load_done,
                 latest_time,
                 local_state.link.as_ref()
             );
@@ -668,7 +696,18 @@ impl Jokolay {
             glfw_backend
                 .window
                 .set_mouse_passthrough(!(etx.wants_keyboard_input() || etx.wants_pointer_input()));
-            //TODO: view when map is open
+            //TODO: view from above when map is open
+            /*
+            TODO: have a clean view when game is not focused.
+            let mut do_draw = local_state.editable_mumble;
+            if !do_draw {
+                if let Some(link) = local_state.link.as_ref() {
+                    if let Some(ui_state) = link.ui_state {
+                        do_draw = ui_state.contains(UIState::GameHasFocus)
+                    }
+                };
+            }*/
+            
             joko_renderer.render_egui(
                 etx.tessellate(shapes, etx.pixels_per_point()),
                 textures_delta,
@@ -676,6 +715,7 @@ impl Jokolay {
             );
             joko_renderer.present();
             glfw_backend.window.swap_buffers();
+            
             nb_frames += 1;
         }
         drop(span_guard);
@@ -720,6 +760,7 @@ pub fn start_jokolay() {
     };
     std::mem::drop(log_file_flush_guard);
 }
+
 /// Guild Wars 2 has an array of menu icons on top left corner of the game.
 /// Its size is affected by four different factors
 /// 1. UISZ:
@@ -733,7 +774,6 @@ pub fn start_jokolay() {
 /// 3. Dimensions of the gw2 window
 ///     This is something we get from mumble link and win32 api. We store this as client pos/size in mumble link
 ///     It is not just the width or height, but their ratio to the 1024x768 resolution
-
 ///
 /// 1. By default, with dpi 96 (scale 1.0), at resolution 1024x768 these are the sizes of menu at different uisz settings
 ///     UISZ   -> WIDTH   HEIGHT
@@ -791,10 +831,10 @@ impl MenuPanel {
             let uisz_scale = convert_uisz_to_scale(link.uisz);
             ui_scaling_factor *= uisz_scale;
 
-            let min_width = 1024.0 * gw2_scale;
-            let min_height = 768.0 * gw2_scale;
-            let gw2_width = link.client_size.x.max(1024) as f32;
-            let gw2_height = link.client_size.y.max(768) as f32;
+            let min_width = MINIMAL_WINDOW_WIDTH as f32 * gw2_scale;
+            let min_height = MINIMAL_WINDOW_HEIGHT as f32 * gw2_scale;
+            let gw2_width = link.client_size.x.max(MINIMAL_WINDOW_WIDTH) as f32;
+            let gw2_height = link.client_size.y.max(MINIMAL_WINDOW_HEIGHT) as f32;
             let min_width_ratio = min_width.min(gw2_width) / min_width;
             let min_height_ratio = min_height.min(gw2_height) / min_height;
 

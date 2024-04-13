@@ -8,9 +8,7 @@ use indexmap::IndexMap;
 use uuid::Uuid;
 
 use joko_core::RelativePath;
-use crate::{
-    INCHES_PER_METER,
-};
+use crate::INCHES_PER_METER;
 use jokolink::MumbleLink;
 use joko_render_models::{
     marker::{MarkerObject, MarkerVertex},

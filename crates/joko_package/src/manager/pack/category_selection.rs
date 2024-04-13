@@ -1,14 +1,11 @@
 use std::collections::{HashSet, HashMap};
-use joko_package_models::{attributes::CommonAttributes, category::Category, package::PackCore};
+use joko_package_models::{attributes::CommonAttributes, category::Category, package::{PackageImportReport, PackCore}};
 use ordered_hash_map::OrderedHashMap;
 
-use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    message::{UIToBackMessage, UIToUIMessage}
-};
-use serde::{Deserialize, Serialize};
+use crate::message::{UIToBackMessage, UIToUIMessage};
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct CategorySelection {
@@ -30,7 +27,7 @@ pub struct SelectedCategoryManager {
 impl<'a> SelectedCategoryManager {
     pub fn new(
         selected_categories: &OrderedHashMap<String, CategorySelection>,
-        categories: &IndexMap<Uuid, Category>
+        categories: &OrderedHashMap<Uuid, Category>
     ) -> Self {
         let mut list_of_enabled_categories = Default::default();
         CategorySelection::get_list_of_enabled_categories(
@@ -69,7 +66,7 @@ impl CategorySelection {
     }
     fn get_list_of_enabled_categories(
         selection: &OrderedHashMap<String, CategorySelection>,
-        categories: &IndexMap<Uuid, Category>,
+        categories: &OrderedHashMap<Uuid, Category>,
         list_of_enabled_categories: &mut OrderedHashMap<Uuid, CommonAttributes>,
         parent_common_attributes: &CommonAttributes,
     ) {
@@ -124,7 +121,7 @@ impl CategorySelection {
     }
     fn recursive_create_selectable_categories(
         selectable_categories: &mut OrderedHashMap<String, CategorySelection>,
-        cats: &IndexMap<Uuid, Category>,
+        cats: &OrderedHashMap<Uuid, Category>,
     ) {
         for (_, cat) in cats.iter() {
             if !selectable_categories.contains_key(&cat.relative_category_name) {
@@ -200,13 +197,13 @@ impl CategorySelection {
         if ui.button("Activate branch").clicked() {
             cs.is_selected = true;
             CategorySelection::recursive_set_all(&mut cs.children, true);
-            u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, true));
+            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, true));
             ui.close_menu();
         }
         if ui.button("Deactivate branch").clicked() {
             CategorySelection::recursive_set_all(&mut cs.children, false);
             cs.is_selected = false;
-            u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, false));
+            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, false));
             ui.close_menu();
         }
     }
@@ -218,7 +215,7 @@ impl CategorySelection {
         ui: &mut egui::Ui,
         is_dirty: &mut bool,
         show_only_active: bool,
-        late_discovery_categories: &HashSet<Uuid>,
+        import_quality_report: &PackageImportReport,
     ) {
         if selection.is_empty() {
             return;
@@ -234,12 +231,12 @@ impl CategorySelection {
                     } else {
                         let cb = ui.checkbox(&mut cat.is_selected, "");
                         if cb.changed() {
-                            u2b_sender.send(UIToBackMessage::CategoryActivationElementStatusChange(cat.uuid, cat.is_selected));
+                            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationElementStatusChange(cat.uuid, cat.is_selected));
                             *is_dirty = true;
                         }
                     }
                     //println!("Look for {} {} among displayed elements {}", name,  cat.uuid, on_screen.contains(&cat.uuid));
-                    let color = if late_discovery_categories.contains(&cat.uuid) {
+                    let color = if import_quality_report.is_category_discovered_late(cat.uuid) {
                         egui::Color32::LIGHT_RED
                     } else if cat.is_active {
                         egui::Color32::LIGHT_GREEN
@@ -258,7 +255,7 @@ impl CategorySelection {
                                 ui, 
                                 is_dirty, 
                                 show_only_active, 
-                                late_discovery_categories
+                                import_quality_report
                             );
                         }).response.context_menu(|ui| Self::context_menu(u2b_sender, cat, ui));
                     }

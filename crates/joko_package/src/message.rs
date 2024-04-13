@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use joko_package_models::{attributes::CommonAttributes, package::PackCore};
+use joko_package_models::{attributes::CommonAttributes, package::{PackCore, PackageImportReport}};
 use uuid::Uuid;
 
 use glam::Vec3;
@@ -17,8 +17,9 @@ use crate::LoadedPackTexture;
 pub enum BackToUIMessage {
     ActiveElements(HashSet<Uuid>),//list of all elements that are loaded for current map
     CurrentlyUsedFiles(BTreeMap<String, bool>),//when there is a change in map or anything else, the list of files is sent to ui for display
-    LoadedPack(LoadedPackTexture),//push a loaded pack to UI
+    LoadedPack(LoadedPackTexture, PackageImportReport),//push a loaded pack to UI
     DeletedPacks(Vec<Uuid>),//push a deleted set of packs to UI
+    FirstLoadDone,
     ImportedPack(String, PackCore),
     ImportFailure(miette::Report),
     MarkerTexture(Uuid, RelativePath, Uuid, Vec3, CommonAttributes),

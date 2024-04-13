@@ -1,10 +1,7 @@
-use std::collections::HashSet;
-
 use ordered_hash_map::OrderedHashMap;
 use tracing::debug;
 use uuid::Uuid;
-use indexmap::IndexMap;
-use crate::attributes::CommonAttributes;
+use crate::{attributes::CommonAttributes, package::PackageImportReport};
 
 #[derive(Debug, Clone)]
 pub struct RawCategory {
@@ -16,6 +13,7 @@ pub struct RawCategory {
     pub separator: bool,
     pub default_enabled: bool,
     pub props: CommonAttributes,
+    pub sources: OrderedHashMap<Uuid, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +26,7 @@ pub struct Category {
     pub separator: bool,
     pub default_enabled: bool,
     pub props: CommonAttributes,
-    pub children: IndexMap<Uuid, Category>,
+    pub children: OrderedHashMap<Uuid, Category>,//TODO: make a branch to test if having an Vec<Uuid> associated with global list of categories is faster.
 }
 
 pub fn nth_chunk(s: &str, pat: char, n: usize) -> String {
@@ -78,7 +76,7 @@ impl Category {
             children: Default::default()
         }
     }
-    pub fn per_uuid<'a>(categories: &'a mut IndexMap<Uuid, Category>, uuid: &Uuid, depth: usize) -> Option<&'a mut Category> {
+    pub fn per_uuid<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, uuid: &Uuid, depth: usize) -> Option<&'a mut Category> {
         for (_, cat) in categories {
             if &cat.guid == uuid {
                 return Some(cat);
@@ -92,19 +90,27 @@ impl Category {
     }
     pub fn reassemble(
         input_first_pass_categories: &OrderedHashMap<String, RawCategory>,
-        late_discovered_categories: &mut HashSet<Uuid>,
-    ) -> IndexMap<Uuid, Category> {
+        report: &mut PackageImportReport,
+    ) -> OrderedHashMap<Uuid, Category> {
+        let start_initialize = std::time::SystemTime::now();
         let mut first_pass_categories = input_first_pass_categories.clone();
         let mut second_pass_categories: OrderedHashMap<String, RawCategory> = Default::default();
         let mut need_a_pass: bool = true;
     
-        let mut third_pass_categories: IndexMap<Uuid, Category> = Default::default();
+        let mut third_pass_categories: OrderedHashMap<Uuid, Category> = Default::default();
         let mut third_pass_categories_ref: Vec<Uuid> = Default::default();
-        let mut root: IndexMap<Uuid, Category> = Default::default();
+        let mut root: OrderedHashMap<Uuid, Category> = Default::default();
+
+        let elaspsed_initialize = start_initialize.elapsed().unwrap_or_default();
+        report.telemetry.categories_reassemble.initialize = elaspsed_initialize.as_millis();
+        
+        let start_multi_pass_missing_categories_creation = std::time::SystemTime::now();
+        let mut nb_pass_done = 0;
         while need_a_pass {
             need_a_pass = false;
+            nb_pass_done += 1;
             for (key, value) in first_pass_categories.iter() {
-                debug!("reassemble_categories {:?}", value);
+                debug!("reassemble_categories pass #{} {:?}", nb_pass_done, value);
                 let mut to_insert = value.clone();
                 if value.relative_category_name.matches('.').count() > 0  && value.relative_category_name == value.full_category_name {
                     let mut n = 0;
@@ -113,15 +119,16 @@ impl Category {
                     while let Some(parent_name) = prefix_until_nth_char(&value.relative_category_name, '.', n) {
                         debug!("{} {}", parent_name, n);
                         if let Some(parent_category) = first_pass_categories.get(&parent_name) {
-                            late_discovered_categories.insert(parent_category.guid);
+                            report.found_category_late(&parent_name, parent_category.guid);
                             last_name = Some(parent_name.clone());
                         } else if let Some(parent_category) = second_pass_categories.get(&parent_name) {
-                            late_discovered_categories.insert(parent_category.guid);
+                            report.found_category_late(&parent_name, parent_category.guid);
                             last_name = Some(parent_name.clone());
                         }else{
                             let new_uuid = Uuid::new_v4();
                             let relative_category_name = nth_chunk(&value.relative_category_name, '.', n);
                             debug!("reassemble_categories Partial create missing parent category: {} {} {} {}", parent_name, relative_category_name, n, new_uuid);
+                            let sources: OrderedHashMap<Uuid, String> = OrderedHashMap::new();
                             let to_insert = RawCategory {
                                 default_enabled: value.default_enabled,
                                 guid: new_uuid,
@@ -130,16 +137,20 @@ impl Category {
                                 parent_name: prefix_until_nth_char(&parent_name, '.', n-1),
                                 props: value.props.clone(),
                                 separator: false,
-                                full_category_name: parent_name.clone()
+                                full_category_name: parent_name.clone(),
+                                sources,
                             };
                             last_name = Some(to_insert.full_category_name.clone());
+                            report.found_category_late(&to_insert.full_category_name, new_uuid);
                             second_pass_categories.insert(parent_name.clone(), to_insert);
-                            late_discovered_categories.insert(new_uuid);
                             need_a_pass = true;
                         }
                         n += 1;
                     }
-                    late_discovered_categories.insert(value.guid);
+                    for (requester_uuid, source_file_name) in value.sources.iter() {
+                        report.found_category_late_with_details(&value.full_category_name, value.guid, requester_uuid, source_file_name);
+                    }
+                    report.found_category_late(&value.full_category_name, value.guid);
                     to_insert.relative_category_name = nth_chunk(&value.relative_category_name, '.', n);
                     to_insert.display_name = to_insert.relative_category_name.clone();
                     debug!("parent_name: {:?}, new name: {}, old name: {}", last_name, to_insert.relative_category_name, &value.relative_category_name);
@@ -164,6 +175,11 @@ impl Category {
                 second_pass_categories.clear();
             }
         }
+        let elaspsed_multi_pass_missing_categories_creation = start_multi_pass_missing_categories_creation.elapsed().unwrap_or_default();
+        report.telemetry.categories_reassemble.missing_categories_creation = elaspsed_multi_pass_missing_categories_creation.as_millis();
+
+        debug!("nb_pass_done {}", nb_pass_done);
+        let start_parent_child_relationship = std::time::SystemTime::now();
         for (key, value) in second_pass_categories {
             let parent = if let Some(parent_name) = &value.parent_name {
                 if let Some(parent_category) = first_pass_categories.get(parent_name) {
@@ -182,9 +198,13 @@ impl Category {
                 third_pass_categories_ref.push(ref_uuid);
             }
         }
+        let elaspsed_parent_child_relationship = start_parent_child_relationship.elapsed().unwrap_or_default();
+        report.telemetry.categories_reassemble.parent_child_relationship = elaspsed_parent_child_relationship.as_millis();
     
-        for full_category_name in third_pass_categories_ref {
-            if let Some(cat) = third_pass_categories.shift_remove(&full_category_name) {
+        debug!("third_pass_categories_ref");
+        let start_tree_insertion = std::time::SystemTime::now();
+        for full_category_uuid in third_pass_categories_ref {
+            if let Some(cat) = third_pass_categories.remove(&full_category_uuid) {
                 if let Some(parent) = cat.parent {
                     if let Some(parent_category) = Category::per_uuid(&mut third_pass_categories, &parent, 0) {
                         parent_category.children.insert(cat.guid.clone(), cat);
@@ -200,7 +220,9 @@ impl Category {
                 panic!("Some bad logic at works");
             }
         }
-        debug!("reassemble_categories {:?}", root);
+        let elaspsed_tree_insertion = start_tree_insertion.elapsed().unwrap_or_default();
+        report.telemetry.categories_reassemble.tree_insertion = elaspsed_tree_insertion.as_millis();
+        debug!("reassemble_categories end {:?}", root);
         root
     }
     

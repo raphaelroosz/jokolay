@@ -2,14 +2,13 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet}, sync::Arc
 };
 
-use indexmap::IndexMap;
-use joko_package_models::{attributes::{Behavior, CommonAttributes}, category::Category, map::MapData, package::PackCore, trail::TBin};
+use joko_package_models::{attributes::{Behavior, CommonAttributes}, category::Category, map::MapData, package::{PackageImportReport, PackCore}, trail::TBin};
 use ordered_hash_map::OrderedHashMap;
 
 use cap_std::fs_utf8::Dir;
 use egui::{ColorImage, TextureHandle};
 use image::EncodableLayout;
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info, info_span, trace};
 use uuid::Uuid;
 
 use crate::{
@@ -30,14 +29,19 @@ use crate::manager::pack::category_selection::CategorySelection;
 use crate::manager::package::{PACKAGES_DIRECTORY_NAME, PACKAGE_MANAGER_DIRECTORY_NAME};
 
 
+type ImportAllTriplet = (BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>, BTreeMap<Uuid, PackageImportReport>);
+type ImportTriplet = (LoadedPackData, LoadedPackTexture, PackageImportReport);
+
 //TODO: separate in front and back tasks
 pub (crate) struct PackTasks {
     //an object that can handle such tasks should be passed as argument of any function that may required an async action
     save_texture_task: AsyncTask<LoadedPackTexture, Result<()>>,
     save_data_task: AsyncTask<LoadedPackData, Result<()>>,
-    load_all_packs_task: AsyncTask<Arc<Dir>, Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>>
+    save_report_task: AsyncTask<(Arc<Dir>, PackageImportReport), Result<()>>,
+    load_all_packs_task: AsyncTask<Arc<Dir>, Result<ImportAllTriplet>>
 }
 
+//TOOD: move the LoadedPackData & LoadedPackTexture to joko_package_models ? The problem is about the messages to be sent. Where to put them ? and at the cost of which dependancy ?
 #[derive(Clone)]
 pub struct LoadedPackData {
     pub name: String,
@@ -45,7 +49,7 @@ pub struct LoadedPackData {
     pub dir: Arc<Dir>,
     /// The actual xml pack.
     //pub core: PackCore,
-    pub categories: IndexMap<Uuid, Category>,
+    pub categories: OrderedHashMap<Uuid, Category>,
     pub all_categories: HashMap<String, Uuid>,
     pub source_files: BTreeMap<String, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
     pub maps: HashMap<u32, MapData>,
@@ -76,7 +80,7 @@ pub struct LoadedPackTexture {
     current_map_data: CurrentMapData,
     activation_data: ActivationData,
     active_elements: HashSet<Uuid>,//which are the active elements (loaded)
-    pub late_discovery_categories: HashSet<Uuid>,//categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
+    //pub report: ImportQualityReport,//categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
     _is_dirty: bool,
 }
 
@@ -85,6 +89,7 @@ impl PackTasks {
         Self {
             save_texture_task: AsyncTaskGuard::new(PackTasks::async_save_texture),
             save_data_task: AsyncTaskGuard::new(PackTasks::async_save_data),
+            save_report_task: AsyncTaskGuard::new(PackTasks::async_save_report),
             load_all_packs_task: AsyncTaskGuard::new(load_all_from_dir),
         }
     }
@@ -102,7 +107,7 @@ impl PackTasks {
     pub fn save_texture(&self, texture_pack: &mut LoadedPackTexture, status: bool) {
         if status {
             std::mem::take(&mut texture_pack._is_dirty);
-            self.save_texture_task.lock().unwrap().send(
+            let _ = self.save_texture_task.lock().unwrap().send(
                 texture_pack.clone()
             );
         }
@@ -111,17 +116,24 @@ impl PackTasks {
     pub fn save_data(&self, data_pack: &mut LoadedPackData, status: bool) {
         if status {
             std::mem::take(&mut data_pack._is_dirty);
-            self.save_data_task.lock().unwrap().send(
+            let _ = self.save_data_task.lock().unwrap().send(
                 data_pack.clone()
             );
         }
     }
+    pub fn save_report(&self, target_dir: Arc<Dir>, report: PackageImportReport, status: bool) {
+        if status {
+            let _ = self.save_report_task.lock().unwrap().send(
+                (target_dir, report)
+            );
+        }
+    }
     pub fn load_all_packs(&self, jokolay_dir: Arc<Dir>) {
-        self.load_all_packs_task.lock().unwrap().send(
+        let _ = self.load_all_packs_task.lock().unwrap().send(
             jokolay_dir
         );
     }
-    pub fn wait_for_load_all_packs(&self) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)> {
+    pub fn wait_for_load_all_packs(&self) -> Result<ImportAllTriplet> {
         self.load_all_packs_task.lock().unwrap().recv().unwrap()
     }
 
@@ -139,7 +151,7 @@ impl PackTasks {
     fn async_save_texture(
         pack_texture: LoadedPackTexture
     ) -> Result<()> {
-        info!("Save texture package {:?}", pack_texture.dir);
+        trace!("Save texture package {:?}", pack_texture.dir);
         match serde_json::to_string_pretty(&pack_texture.selectable_categories) {
             Ok(cs_json) => match pack_texture.dir.write(LoadedPackData::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                 Ok(_) => {
@@ -177,7 +189,7 @@ impl PackTasks {
     fn async_save_data(
         pack_data: LoadedPackData
     ) -> Result<()> {
-        info!("Save data package {:?}", pack_data.dir);
+        trace!("Save data package {:?}", pack_data.dir);
         pack_data.dir
             .create_dir_all(LoadedPackData::CORE_PACK_DIR_NAME)
             .into_diagnostic()
@@ -190,6 +202,27 @@ impl PackTasks {
             &pack_data,
             &writing_directory,
         )?;
+        Ok(())
+    }
+
+    fn async_save_report(
+        input: (Arc<Dir>, PackageImportReport)
+    ) -> Result<()> {
+        let (writing_directory, report,) = input;
+        trace!("Save report package {:?}", writing_directory);
+        match serde_json::to_string_pretty(&report) {
+            Ok(cs_json) => match writing_directory.write(PackageImportReport::REPORT_FILE_NAME, cs_json) {
+                Ok(_) => {
+                    debug!("wrote import quality report to disk");
+                }
+                Err(e) => {
+                    debug!(?e, "failed to write import quality report to disk");
+                }
+            },
+            Err(e) => {
+                error!(?e, "failed to serialize import quality report");
+            }
+        }
         Ok(())
     }
 
@@ -303,7 +336,7 @@ impl LoadedPackData {
         self._is_dirty
     }
 
-    pub fn tick(
+    pub(crate) fn tick(
         &mut self,
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         loop_index: u128,
@@ -319,7 +352,7 @@ impl LoadedPackData {
             tasks.change_map(self, b2u_sender, link, currently_used_files);
             let mut active_elements: HashSet<Uuid> = Default::default();
             self.on_map_changed(b2u_sender, link, currently_used_files, &mut active_elements);
-            b2u_sender.send(BackToUIMessage::PackageActiveElements(self.uuid, active_elements.clone()));
+            let _ = b2u_sender.send(BackToUIMessage::PackageActiveElements(self.uuid, active_elements.clone()));
             self.active_elements = active_elements.clone();
             next_loaded.extend(active_elements);
         }
@@ -408,7 +441,7 @@ impl LoadedPackData {
                         }
                     }
                     if let Some(tex_path) = common_attributes.get_icon_file() {
-                        b2u_sender.send(BackToUIMessage::MarkerTexture(self.uuid, tex_path.clone(), marker.guid, marker.position, common_attributes));
+                        let _ = b2u_sender.send(BackToUIMessage::MarkerTexture(self.uuid, tex_path.clone(), marker.guid, marker.position, common_attributes));
                     } else {
                         debug!("no texture attribute on this marker");
                     }
@@ -440,7 +473,7 @@ impl LoadedPackData {
                     let mut common_attributes = trail.props.clone();
                     common_attributes.inherit_if_attr_none(category_attributes);
                     if let Some(tex_path) = common_attributes.get_texture() {
-                        b2u_sender.send(BackToUIMessage::TrailTexture(self.uuid, tex_path.clone(), trail.guid, common_attributes));
+                        let _ = b2u_sender.send(BackToUIMessage::TrailTexture(self.uuid, tex_path.clone(), trail.guid, common_attributes));
                     } else {
                         debug!("no texture attribute on this trail");
                     }
@@ -474,6 +507,7 @@ impl LoadedPackTexture {
         u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         ui: &mut egui::Ui, 
         show_only_active: bool, 
+        import_quality_report: &PackageImportReport,
     ) {
         //it is important to generate a new id each time to avoid collision
         ui.push_id(ui.next_auto_id(), |ui| {
@@ -484,18 +518,18 @@ impl LoadedPackTexture {
                 ui,
                 &mut self._is_dirty,
                 show_only_active,
-                &self.late_discovery_categories
+                &import_quality_report
             );
         });
         if self._is_dirty {
-            u2b_sender.send(UIToBackMessage::CategoryActivationStatusChanged);
+            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationStatusChanged);
         }
     }
 
     pub fn is_dirty(&self) -> bool {
         self._is_dirty
     }
-    pub fn tick(
+    pub(crate) fn tick(
         &mut self,
         u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         _timestamp: f64,
@@ -512,15 +546,15 @@ impl LoadedPackTexture {
             self.current_map_data.wip_trails.len(),
         );
         let mut marker_objects = Vec::new();
-        for (uuid, marker) in self.current_map_data.active_markers.iter() {
+        for marker in self.current_map_data.active_markers.values() {
             if let Some(mo) = marker.get_vertices_and_texture(link, z_near) {
                 marker_objects.push(mo);
             }
         }
         tracing::trace!("LoadedPackTexture.tick: {}, markers {}", self.name, marker_objects.len());
-        u2u_sender.send(UIToUIMessage::BulkMarkerObject(marker_objects));
+        let _ = u2u_sender.send(UIToUIMessage::BulkMarkerObject(marker_objects));
         let mut trail_objects = Vec::new();
-        for (uuid, trail) in self.current_map_data.active_trails.iter() {
+        for trail in self.current_map_data.active_trails.values() {
             trail_objects.push(TrailObject {
                 vertices: trail.trail_object.vertices.clone(),
                 texture: trail.trail_object.texture,
@@ -528,7 +562,7 @@ impl LoadedPackTexture {
             //next_on_screen.insert(*uuid);
         }
         tracing::trace!("LoadedPackTexture.tick: {}, trails {}", self.name, trail_objects.len());
-        u2u_sender.send(UIToUIMessage::BulkTrailObject(trail_objects));
+        let _ = u2u_sender.send(UIToUIMessage::BulkTrailObject(trail_objects));
     }
 
     pub fn swap(&mut self) {
@@ -567,7 +601,7 @@ impl LoadedPackTexture {
                     ),
                 );
             } else {
-                info!(%tex_path, "failed to find this icon texture");
+                error!(%tex_path, "failed to find this icon texture");
             }
         }
         let th = self.current_map_data.active_textures.get(tex_path)
@@ -615,10 +649,10 @@ impl LoadedPackTexture {
                     ),
                 );
             } else {
-                info!(%tex_path, "failed to find this trail texture");
+                error!(%tex_path, "failed to find this trail texture");
             }
         } else {
-            debug!("Trail texture alreadu loaded {:?}", tex_path);
+            trace!("Trail texture already loaded {:?}", tex_path);
         }
         let texture_path = common_attributes.get_texture();
         let th = texture_path
@@ -673,10 +707,13 @@ pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
     Ok(marker_packs_dir)
 }
 
-pub fn load_all_from_dir(jokolay_dir: Arc<Dir>) -> Result<(BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>)>{
+pub fn load_all_from_dir(jokolay_dir: Arc<Dir>)
+ -> Result<ImportAllTriplet>
+ {
     let marker_packs_dir = jokolay_to_marker_dir(&jokolay_dir)?;
     let mut data_packs: BTreeMap<Uuid, LoadedPackData> = Default::default();
     let mut texture_packs: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
+    let mut report_packs: BTreeMap<Uuid, PackageImportReport> = Default::default();
 
 
     for entry in marker_packs_dir
@@ -698,9 +735,10 @@ pub fn load_all_from_dir(jokolay_dir: Arc<Dir>) -> Result<(BTreeMap<Uuid, Loaded
 
                 match build_from_dir(name.clone(), pack_dir.into()) {
                     Ok(lp) => {
-                        let (data, tex) = lp;
+                        let (data, tex, report) = lp;
                         data_packs.insert(data.uuid, data);
                         texture_packs.insert(tex.uuid, tex);
+                        report_packs.insert(report.uuid, report);
                     }
                     Err(e) => {
                         error!(?e, "failed to load pack from directory: {}", name);
@@ -710,10 +748,10 @@ pub fn load_all_from_dir(jokolay_dir: Arc<Dir>) -> Result<(BTreeMap<Uuid, Loaded
             }
         }
     }
-    Ok((data_packs, texture_packs))
+    Ok((data_packs, texture_packs, report_packs))
 }
 
-fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<(LoadedPackData, LoadedPackTexture)> {
+fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<ImportTriplet> {
     if !pack_dir
         .try_exists(LoadedPackData::CORE_PACK_DIR_NAME)
         .into_diagnostic()
@@ -734,7 +772,7 @@ fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<(LoadedPackData, L
 }
 
 
-pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> (LoadedPackData, LoadedPackTexture) {
+pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> ImportTriplet {
     let selectable_categories = LoadedPackData::load_selectable_categories(&pack_dir, &core);
     let data = LoadedPackData {
         name: name.clone(),
@@ -778,11 +816,11 @@ pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> (Loa
         _is_dirty: false,
         activation_data,
         dir: Arc::clone(&pack_dir),
-        late_discovery_categories: core.late_discovery_categories,
         name: name,
         tbins: core.tbins,
         active_elements: Default::default(),
     };
-    (data, tex)
+    let report = core.report;
+    (data, tex, report)
 }
 

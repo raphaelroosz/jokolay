@@ -3,7 +3,7 @@ use std::{
 };
 
 use glam::Vec3;
-use joko_package_models::attributes::CommonAttributes;
+use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 use tribool::Tribool;
 use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
@@ -64,6 +64,7 @@ pub struct PackageUIManager {
     default_marker_texture: Option<TextureHandle>,
     default_trail_texture: Option<TextureHandle>,
     packs: BTreeMap<Uuid, LoadedPackTexture>,
+    reports: BTreeMap<Uuid, PackageImportReport>,
     tasks: PackTasks,
 
     currently_used_files: BTreeMap<String, bool>,
@@ -210,10 +211,10 @@ impl PackageDataManager {
                         }
                     }
                 }
-                let mut tasks = &self.tasks;
-                for (uuid, pack) in self.packs.iter_mut() {
+                let tasks = &self.tasks;
+                for pack in self.packs.values_mut() {
                     let span_guard = info_span!("Updating package status").entered();
-                    b2u_sender.send(BackToUIMessage::NbTasksRunning(tasks.count()));
+                    let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(tasks.count()));
                     tasks.save_data(pack, pack.is_dirty());
                     pack.tick(
                         &b2u_sender,
@@ -229,13 +230,13 @@ impl PackageDataManager {
                 }
                 if map_changed {
                     self.get_active_elements_parents(categories_and_elements_to_be_loaded);
-                    b2u_sender.send(BackToUIMessage::ActiveElements(self.loaded_elements.clone()));
+                    let _ = b2u_sender.send(BackToUIMessage::ActiveElements(self.loaded_elements.clone()));
                 }
                 if map_changed || have_used_files_list_changed || choice_of_category_changed {
                     //there is no point in sending a new list if nothing changed
-                    b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(currently_used_files.clone()));
+                    let _ = b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(currently_used_files.clone()));
                     self.currently_used_files = currently_used_files;
-                    b2u_sender.send(BackToUIMessage::TextureSwapChain);
+                    let _ = b2u_sender.send(BackToUIMessage::TextureSwapChain);
                 }
             },
             None => {},
@@ -247,7 +248,7 @@ impl PackageDataManager {
             self.packs.remove(&uuid);
         }
     }
-    pub fn save(&mut self, mut data_pack: LoadedPackData) -> Uuid {
+    pub fn save(&mut self, mut data_pack: LoadedPackData, mut report: PackageImportReport) -> Uuid {
         let mut to_delete: Vec<Uuid> = Vec::new();
         for (uuid, pack) in self.packs.iter() {
             if pack.name == data_pack.name {
@@ -255,6 +256,7 @@ impl PackageDataManager {
             }
         }
         self.delete_packs(to_delete);
+        self.tasks.save_report(Arc::clone(&data_pack.dir), report, true);
         self.tasks.save_data(&mut data_pack, true);
         let mut uuid_to_insert = data_pack.uuid.clone();
         while self.packs.contains_key(&uuid_to_insert) {//collision avoidance
@@ -273,17 +275,18 @@ impl PackageDataManager {
     ) {
         once::assert_has_not_been_called!("Early load must happen only once");
         // Called only once at application start.
-        b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
+        let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
         self.tasks.load_all_packs(jokolay_dir);
-        if let Ok((data_packages, texture_packages)) = self.tasks.wait_for_load_all_packs() {
+        if let Ok((data_packages, texture_packages, report_packages)) = self.tasks.wait_for_load_all_packs() {
             for (uuid, data_pack) in data_packages {
                 self.packs.insert(uuid, data_pack);
             }
-            for (uuid, texture_pack) in texture_packages {
-                b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack));
+            for ((_, texture_pack), (_, report)) in std::iter::zip(texture_packages, report_packages) {
+                let _ = b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack, report));
             }
-            b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
+            let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
         }
+        let _ = b2u_sender.send(BackToUIMessage::FirstLoadDone);
         
     }
 
@@ -295,6 +298,7 @@ impl PackageUIManager {
         Self {
             packs,
             tasks: PackTasks::new(),
+            reports: Default::default(),
             default_marker_texture: None,
             default_trail_texture: None,
 
@@ -340,6 +344,7 @@ impl PackageUIManager {
     pub fn delete_packs(&mut self, to_delete: Vec<Uuid>) {
         for uuid in to_delete {
             self.packs.remove(&uuid);
+            self.reports.remove(&uuid);
         }
     }
     pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
@@ -443,8 +448,8 @@ impl PackageUIManager {
         link: &MumbleLink,
         z_near: f32,
     ) {
-        let mut tasks = &self.tasks;
-        for (uuid, pack) in self.packs.iter_mut() {
+        let tasks = &self.tasks;
+        for pack in self.packs.values_mut() {
             let span_guard = info_span!("Updating package status").entered();
             tasks.save_texture(pack, pack.is_dirty());
             pack.tick(
@@ -456,7 +461,7 @@ impl PackageUIManager {
             );
             std::mem::drop(span_guard);
         }
-        u2u_sender.send(UIToUIMessage::RenderSwapChain);
+        let _ = u2u_sender.send(UIToUIMessage::RenderSwapChain);
         //u2u_sender.send(UIToUIMessage::Present);
     }
 
@@ -480,17 +485,17 @@ impl PackageUIManager {
             }
             if ui.button("Activate all elements").clicked() {
                 self.category_set_all(true);
-                u2b_sender.send(UIToBackMessage::CategorySetAll(true));
+                let _ = u2b_sender.send(UIToBackMessage::CategorySetAll(true));
             }
             if ui.button("Deactivate all elements").clicked() {
                 self.category_set_all(false);
-                u2b_sender.send(UIToBackMessage::CategorySetAll(false));
+                let _ = u2b_sender.send(UIToBackMessage::CategorySetAll(false));
             }
 
-            for pack in self.packs.values_mut() {
+            for (pack, import_quality_report) in std::iter::zip(self.packs.values_mut(), self.reports.values()) {
                 //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
                 //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
-                pack.category_sub_menu(u2b_sender, u2u_sender, ui, self.show_only_active);
+                pack.category_sub_menu(u2b_sender, u2u_sender, ui, self.show_only_active, &import_quality_report);
             }
             
         });
@@ -569,19 +574,23 @@ impl PackageUIManager {
             Ok(())
         });
         if files_changed {
-            event_sender.send(UIToBackMessage::ActiveFiles(self.currently_used_files.clone()));
+            let _ = event_sender.send(UIToBackMessage::ActiveFiles(self.currently_used_files.clone()));
         }
     }
-    fn gui_package_loader(
+    fn gui_package_list(
         &mut self, 
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context, 
         import_status: &Arc<Mutex<ImportStatus>>,
-        open: &mut bool
+        open: &mut bool,
+        first_load_done: bool,
     ) {
         Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
             CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
                 egui::Grid::new("packs").striped(true).show(ui, |ui| {
+                    if !first_load_done {
+                        ui.label("Loading in progress...");
+                    }
                     let mut to_delete = vec![];
                     for pack in self.packs.values() {
                         ui.label(pack.name.clone());
@@ -591,10 +600,13 @@ impl PackageUIManager {
                         if ui.button("Details").clicked() {
                             //TODO
                         }
+                        if ui.button("Export").clicked() {
+                            //TODO
+                        }
                         ui.end_row();
                     }
                     if !to_delete.is_empty() {
-                        u2b_sender.send(UIToBackMessage::DeletePacks(to_delete));
+                        let _ = u2b_sender.send(UIToBackMessage::DeletePacks(to_delete));
                     }
                 });
             });
@@ -607,7 +619,7 @@ impl PackageUIManager {
                             //let import_status = import_status.lock().unwrap();
                             Self::pack_importer(Arc::clone(import_status));
                         }
-                        ui.label("import not started yet");
+                        //ui.label("import not started yet");
                     }
                     ImportStatus::WaitingForFileChooser => {
                         ui.label(
@@ -626,7 +638,7 @@ impl PackageUIManager {
                                 ui.text_edit_singleline(name);
                             });
                             if ui.button("save").clicked() {
-                                u2b_sender.send(UIToBackMessage::SavePack(name.clone(), pack.clone()));
+                                let _ = u2b_sender.send(UIToBackMessage::SavePack(name.clone(), pack.clone()));
                             }
                         }
                     }
@@ -654,14 +666,15 @@ impl PackageUIManager {
         is_marker_open: &mut bool, 
         import_status: &Arc<Mutex<ImportStatus>>,
         is_file_open: &mut bool, 
+        first_load_done: bool,
         timestamp: f64,
         link: Option<&MumbleLink>
     ) {
-        self.gui_package_loader(u2b_sender, etx, import_status, is_marker_open);
+        self.gui_package_list(u2b_sender, etx, import_status, is_marker_open, first_load_done);
         self.gui_file_manager(u2b_sender, etx, is_file_open, link);
     }
 
-    pub fn save(&mut self, mut texture_pack: LoadedPackTexture) {
+    pub fn save(&mut self, mut texture_pack: LoadedPackTexture, report: PackageImportReport) {
         /*
             We save in a file with the name of the package, while we keep track of it from a uuid point of view.
             It means we can have duplicates unless package with same name is deleted.
@@ -675,6 +688,7 @@ impl PackageUIManager {
         self.delete_packs(to_delete);
         self.tasks.save_texture(&mut texture_pack, true);
         self.packs.insert(texture_pack.uuid, texture_pack);
+        self.reports.insert(report.uuid, report);
     }
 }
 

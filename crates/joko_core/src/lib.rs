@@ -25,22 +25,28 @@ pub mod task;
 pub struct RelativePath(SmolStr);
 #[allow(unused)]
 impl RelativePath {
+    pub fn normalize(path: &str) -> String {
+        let normalized_slash = path.replace("\\", "/");
+        let trimmed_path = normalized_slash.trim_start_matches('/');
+        let lower_case = trimmed_path.to_lowercase();
+        lower_case
+    }
+
     pub fn join_str(&self, path: &str) -> Self {
-        let path = path.trim_start_matches('/');
-        if path.is_empty() {
+        let normalized_path = RelativePath::normalize(path);
+        if normalized_path.is_empty() {
             return Self(self.0.clone());
         }
-        let lower_case = path.to_lowercase();
         if self.0.is_empty() {
             // no need to push `/` if we are empty, as that would make it an absolute path
-            return Self(lower_case.into());
+            return Self(normalized_path.into());
         }
 
         let mut new = self.0.to_string();
         if !self.0.ends_with('/') {
             new.push('/');
         }
-        new.push_str(&lower_case);
+        new.push_str(&normalized_path);
         Self(new.into())
     }
 
@@ -86,11 +92,11 @@ impl FromStr for RelativePath {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let path = s.trim_start_matches('/');
+        let path = RelativePath::normalize(s);
         if path.is_empty() {
             return Ok(Self::default());
         }
-        Ok(Self(path.to_lowercase().into()))
+        Ok(Self(path.into()))
     }
 }
 

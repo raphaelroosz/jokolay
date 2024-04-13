@@ -63,8 +63,8 @@ impl MumbleManager {
         }
 
         if !self.backend.is_alive() {
-            self.link.client_size.x = self.link.client_size.x.max(1024);
-            self.link.client_size.y = self.link.client_size.y.max(768);
+            self.link.client_size.x = -1;
+            self.link.client_size.y = -1;
             self.link.changes = BitFlags::all();
             return Ok(Some(&self.link));
         }

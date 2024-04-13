@@ -1,5 +1,3 @@
-
-use egui;
 use egui::DragValue;
 use jmf::message::UIToBackMessage;
 use jokolink::MumbleLink;
@@ -18,11 +16,11 @@ pub fn mumble_gui(
             ui.horizontal(|ui| {
                 if ui.selectable_label(!*editable_mumble, "live").clicked() {
                     *editable_mumble = false;
-                    u2b_sender.send(UIToBackMessage::MumbleLinkAutonomous);
+                    let _ = u2b_sender.send(UIToBackMessage::MumbleLinkAutonomous);
                 }
                 if ui.selectable_label(*editable_mumble, "editable").clicked() {
                     *editable_mumble = true;
-                    u2b_sender.send(UIToBackMessage::MumbleLinkBindedOnUI);
+                    let _ = u2b_sender.send(UIToBackMessage::MumbleLinkBindedOnUI);
                 }
             });
             if *editable_mumble {
