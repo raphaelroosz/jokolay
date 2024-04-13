@@ -76,7 +76,31 @@ impl Category {
             children: Default::default()
         }
     }
+    pub fn per_route<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, route: &Vec<&str>, depth: usize) -> Option<&'a mut Category> {
+        let mut route = route.clone();
+        route.reverse();
+        Category::_per_route(categories, &mut route, depth)
+    }
+    fn _per_route<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, route: &mut Vec<&str>, depth: usize) -> Option<&'a mut Category> {
+        if let Some(relative_category_name) = route.pop() {
+            for (_, cat) in categories {
+                if cat.relative_category_name == relative_category_name {
+                    if route.is_empty() {
+                        return Some(cat);
+                    } else {
+                        return Category::_per_route(&mut cat.children, route, depth + 1);
+                    }
+                }
+            }
+        }
+        return None;
+    }
     pub fn per_uuid<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, uuid: &Uuid, depth: usize) -> Option<&'a mut Category> {
+        /*
+        Do a look up in the tree based on uuid. Whole tree is scanned until a match is found.
+
+        WARNING: very inefficient in the general case.
+        */
         for (_, cat) in categories {
             if &cat.guid == uuid {
                 return Some(cat);
@@ -193,9 +217,9 @@ impl Category {
             
             debug!("{} parent is {:?}", key , parent);
             let cat = Category::from(&value, parent);
-            let ref_uuid = cat.guid.clone();
+            let cat_ref = cat.guid.clone();
             if third_pass_categories.insert(cat.guid.clone(), cat).is_none() {
-                third_pass_categories_ref.push(ref_uuid);
+                third_pass_categories_ref.push(cat_ref);
             }
         }
         let elaspsed_parent_child_relationship = start_parent_child_relationship.elapsed().unwrap_or_default();
@@ -205,10 +229,12 @@ impl Category {
         let start_tree_insertion = std::time::SystemTime::now();
         for full_category_uuid in third_pass_categories_ref {
             if let Some(cat) = third_pass_categories.remove(&full_category_uuid) {
+                let mut route = Vec::from_iter(cat.full_category_name.split('.'));
+                route.pop();//it is now the parent route
                 if let Some(parent) = cat.parent {
-                    if let Some(parent_category) = Category::per_uuid(&mut third_pass_categories, &parent, 0) {
+                    if let Some(parent_category) = Category::per_route(&mut third_pass_categories, &route, 0) {
                         parent_category.children.insert(cat.guid.clone(), cat);
-                    } else if let Some(parent_category) = Category::per_uuid(&mut root, &parent, 0) {
+                    } else if let Some(parent_category) = Category::per_route(&mut root, &route, 0) {
                         parent_category.children.insert(cat.guid.clone(), cat);
                     } else {
                         panic!("Could not find parent {} for {:?}", parent, cat);

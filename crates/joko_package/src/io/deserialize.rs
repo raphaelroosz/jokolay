@@ -8,7 +8,7 @@ use cap_std::fs_utf8::{Dir, DirEntry};
 use glam::Vec3;
 use std::{collections::{VecDeque, HashMap}, io::Read};
 use ordered_hash_map::OrderedHashMap;
-use tracing::{debug, info, info_span, instrument, trace, warn};
+use tracing::{debug, error, info, info_span, instrument, trace, warn};
 use uuid::Uuid;
 use xot::{Node, Xot, Element};
 
@@ -481,7 +481,12 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
                     continue;
                 }
                 //FIXME: this needs to be changed for partial load
-                let category_uuid = target.get_category_uuid(&full_category_name).unwrap().clone();//categories MUST exist, they have already been parsed
+                let opt_cat_uuid = target.get_category_uuid(&full_category_name);
+                if opt_cat_uuid.is_none() {
+                    error!("Mandatory category missing, packge is corrupted {:?} {:?}", map_id, child_element);
+                    return Err(miette::Report::msg(format!("Mandatory category missing, packge is corrupted {:?} {:?}", map_xml_str, child_element)));
+                }
+                let category_uuid = opt_cat_uuid.unwrap().clone();//categories MUST exist, they have already been parsed
                 let guid = raw_uid.and_then(|guid| {
                         let mut buffer = [0u8; 20];
                         BASE64_ENGINE
