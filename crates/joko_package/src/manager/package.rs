@@ -1,10 +1,9 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, Mutex}
+    collections::{BTreeMap, HashMap, HashSet}, sync::{Arc, Mutex}
 };
 
 use glam::Vec3;
 use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
-use tribool::Tribool;
 use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
 use image::EncodableLayout;
@@ -17,7 +16,7 @@ use miette::Result;
 use uuid::Uuid;
 use crate::message::{UIToBackMessage, UIToUIMessage};
 
-use crate::{message::BackToUIMessage};
+use crate::message::BackToUIMessage;
 use crate::manager::pack::loaded::{LoadedPackData, PackTasks, LoadedPackTexture};
 use crate::manager::pack::import::ImportStatus;
 
@@ -49,7 +48,6 @@ pub struct PackageDataManager {
     pub packs: BTreeMap<Uuid, LoadedPackData>,
     tasks: PackTasks,
     current_map_id: u32,
-    show_only_active: bool,
     /// This is the interval in number of seconds when we check if any of the packs need to be saved due to changes.
     /// This allows us to avoid saving the pack too often.
     pub save_interval: f64,
@@ -57,7 +55,6 @@ pub struct PackageDataManager {
     pub currently_used_files: BTreeMap<Uuid, bool>,
     parents: HashMap<Uuid, Uuid>,
     loaded_elements: HashSet<Uuid>,
-    on_screen: BTreeSet<Uuid>,
 }
 #[must_use]
 pub struct PackageUIManager {
@@ -68,8 +65,7 @@ pub struct PackageUIManager {
     tasks: PackTasks,
 
     currently_used_files: BTreeMap<Uuid, bool>,
-    all_files_tribool: Tribool,
-    all_files_toggle: bool,
+    all_files_activation_status: bool,// this consume a change of display event
     show_only_active: bool,
 }
 
@@ -90,11 +86,9 @@ impl PackageDataManager {
             //_marker_manager_dir: marker_manager_dir.into(),
             current_map_id: 0,
             save_interval: 0.0,
-            show_only_active: true,
             currently_used_files: Default::default(),
             parents: Default::default(),
             loaded_elements: Default::default(),
-            on_screen: Default::default(),
         })
     }
 
@@ -302,8 +296,7 @@ impl PackageUIManager {
             default_marker_texture: None,
             default_trail_texture: None,
 
-            all_files_tribool: Tribool::True,
-            all_files_toggle: false,
+            all_files_activation_status: false,
             show_only_active: true,
             currently_used_files: Default::default()// UI copy to (de-)activate files
         }
@@ -549,27 +542,55 @@ impl PackageUIManager {
                     .num_columns(4)
                     .striped(true)
                     .show(ui, |ui| {
-                        if self.all_files_tribool.is_indeterminate(){
-                            ui.add(egui::Checkbox::new(&mut self.all_files_toggle, "File").indeterminate(true));
-                        } else {
-                            ui.checkbox(&mut self.all_files_toggle, "File");
-                        }
+                        let mut all_files_toggle = false;
+                        ui.horizontal(|ui|{
+                            if ui.button("activate all").clicked() {
+                                self.all_files_activation_status = true;
+                                all_files_toggle = true;
+                            }
+                            if ui.button("deactivate all").clicked() {
+                                self.all_files_activation_status = false;
+                                all_files_toggle = true;
+                            }
+                        });
                         //ui.label("Trails");
                         //ui.label("Markers");
                         ui.end_row();
                         
                         for pack in self.packs.values_mut() {
                             let report = self.reports.get(&pack.uuid).unwrap();
-                            for (source_file_uuid, is_selected) in pack.source_files.iter_mut() {
-                                if self.currently_used_files.contains_key(source_file_uuid) {
+                            let mut pack_files_toggle = false;
+                            let mut pack_files_activation_status = true;
+                            ui.horizontal(|ui|{
+                                ui.label(&pack.name);
+                                if ui.button("activate all").clicked() {
+                                    pack_files_activation_status = true;
+                                    pack_files_toggle = true;
+                                }
+                                if ui.button("deactivate all").clicked() {
+                                    pack_files_activation_status = false;
+                                    pack_files_toggle = true;
+                                }
+                            });
+                            ui.end_row();
+                            for source_file_uuid in pack.source_files.keys() {
+                                if let Some(is_selected) = self.currently_used_files.get_mut(source_file_uuid) {
+                                    if all_files_toggle {
+                                        *is_selected = self.all_files_activation_status;
+                                    }
+                                    if pack_files_toggle {
+                                        *is_selected = pack_files_activation_status;
+                                    }
+                                    ui.add_space(3.0);
                                     //reports may be corrupted or not loaded, files are there
                                     if let Some(source_file_name) = report.source_file_uuid_to_name(source_file_uuid) {
-                                        //FIXME: format the file from reports and packages + ensure there is the package name as a prefix
+                                        //format the file from reports and packages + prefix with the package name
                                         let cb = ui.checkbox(is_selected, format!("{}: {}", pack.name, source_file_name));
                                         if cb.changed() {
                                             files_changed = true;
                                         }
                                     } else {
+                                        // Import report is corrupted, only print reference
                                         let cb = ui.checkbox(is_selected, format!("{}: {}", pack.name, source_file_uuid));
                                         if cb.changed() {
                                             files_changed = true;

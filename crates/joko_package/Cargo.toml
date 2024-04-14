@@ -34,7 +34,6 @@ serde_json = { workspace = true }
 smol_str = { workspace = true }
 time = { workspace = true , features = ["serde"]}
 tracing = { workspace = true }
-tribool = "0.3.0"
 url = { workspace = true }
 uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 xot = { version = "0.16.0" }

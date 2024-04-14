@@ -1431,7 +1431,6 @@ dependencies = [
  "smol_str",
  "time",
  "tracing",
- "tribool",
  "url",
  "uuid",
  "xot",
@@ -2806,12 +2805,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
-
-[[package]]
-name = "tribool"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e8660361502033a51e119386b47fbb811e5706722f2e91ccf867aa6b2b09f90"
 
 [[package]]
 name = "ttf-parser"
