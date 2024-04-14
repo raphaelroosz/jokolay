@@ -26,7 +26,6 @@ smol_str = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
-vector-map = "1.0.1"
 xot = { version = "0.16.0" }
 
 

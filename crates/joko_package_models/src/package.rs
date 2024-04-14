@@ -3,7 +3,7 @@ use joko_core::RelativePath;
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use tracing::{debug, trace};
 use uuid::Uuid;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use ordered_hash_map::OrderedHashMap;
 use crate::marker::Marker;
 use crate::route::{route_to_tbin, route_to_trail, Route};
@@ -120,8 +120,8 @@ pub struct PackageImportTelemetry {
     pub categories_first_pass: u128,
     pub categories_second_pass: u128,
     pub categories_registering: u128,
-    pub elements_registering: u128,
     pub categories_reassemble: PackageImportReassembleTelemetry,
+    pub elements_registering: u128,
 }
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PackageImportReport {
