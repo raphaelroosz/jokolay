@@ -54,7 +54,7 @@ pub struct PackageDataManager {
     /// This allows us to avoid saving the pack too often.
     pub save_interval: f64,
 
-    pub currently_used_files: BTreeMap<String, bool>,
+    pub currently_used_files: BTreeMap<Uuid, bool>,
     parents: HashMap<Uuid, Uuid>,
     loaded_elements: HashSet<Uuid>,
     on_screen: BTreeSet<Uuid>,
@@ -67,7 +67,7 @@ pub struct PackageUIManager {
     reports: BTreeMap<Uuid, PackageImportReport>,
     tasks: PackTasks,
 
-    currently_used_files: BTreeMap<String, bool>,
+    currently_used_files: BTreeMap<Uuid, bool>,
     all_files_tribool: Tribool,
     all_files_toggle: bool,
     show_only_active: bool,
@@ -98,7 +98,7 @@ impl PackageDataManager {
         })
     }
 
-    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
+    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<Uuid, bool>) {
         self.currently_used_files = currently_used_files;
     }
 
@@ -181,7 +181,7 @@ impl PackageDataManager {
         link: Option<&MumbleLink>,
         choice_of_category_changed: bool,
     ) {
-        let mut currently_used_files: BTreeMap<String, bool> = Default::default();
+        let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
         let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
         
         match link {
@@ -194,18 +194,18 @@ impl PackageDataManager {
                 for pack in self.packs.values_mut() {
                     if let Some(current_map) = pack.maps.get(&link.map_id) {
                         for marker in current_map.markers.values() {
-                            if let Some(is_active) = pack.source_files.get(&marker.source_file_name) {
+                            if let Some(is_active) = pack.source_files.get(&marker.source_file_uuid) {
                                 currently_used_files.insert(
-                                    marker.source_file_name.clone(), 
-                                    *self.currently_used_files.get(&marker.source_file_name).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
+                                    marker.source_file_uuid.clone(), 
+                                    *self.currently_used_files.get(&marker.source_file_uuid).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
                                 );
                             }
                         }
                         for trail in current_map.trails.values() {
-                            if let Some(is_active) = pack.source_files.get(&trail.source_file_name) {
+                            if let Some(is_active) = pack.source_files.get(&trail.source_file_uuid) {
                                 currently_used_files.insert(
-                                    trail.source_file_name.clone(), 
-                                    *self.currently_used_files.get(&trail.source_file_name).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
+                                    trail.source_file_uuid.clone(), 
+                                    *self.currently_used_files.get(&trail.source_file_uuid).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
                                 );
                             }
                         }
@@ -248,7 +248,7 @@ impl PackageDataManager {
             self.packs.remove(&uuid);
         }
     }
-    pub fn save(&mut self, mut data_pack: LoadedPackData, mut report: PackageImportReport) -> Uuid {
+    pub fn save(&mut self, mut data_pack: LoadedPackData, report: PackageImportReport) -> Uuid {
         let mut to_delete: Vec<Uuid> = Vec::new();
         for (uuid, pack) in self.packs.iter() {
             if pack.name == data_pack.name {
@@ -347,7 +347,7 @@ impl PackageUIManager {
             self.reports.remove(&uuid);
         }
     }
-    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<String, bool>) {
+    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<Uuid, bool>) {
         self.currently_used_files = currently_used_files;
     }
 
@@ -554,19 +554,30 @@ impl PackageUIManager {
                         } else {
                             ui.checkbox(&mut self.all_files_toggle, "File");
                         }
-                        ui.label("Trails");
-                        ui.label("Markers");
+                        //ui.label("Trails");
+                        //ui.label("Markers");
                         ui.end_row();
                         
-                        for file in self.currently_used_files.iter_mut() {
-                            let cb = ui.checkbox(file.1, file.0.clone());
-                            if cb.changed() {
-                                files_changed = true;
+                        for pack in self.packs.values_mut() {
+                            let report = self.reports.get(&pack.uuid).unwrap();
+                            for (source_file_uuid, is_selected) in pack.source_files.iter_mut() {
+                                if self.currently_used_files.contains_key(source_file_uuid) {
+                                    //reports may be corrupted or not loaded, files are there
+                                    if let Some(source_file_name) = report.source_file_uuid_to_name(source_file_uuid) {
+                                        //FIXME: format the file from reports and packages + ensure there is the package name as a prefix
+                                        let cb = ui.checkbox(is_selected, format!("{}: {}", pack.name, source_file_name));
+                                        if cb.changed() {
+                                            files_changed = true;
+                                        }
+                                    } else {
+                                        let cb = ui.checkbox(is_selected, format!("{}: {}", pack.name, source_file_uuid));
+                                        if cb.changed() {
+                                            files_changed = true;
+                                        }
+                                    }
+                                    ui.end_row();
+                                }
                             }
-                            if ui.button("Edit").clicked() {
-                                println!("click {}", file.0.clone());
-                            }
-                            ui.end_row();
                         }
                         ui.end_row();
                     })

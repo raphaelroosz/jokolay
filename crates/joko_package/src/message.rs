@@ -16,7 +16,7 @@ use crate::LoadedPackTexture;
 
 pub enum BackToUIMessage {
     ActiveElements(HashSet<Uuid>),//list of all elements that are loaded for current map
-    CurrentlyUsedFiles(BTreeMap<String, bool>),//when there is a change in map or anything else, the list of files is sent to ui for display
+    CurrentlyUsedFiles(BTreeMap<Uuid, bool>),//when there is a change in map or anything else, the list of files is sent to ui for display
     LoadedPack(LoadedPackTexture, PackageImportReport),//push a loaded pack to UI
     DeletedPacks(Vec<Uuid>),//push a deleted set of packs to UI
     FirstLoadDone,
@@ -32,7 +32,7 @@ pub enum BackToUIMessage {
 }
 
 pub enum UIToBackMessage {
-    ActiveFiles(BTreeMap<String, bool>),//when there is a change of files activated, send whole list to data for save.
+    ActiveFiles(BTreeMap<Uuid, bool>),//when there is a change of files activated, send whole list to data for save.
     CategoryActivationElementStatusChange(Uuid, bool),//sent each time there is a category whose activation status has been changed. With uuid being the reference of the category and bool the status.
     CategoryActivationBranchStatusChange(Uuid, bool),//same, for a whole branch
     CategoryActivationStatusChanged,//something happened that needs to reload the whole set

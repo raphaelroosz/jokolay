@@ -10,7 +10,7 @@ pub struct Trail {
     pub category: String,
     pub props: CommonAttributes,
     pub dynamic: bool,
-    pub source_file_name: String,
+    pub source_file_uuid: Uuid,
 }
 
 #[derive(Debug, Clone)]

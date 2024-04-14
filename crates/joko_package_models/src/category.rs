@@ -13,7 +13,7 @@ pub struct RawCategory {
     pub separator: bool,
     pub default_enabled: bool,
     pub props: CommonAttributes,
-    pub sources: OrderedHashMap<Uuid, String>,
+    pub sources: OrderedHashMap<Uuid, Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ impl Category {
             children: Default::default()
         }
     }
-    pub fn per_route<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, route: &Vec<&str>, depth: usize) -> Option<&'a mut Category> {
+    fn per_route<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, route: &Vec<&str>, depth: usize) -> Option<&'a mut Category> {
         let mut route = route.clone();
         route.reverse();
         Category::_per_route(categories, &mut route, depth)
@@ -95,7 +95,7 @@ impl Category {
         }
         return None;
     }
-    pub fn per_uuid<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, uuid: &Uuid, depth: usize) -> Option<&'a mut Category> {
+    fn per_uuid<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, uuid: &Uuid, depth: usize) -> Option<&'a mut Category> {
         /*
         Do a look up in the tree based on uuid. Whole tree is scanned until a match is found.
 
@@ -152,7 +152,7 @@ impl Category {
                             let new_uuid = Uuid::new_v4();
                             let relative_category_name = nth_chunk(&value.relative_category_name, '.', n);
                             debug!("reassemble_categories Partial create missing parent category: {} {} {} {}", parent_name, relative_category_name, n, new_uuid);
-                            let sources: OrderedHashMap<Uuid, String> = OrderedHashMap::new();
+                            let sources: OrderedHashMap<Uuid, Uuid> = OrderedHashMap::new();
                             let to_insert = RawCategory {
                                 default_enabled: value.default_enabled,
                                 guid: new_uuid,
@@ -171,8 +171,8 @@ impl Category {
                         }
                         n += 1;
                     }
-                    for (requester_uuid, source_file_name) in value.sources.iter() {
-                        report.found_category_late_with_details(&value.full_category_name, value.guid, requester_uuid, source_file_name);
+                    for (requester_uuid, source_file_uuid) in value.sources.iter() {
+                        report.found_category_late_with_details(&value.full_category_name, value.guid, requester_uuid, source_file_uuid);
                     }
                     report.found_category_late(&value.full_category_name, value.guid);
                     to_insert.relative_category_name = nth_chunk(&value.relative_category_name, '.', n);

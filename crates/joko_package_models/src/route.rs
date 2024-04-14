@@ -14,7 +14,7 @@ pub struct Route {
     pub map_id: u32,
     pub guid: Uuid,
     pub name: String,
-    pub source_file_name: String,
+    pub source_file_uuid: Uuid,
 }
 
 
@@ -39,7 +39,7 @@ pub(crate) fn route_to_trail(route: &Route, file_path: &RelativePath) -> Trail {
         guid: route.guid,
         props: props,
         dynamic: true,
-        source_file_name: route.source_file_name.clone(),
+        source_file_uuid: route.source_file_uuid.clone(),
     }
 }    
 

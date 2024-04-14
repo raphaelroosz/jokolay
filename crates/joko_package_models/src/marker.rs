@@ -10,6 +10,6 @@ pub struct Marker {
     pub position: Vec3,
     pub map_id: u32,
     pub category: String,
-    pub source_file_name: String,
+    pub source_file_uuid: Uuid,
     pub attrs: CommonAttributes,
 }

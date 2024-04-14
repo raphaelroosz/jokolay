@@ -51,9 +51,9 @@ pub struct LoadedPackData {
     //pub core: PackCore,
     pub categories: OrderedHashMap<Uuid, Category>,
     pub all_categories: HashMap<String, Uuid>,
-    pub source_files: BTreeMap<String, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
+    pub source_files: BTreeMap<Uuid, bool>,//TODO: have a reference containing pack name and maybe even path inside the package
     pub maps: HashMap<u32, MapData>,
-    selected_files: BTreeMap<String, bool>,
+    selected_files: BTreeMap<Uuid, bool>,
     _is_dirty: bool,//there was an edition in the package itself
 
     // loca copy in the data side of what is exposed in UI
@@ -72,6 +72,7 @@ pub struct LoadedPackTexture {
     /// Files related to Jokolay thought will have to be stored directly inside this directory, to keep the xml subdirectory clean.
     /// eg: Active categories, activation data etc..
     pub dir: Arc<Dir>,
+    pub source_files: BTreeMap<Uuid, bool>,
     pub tbins: HashMap<RelativePath, TBin>,
     pub textures: HashMap<RelativePath, Vec<u8>>,
 
@@ -80,7 +81,6 @@ pub struct LoadedPackTexture {
     current_map_data: CurrentMapData,
     activation_data: ActivationData,
     active_elements: HashSet<Uuid>,//which are the active elements (loaded)
-    //pub report: ImportQualityReport,//categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
     _is_dirty: bool,
 }
 
@@ -142,7 +142,7 @@ impl PackTasks {
         pack: &mut LoadedPackData,
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         link: &MumbleLink,
-        currently_used_files: &BTreeMap<String, bool>
+        currently_used_files: &BTreeMap<Uuid, bool>
     ) {
         //TODO
         //self.load_map_task.lock().unwrap().send(pack);
@@ -271,6 +271,28 @@ impl LoadedPackData {
             cs
         })
     }
+
+    fn load_import_report(pack_dir: &Arc<Dir>) -> Option<PackageImportReport> {
+        //FIXME: we need to patch those categories from the one in the files
+        (if pack_dir.is_file(PackageImportReport::REPORT_FILE_NAME) {
+            match pack_dir.read_to_string(PackageImportReport::REPORT_FILE_NAME) {
+                Ok(cd_json) => match serde_json::from_str(&cd_json) {
+                    Ok(cd) => Some(cd),
+                    Err(e) => {
+                        error!(?e, "failed to deserialize import report");
+                        None
+                    }
+                },
+                Err(e) => {
+                    error!(?e, "failed to read string of import report");
+                    None
+                }
+            }
+        } else {
+            None
+        })
+        .flatten()
+    }
     pub fn load_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<Self> {
         if !pack_dir
             .try_exists(Self::CORE_PACK_DIR_NAME)
@@ -284,7 +306,8 @@ impl LoadedPackData {
             .into_diagnostic()
             .wrap_err("failed to open core pack directory")?;
         let start = std::time::SystemTime::now();
-        let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
+        let import_report = LoadedPackData::load_import_report(&pack_dir);
+        let core = load_pack_core_from_dir(&core_dir, import_report).wrap_err("failed to load pack from dir")?;
         let elaspsed = start.elapsed().unwrap_or_default();
         tracing::info!("Loading of package from disk {} took {} ms", name, elaspsed.as_millis());
     
@@ -300,7 +323,7 @@ impl LoadedPackData {
             all_categories: core.all_categories,
             categories: core.categories,
             maps: core.maps,
-            source_files: core.source_files,
+            source_files: core.active_source_files,
             _is_dirty: false,
             active_elements: Default::default(),
             activation_data: Default::default(),
@@ -341,7 +364,7 @@ impl LoadedPackData {
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         loop_index: u128,
         link: &MumbleLink,
-        currently_used_files: &BTreeMap<String, bool>,
+        currently_used_files: &BTreeMap<Uuid, bool>,
         list_of_active_or_selected_elements_changed: bool,
         map_changed: bool,
         tasks: &PackTasks,
@@ -362,7 +385,7 @@ impl LoadedPackData {
         &mut self,
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
         link: &MumbleLink,
-        currently_used_files: &BTreeMap<String, bool>,
+        currently_used_files: &BTreeMap<Uuid, bool>,
         active_elements: &mut HashSet<Uuid>,
     ){
         info!(link.map_id, "current map data is updated. {}", self.name);
@@ -388,7 +411,7 @@ impl LoadedPackData {
             .enumerate()
         {
             nb_markers_attempt += 1;
-            if selected_files_manager.is_selected(&marker.source_file_name) {
+            if selected_files_manager.is_selected(&marker.source_file_uuid) {
                 active_elements.insert(marker.guid);
                 active_elements.insert(marker.parent);
                 if selected_categories_manager.is_selected(&marker.parent) {
@@ -465,7 +488,7 @@ impl LoadedPackData {
             .enumerate()
         {
             nb_trails_attempt += 1;
-            if selected_files_manager.is_selected(&trail.source_file_name) {
+            if selected_files_manager.is_selected(&trail.source_file_uuid) {
                 active_elements.insert(trail.guid);
                 active_elements.insert(trail.parent);
                 if selected_categories_manager.is_selected(&trail.parent) {
@@ -764,7 +787,8 @@ fn build_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<ImportTriplet> {
         .into_diagnostic()
         .wrap_err("failed to open core pack directory")?;
     let start = std::time::SystemTime::now();
-    let core = load_pack_core_from_dir(&core_dir).wrap_err("failed to load pack from dir")?;
+    let import_report = LoadedPackData::load_import_report(&pack_dir);
+    let core = load_pack_core_from_dir(&core_dir, import_report).wrap_err("failed to load pack from dir")?;
     let elaspsed = start.elapsed().unwrap_or_default();
     tracing::info!("Loading of package from disk {} took {} ms", name, elaspsed.as_millis());
     let res = build_from_core(name.clone(), pack_dir, core);
@@ -782,7 +806,7 @@ pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> Impo
         all_categories: core.all_categories,
         categories: core.categories,
         maps: core.maps,
-        source_files: core.source_files,
+        source_files: core.active_source_files.clone(),
         _is_dirty: false,
         activation_data: Default::default(),
         active_elements: Default::default(),
@@ -819,6 +843,7 @@ pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> Impo
         name: name,
         tbins: core.tbins,
         active_elements: Default::default(),
+        source_files: core.active_source_files
     };
     let report = core.report;
     (data, tex, report)
