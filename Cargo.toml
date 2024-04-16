@@ -55,7 +55,8 @@ opt-level = 3
 
 
 [profile.release]
-strip = "symbols"
+#https://doc.rust-lang.org/cargo/reference/profiles.html#strip
+#strip = "symbols"
 
 #lto make the build very slow
 #lto = true

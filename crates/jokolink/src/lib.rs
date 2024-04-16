@@ -10,7 +10,7 @@
 
 mod mumble;
 use enumflags2::BitFlags;
-use glam::IVec2;
+use glam::{IVec2, UVec2};
 //use jokoapi::end_point::{mounts::Mount, races::Race};
 use miette::{IntoDiagnostic, Result, WrapErr};
 pub use mumble::*;
@@ -63,8 +63,8 @@ impl MumbleManager {
         }
 
         if !self.backend.is_alive() {
-            self.link.client_size.x = -1;
-            self.link.client_size.y = -1;
+            self.link.client_size.x = 0;
+            self.link.client_size.y = 0;
             self.link.changes = BitFlags::all();
             return Ok(Some(&self.link));
         }
@@ -76,7 +76,7 @@ impl MumbleManager {
             self.link.clone()
         };
 
-        if cml.ui_tick == 0 || cml.context.client_pos_size == [0; 4] {
+        if cml.ui_tick == 0 || cml.context.client_pos == [0; 2] {
             return Ok(None);
         }
         let mut changes: BitFlags<MumbleChanges> = Default::default();
@@ -110,12 +110,12 @@ impl MumbleManager {
             changes.insert(MumbleChanges::Map);
         }
         let client_pos = IVec2::new(
-            cml.context.client_pos_size[0],
-            cml.context.client_pos_size[1],
+            cml.context.client_pos[0],
+            cml.context.client_pos[1],
         );
-        let client_size = IVec2::new(
-            cml.context.client_pos_size[2],
-            cml.context.client_pos_size[3],
+        let client_size = UVec2::new(
+            cml.context.client_size[0],
+            cml.context.client_size[1],
         );
 
         if new_link.client_pos != client_pos {

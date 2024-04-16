@@ -5,7 +5,7 @@ use std::{
 use glam::Vec3;
 use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 use cap_std::fs_utf8::Dir;
-use egui::{CollapsingHeader, ColorImage, TextureHandle, Window};
+use egui::{CollapsingHeader, ColorImage, TextureHandle, Ui, Window};
 use image::EncodableLayout;
 
 use tracing::{info_span, trace};
@@ -67,6 +67,7 @@ pub struct PackageUIManager {
     currently_used_files: BTreeMap<Uuid, bool>,
     all_files_activation_status: bool,// this consume a change of display event
     show_only_active: bool,
+    pack_details: Option<Uuid>, // if filled, display the details of the package
 }
 
 impl PackageDataManager {
@@ -181,7 +182,6 @@ impl PackageDataManager {
         match link {
             Some(link) => {
                 //TODO: how to save/load the active files ?
-                //TODO: find an efficient way to propagate the file deactivation
                 let mut have_used_files_list_changed = false;
                 let map_changed = self.current_map_id != link.map_id;
                 self.current_map_id = link.map_id;
@@ -298,7 +298,8 @@ impl PackageUIManager {
 
             all_files_activation_status: false,
             show_only_active: true,
-            currently_used_files: Default::default()// UI copy to (de-)activate files
+            currently_used_files: Default::default(),// UI copy to (de-)activate files
+            pack_details: None,
         }
     }
 
@@ -533,7 +534,6 @@ impl PackageUIManager {
         event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context, 
         open: &mut bool, 
-        link: Option<&MumbleLink>
     ) {
         let mut files_changed = false;
         Window::new("File Manager").open(open).show(etx, |ui| -> Result<()> {
@@ -547,10 +547,12 @@ impl PackageUIManager {
                             if ui.button("activate all").clicked() {
                                 self.all_files_activation_status = true;
                                 all_files_toggle = true;
+                                files_changed = true;
                             }
                             if ui.button("deactivate all").clicked() {
                                 self.all_files_activation_status = false;
                                 all_files_toggle = true;
+                                files_changed = true;
                             }
                         });
                         //ui.label("Trails");
@@ -558,6 +560,7 @@ impl PackageUIManager {
                         ui.end_row();
                         
                         for pack in self.packs.values_mut() {
+                            //TODO: first loop to list what is active per pack, to not display all packs
                             let report = self.reports.get(&pack.uuid).unwrap();
                             let mut pack_files_toggle = false;
                             let mut pack_files_activation_status = true;
@@ -566,10 +569,12 @@ impl PackageUIManager {
                                 if ui.button("activate all").clicked() {
                                     pack_files_activation_status = true;
                                     pack_files_toggle = true;
+                                    files_changed = true;
                                 }
                                 if ui.button("deactivate all").clicked() {
                                     pack_files_activation_status = false;
                                     pack_files_toggle = true;
+                                    files_changed = true;
                                 }
                             });
                             ui.end_row();
@@ -609,6 +614,34 @@ impl PackageUIManager {
             let _ = event_sender.send(UIToBackMessage::ActiveFiles(self.currently_used_files.clone()));
         }
     }
+
+    fn gui_package_details(&mut self, ui: &mut Ui, uuid: Uuid) {
+        let pack = self.packs.get(&uuid).unwrap();
+        let report = self.reports.get(&uuid).unwrap();
+
+        let collapsing = CollapsingHeader::new(format!("Last load details of package {}", pack.name));
+        let header_response = collapsing
+            .open(Some(true))
+            .show(ui, |ui| {
+                egui::Grid::new("packs details").striped(true).show(ui, |ui| {
+                    let number_of = &report.number_of;
+                    ui.label("categories");        ui.label(format!("{}", number_of.categories));        ui.end_row();
+                    ui.label("missing_categories");ui.label(format!("{}", number_of.missing_categories));ui.end_row();
+                    ui.label("textures");          ui.label(format!("{}", number_of.textures));          ui.end_row();
+                    ui.label("missing_textures");  ui.label(format!("{}", number_of.missing_textures));  ui.end_row();
+                    ui.label("entities");          ui.label(format!("{}", number_of.entities));          ui.end_row();
+                    ui.label("markers");           ui.label(format!("{}", number_of.markers));           ui.end_row();
+                    ui.label("trails");            ui.label(format!("{}", number_of.trails));            ui.end_row();
+                    ui.label("routes");            ui.label(format!("{}", number_of.routes));            ui.end_row();
+                    ui.label("maps");              ui.label(format!("{}", number_of.maps));              ui.end_row();
+                    ui.label("source_files");      ui.label(format!("{}", number_of.source_files));      ui.end_row();
+                })
+            })
+            .header_response;
+        if header_response.clicked() {
+            self.pack_details = None;
+        }
+    }
     fn gui_package_list(
         &mut self, 
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
@@ -630,7 +663,7 @@ impl PackageUIManager {
                             to_delete.push(pack.uuid);
                         }
                         if ui.button("Details").clicked() {
-                            //TODO
+                            self.pack_details = Some(pack.uuid);
                         }
                         if ui.button("Export").clicked() {
                             //TODO
@@ -642,13 +675,12 @@ impl PackageUIManager {
                     }
                 });
             });
-
-            if let Ok(mut status) = import_status.lock() {
+            if let Some(uuid) = self.pack_details {
+                self.gui_package_details(ui, uuid);
+            } else if let Ok(mut status) = import_status.lock() {
                 match &mut *status {
                     ImportStatus::UnInitialized => {
                         if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
-                            //TODO: send message to background thread, UIToBackMessage::ImportPack instead of a rayon thread ?
-                            //let import_status = import_status.lock().unwrap();
                             Self::pack_importer(Arc::clone(import_status));
                         }
                         //ui.label("import not started yet");
@@ -699,11 +731,9 @@ impl PackageUIManager {
         import_status: &Arc<Mutex<ImportStatus>>,
         is_file_open: &mut bool, 
         first_load_done: bool,
-        timestamp: f64,
-        link: Option<&MumbleLink>
     ) {
         self.gui_package_list(u2b_sender, etx, import_status, is_marker_open, first_load_done);
-        self.gui_file_manager(u2b_sender, etx, is_file_open, link);
+        self.gui_file_manager(u2b_sender, etx, is_file_open);
     }
 
     pub fn save(&mut self, mut texture_pack: LoadedPackTexture, report: PackageImportReport) {

@@ -4,6 +4,7 @@ pub mod ctypes;
 use std::net::IpAddr;
 
 use enumflags2::{bitflags, BitFlags};
+use glam::UVec2;
 use glam::{IVec2, Vec3};
 use num_derive::FromPrimitive;
 use num_derive::ToPrimitive;
@@ -78,7 +79,7 @@ pub struct MumbleLink {
     /// This is the position of the gw2's viewport (client area. x/y) relative to the top left corner of the desktop in *screen coords*
     pub client_pos: IVec2,
     /// This is the size of gw2's viewport (width/height) in screen coordinates
-    pub client_size: IVec2,
+    pub client_size: UVec2,
     /// changes since last mumble link update
     pub changes: BitFlags<MumbleChanges>,
 }
@@ -114,7 +115,7 @@ impl Default for MumbleLink {
             dpi: Default::default(),
             dpi_scaling: 96,
             client_pos: Default::default(),
-            client_size: IVec2{x: 1024, y: 768},
+            client_size: UVec2{x: 1024, y: 768},
             changes: Default::default(),
         }
     }

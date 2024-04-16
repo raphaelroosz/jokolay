@@ -13,6 +13,8 @@ use uuid::Uuid;
 use xot::{Node, Xot, Element};
 
 
+const MAX_TRAIL_CHUNK_LENGTH: f32 = 400.0;
+
 pub(crate) fn load_pack_core_from_dir(core_dir: &Dir, import_report: Option<PackageImportReport> ) -> Result<PackCore> {
     //called from already parsed data
     let mut core_pack = PackCore::new();
@@ -25,8 +27,7 @@ pub(crate) fn load_pack_core_from_dir(core_dir: &Dir, import_report: Option<Pack
     let start = std::time::SystemTime::now();
     recursive_walk_dir_and_read_images_and_tbins(
         core_dir,
-        &mut core_pack.textures,
-        &mut core_pack.tbins,
+        &mut core_pack,
         &RelativePath::default(),
     )
     .wrap_err("failed to walk dir when loading a markerpack")?;
@@ -97,8 +98,7 @@ pub(crate) fn load_pack_core_from_dir(core_dir: &Dir, import_report: Option<Pack
 
 fn recursive_walk_dir_and_read_images_and_tbins(
     dir: &Dir,
-    images: &mut HashMap<RelativePath, Vec<u8>>,
-    tbins: &mut HashMap<RelativePath, TBin>,
+    pack: &mut PackCore,
     parent_path: &RelativePath,
 ) -> Result<()> {
     for entry in dir
@@ -128,7 +128,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
                     .into_diagnostic()
                     .wrap_err("failed to read file contents")?;
                 if name.ends_with(".png") {
-                    images.insert(path.clone(), bytes);
+                    pack.register_texture(name, &path, bytes);
                 } else if name.ends_with(".trl") {
                     if let Some(tbs) = parse_tbin_from_slice(&bytes) {
                         let is_closed: bool = tbs.closed;
@@ -137,7 +137,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
                             if tbs.iso_y {}
                             if tbs.iso_z {}
                         }
-                        tbins.insert(path, tbs.tbin);
+                        pack.tbins.insert(path, tbs.tbin);
                     } else {
                         info!("invalid tbin: {path}");
                     }
@@ -146,8 +146,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
         } else {
             recursive_walk_dir_and_read_images_and_tbins(
                 &entry.open_dir().into_diagnostic()?,
-                images,
-                tbins,
+                pack,
                 &path,
             )?;
         }
@@ -222,10 +221,10 @@ fn parse_tbin_from_slice(bytes: &[u8]) -> Option<TBinStatus> {
             if a.distance_squared(zero) > 0.01 && b.distance_squared(zero) > 0.01 {
                 let distance_to_next_point = a.distance_squared(*b);
                 let mut current_cursor = distance_to_next_point;
-                while current_cursor > 1600.0 {
+                while current_cursor > MAX_TRAIL_CHUNK_LENGTH {
                     let c = a.lerp(*b, 1.0 - current_cursor / distance_to_next_point);
                     resulting_nodes.push(c);
-                    current_cursor -= 1600.0;
+                    current_cursor -= MAX_TRAIL_CHUNK_LENGTH;
                 }
             }
             resulting_nodes.push(*b);
@@ -387,7 +386,7 @@ fn parse_categories_file(file_name: &String, cats_xml_str: &str, pack: &mut Pack
                 &xot_names,
                 None,
                 None,
-            );
+            )?;
             trace!("loaded categories: {:?}", categories);
             pack.categories = categories;
             pack.register_categories();
@@ -417,18 +416,6 @@ fn load_map_file(map_id: u32, dir_entry: &DirEntry, target: &mut PackCore) -> Re
 }
 
 fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -> Result<()> {
-    /*
-    fields read:
-        all_categories
-    
-    fields modified:
-        maps
-        all_categories
-        late_discovery_categories
-        source_files
-        tbins
-        entities_parents
-     */
     let mut tree = Xot::new();
     let root_node = tree
         .parse(map_xml_str)
@@ -472,6 +459,13 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
             } else {
                 opt_source_file_uuid.unwrap()
             };
+
+            if let Some(source_file_name) = target.report.source_file_uuid_to_name(&source_file_uuid) {
+                let source_file_name = source_file_name.clone();// this is to bypass borrow checker which has no idea this cannot be changed
+                target.register_source_file(&source_file_name);
+            } else {
+                println!("{:?}", source_file_uuid);
+            }
 
             //There is no file name, only an uuid to register
             target.active_source_files.insert(source_file_uuid.clone(), true);
@@ -538,21 +532,16 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
                     let mut ca = CommonAttributes::default();
                     ca.update_common_attributes_from_element(child_element, &names);
 
-                    target.register_uuid(&full_category_name, &guid)?;
                     let marker = Marker {
                         position: [xpos, ypos, zpos].into(),
                         map_id,
-                        category: full_category_name,
+                        category: full_category_name.clone(),
                         parent: category_uuid.clone(),
                         attrs: ca,
                         guid,
                         source_file_uuid
                     };
-
-                    if !target.maps.contains_key(&map_id) {
-                        target.maps.insert(map_id, MapData::default());
-                    }
-                    target.maps.get_mut(&map_id).unwrap().markers.insert(marker.guid, marker);
+                    target.register_marker(full_category_name, marker);
                 } else if child_element.name() == names.trail {
                     debug!("Found a trail in core pack {:?}", child_element);
                     if child_element
@@ -566,9 +555,8 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
                     let mut ca = CommonAttributes::default();
                     ca.update_common_attributes_from_element(child_element, &names);
 
-                    target.register_uuid(&full_category_name, &guid)?;
                     let trail = Trail {
-                        category: full_category_name,
+                        category: full_category_name.clone(),
                         parent: category_uuid.clone(),
                         map_id,
                         props: ca,
@@ -576,11 +564,8 @@ fn parse_map_xml_string(map_id: u32, map_xml_str: &str, target: &mut PackCore) -
                         dynamic: false,
                         source_file_uuid
                     };
+                    target.register_trail(full_category_name, trail)?;
                     
-                    if !target.maps.contains_key(&map_id) {
-                        target.maps.insert(map_id, MapData::default());
-                    }
-                    target.maps.get_mut(&map_id).unwrap().trails.insert(trail.guid, trail);
                 }
             }
             span_guard.exit();
@@ -599,7 +584,7 @@ fn parse_category_categories_xml_recursive(
     names: &XotAttributeNameIDs,
     parent_uuid: Option<Uuid>,
     parent_name: Option<String>,
-) {
+) -> Result<()> {
     for tag in tags {
         if let Some(ele) = tree.element(tag) {
             if ele.name() != names.marker_category {
@@ -646,7 +631,9 @@ fn parse_category_categories_xml_recursive(
             let guid = parse_guid(names, ele);
             trace!("recursive_marker_category_parser_categories_xml {} {} {:?}", full_category_name, guid, parent_uuid);
             if display_name.is_empty() {
-                assert!(parent_name.is_none());
+                if parent_name.is_some() {
+                    return Err(miette::Error::msg("Package is corrupted, please import it again with current version"));
+                }
                 parse_category_categories_xml_recursive(
                     file_name,
                     tree,
@@ -656,7 +643,7 @@ fn parse_category_categories_xml_recursive(
                     names,
                     Some(guid),
                     Some(full_category_name),
-                );
+                )?;
             } else {
 
                 let current_category = if let Some(c) = cats.get_mut(&guid) {
@@ -685,7 +672,7 @@ fn parse_category_categories_xml_recursive(
                         names,
                         Some(guid),
                         Some(full_category_name),
-                    );
+                    )?;
             };
             
             std::mem::drop(span_guard);
@@ -694,6 +681,7 @@ fn parse_category_categories_xml_recursive(
             //info!("In file {}, ignore node {:?}", file_name, tag);
         }
     }
+    Ok(())
 }
 
 /// This first parses all the files in a zipfile into the memory and then it will try to parse a zpack out of all the files.

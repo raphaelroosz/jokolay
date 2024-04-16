@@ -185,7 +185,8 @@ pub struct CMumbleContext {
     /// This is the actual dpi of the gw2 window. 96 is the default (scale 1.0) value.
     pub dpi: i32,
     /// This is the client (gw2 window's viewport/surface) position and area. This tells jokolay where to position and size itself to match gw2 window.
-    pub client_pos_size: [i32; 4],
+    pub client_pos: [i32; 2],
+    pub client_size: [u32; 4],
     /// to make the struct the right size. everything upto now is 120 bytes, so this rounds upto 256 bytes.
     pub padding: [u8; 96],
 }
@@ -217,7 +218,8 @@ impl Default for CMumbleContext {
             // window_pos_size_without_borders: Default::default(),
             dpi_scaling: Default::default(),
             dpi: Default::default(),
-            client_pos_size: Default::default(),
+            client_pos: Default::default(),
+            client_size: Default::default(),
         }
     }
 }

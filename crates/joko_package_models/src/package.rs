@@ -91,16 +91,16 @@ struct PackageElementSource {
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PackageImportStatistics {
-    categories: usize, // total number of found categories
-    missing_categories: usize, // categories that should be defined in a <MarkerCategory /> node
-    textures: usize, //total number of texture used (or should)
-    missing_textures: usize, // how many of the textures are missing
-    entities: usize, // total number of tracked elements: categories, trails, markers, ...
-    markers: usize, // total number of markers
-    trails: usize, // total number of trails
-    routes: usize, // total number of routes defined, they shall not count as trails even if imported as such
-    maps: usize, // total number of maps covered
-    source_files: usize, // total number of XML files
+    pub categories: usize, // total number of found categories
+    pub missing_categories: usize, // categories that should be defined in a <MarkerCategory /> node
+    pub textures: usize, //total number of texture used (or should)
+    pub missing_textures: usize, // how many of the textures are missing
+    pub entities: usize, // total number of tracked elements: categories, trails, markers, ...
+    pub markers: usize, // total number of markers
+    pub trails: usize, // total number of trails
+    pub routes: usize, // total number of routes defined, they shall not count as trails even if imported as such
+    pub maps: usize, // total number of maps covered
+    pub source_files: usize, // total number of XML files
 }
 
 
@@ -127,7 +127,7 @@ pub struct PackageImportTelemetry {
 pub struct PackageImportReport {
     #[serde(skip)]
     pub uuid: Uuid,
-    number_of: PackageImportStatistics, // count everything we can think of
+    pub number_of: PackageImportStatistics, // count everything we can think of
     pub telemetry: PackageImportTelemetry, // all the time spent in which step
     late_discovered_categories: OrderedHashMap<Uuid, String>,//categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
     missing_categories: Vec<PackageCategorySource>,//categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.

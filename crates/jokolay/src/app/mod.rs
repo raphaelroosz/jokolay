@@ -6,7 +6,7 @@ use std::{
 };
 
 use cap_std::fs_utf8::Dir;
-use egui_window_glfw_passthrough::{glfw::Context as _, GlfwBackend, GlfwConfig};
+use egui_window_glfw_passthrough::{glfw::{ffi::glfwGetVideoMode, Context as _}, GlfwBackend, GlfwConfig};
 mod init;
 mod wm;
 mod mumble;
@@ -26,12 +26,11 @@ use jmf::{LoadedPackData, LoadedPackTexture, build_from_core};
 use jmf::{ImportStatus, import_pack_from_zip_file_path};
 
 
-const MINIMAL_WINDOW_WIDTH: i32 = 640;
-const MINIMAL_WINDOW_HEIGHT: i32 = 480;
+const MINIMAL_WINDOW_WIDTH: u32 = 640;
+const MINIMAL_WINDOW_HEIGHT: u32 = 480;
 const MINIMAL_WINDOW_POSITION_X: i32 = 0;
 const MINIMAL_WINDOW_POSITION_Y: i32 = 0;
 
-#[derive(Clone)]
 struct JokolayUIState {
     link: Option<MumbleLink>,
     editable_mumble: bool,
@@ -41,8 +40,8 @@ struct JokolayUIState {
     nb_running_tasks_on_back: i32,// store the number of running tasks in background thread
     nb_running_tasks_on_network: i32,// store the number of running tasks (requests) in progress
     import_status: Arc<Mutex<ImportStatus>>,
-    maximal_window_width: i32,
-    maximal_window_height: i32,
+    maximal_window_width: u32,
+    maximal_window_height: u32,
 }
 
 struct JokolayBackState {
@@ -111,14 +110,16 @@ impl Jokolay {
             window_title: "Jokolay".to_string(),
             ..Default::default()
         });
-        let screen_physical_size = glfw_backend.glfw.with_primary_monitor(|_, m| {
+
+        //retrieve current screen resolution
+        let video_mode = glfw_backend.glfw.with_primary_monitor(|_, m| {
             if let Some(m) = m {
-                Some(m.get_physical_size())
+                m.get_video_mode()
             } else {
                 None
             }
         });
-        info!("Monitor physical size: {:?}", screen_physical_size);
+        
         glfw_backend.window.set_floating(true);
         glfw_backend.window.set_decorated(false);
         let joko_renderer = JokoRenderer::new(&mut glfw_backend, Default::default());
@@ -152,8 +153,8 @@ impl Jokolay {
                 nb_running_tasks_on_back: 0,
                 nb_running_tasks_on_network: 0,
                 import_status: Default::default(),
-                maximal_window_width: screen_physical_size.unwrap().0,
-                maximal_window_height: screen_physical_size.unwrap().1,
+                maximal_window_width: video_mode.unwrap().width,
+                maximal_window_height: video_mode.unwrap().height,
             },
             state_back: JokolayBackState {
                 choice_of_category_changed: false,
@@ -507,6 +508,21 @@ impl Jokolay {
             
             let etx = egui_context.clone();
 
+            /*
+            if etx.input(|i| {
+                TODO:
+                    handle shortcuts
+                    a module publish a list of shortcuts
+                    At import, user need to accept those.
+                    We can't have a module that is a keyboard listener.
+
+                    modifiers are not forwarded.
+                println!("{:?} {:?}", i.keys_down, i.modifiers);
+                false
+            }) {
+            }
+            */
+
             // gather events
             glfw_backend.glfw.poll_events();
             glfw_backend.tick();
@@ -584,11 +600,14 @@ impl Jokolay {
                     // if gw2 is in windowed fullscreen mode, then the size is full resolution of the screen/monitor.
                     // But if we set that size, when you focus jokolay, the screen goes blank on win11 (some kind of fullscreen optimization maybe?)
                     // so we remove a pixel from right/bottom edges. mostly indistinguishable, but makes sure that transparency works even in windowed fullscrene mode of gw2
-                    let client_size_x = MINIMAL_WINDOW_WIDTH.max(link.client_size.x);
-                    let client_size_y = MINIMAL_WINDOW_HEIGHT.max(link.client_size.y);
+                    let client_size_x = MINIMAL_WINDOW_WIDTH.max(link.client_size.x).min(local_state.maximal_window_width);
+                    let client_size_y = MINIMAL_WINDOW_HEIGHT.max(link.client_size.y).min(local_state.maximal_window_height);
                     glfw_backend
                         .window
-                        .set_size(client_size_x - 1, client_size_y - 1);
+                        .set_size(
+                            (client_size_x - 1) as i32,
+                            (client_size_y - 1) as i32
+                        );
                 }
                 if local_state.list_of_textures_changed || link.changes.contains(MumbleChanges::Position) || link.changes.contains(MumbleChanges::Map) {
                     package_manager.tick(
@@ -667,8 +686,6 @@ impl Jokolay {
                 &local_state.import_status,
                 &mut menu_panel.show_file_manager_window,
                 local_state.first_load_done,
-                latest_time,
-                local_state.link.as_ref()
             );
             JokolayTracingLayer::gui(&etx, &mut menu_panel.show_tracing_window);
             theme_manager.gui(&etx, &mut menu_panel.show_theme_window);
