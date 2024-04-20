@@ -1,8 +1,15 @@
 use cap_std::{ambient_authority, fs_utf8::camino::Utf8PathBuf, fs_utf8::Dir};
 use miette::{Context, IntoDiagnostic, Result};
+
 /// Jokolay Configuration
 /// We will read a path from env `JOKOLAY_DATA_DIR` or create a folder at data_local_dir/jokolay, where data_local_dir is platform specific
 /// Inside this directory, we will store all of jokolay's data like configuration files, themes, logs etc..
+
+pub fn get_jokolay_path() -> Result<Utf8PathBuf, std::io::Error> {
+    let dir = get_jokolay_dir().unwrap();
+    dir.canonicalize(".")
+}
+
 pub fn get_jokolay_dir() -> Result<cap_std::fs_utf8::Dir> {
     let authoratah = ambient_authority();
     let jdir = if let Ok(env_dir) = std::env::var("JOKOLAY_DATA_DIR") {

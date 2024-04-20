@@ -1,12 +1,12 @@
 use joko_core::RelativePath;
-use joko_package_models::{attributes::{CommonAttributes, XotAttributeNameIDs}, category::{prefix_parent, Category, RawCategory}, map::MapData, marker::Marker, package::{PackCore, PackageImportReport}, route::Route, trail::{TBin, TBinStatus, Trail}};
+use joko_package_models::{attributes::{CommonAttributes, XotAttributeNameIDs}, category::{prefix_parent, Category, RawCategory}, marker::Marker, package::{PackCore, PackageImportReport}, route::Route, trail::{TBin, TBinStatus, Trail}};
 use miette::{bail, Context, IntoDiagnostic, Result};
 
 use crate::BASE64_ENGINE;
 use base64::Engine;
 use cap_std::fs_utf8::{Dir, DirEntry};
 use glam::Vec3;
-use std::{collections::{HashMap, VecDeque}, io::Read, str::FromStr};
+use std::{collections::VecDeque, io::Read, str::FromStr};
 use ordered_hash_map::OrderedHashMap;
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 use uuid::Uuid;
@@ -684,6 +684,22 @@ fn parse_category_categories_xml_recursive(
     Ok(())
 }
 
+
+pub(crate) fn get_pack_from_taco_zip(input_path: std::path::PathBuf, working_path: &std::path::PathBuf) -> Result<PackCore> {
+    let mut taco_zip = vec![];
+    std::fs::File::open(&input_path)
+        .into_diagnostic()?
+        .read_to_end(&mut taco_zip)
+        .into_diagnostic()?;
+
+    let mut zip_archive = zip::ZipArchive::new(std::io::Cursor::new(taco_zip))
+        .into_diagnostic()
+        .wrap_err("failed to read zip archive")?;
+    zip_archive.extract(working_path).into_diagnostic()?;
+
+    _get_pack_from_taco_zip(zip_archive)
+}
+
 /// This first parses all the files in a zipfile into the memory and then it will try to parse a zpack out of all the files.
 /// will return error if there's an issue with zipfile.
 ///
@@ -691,14 +707,11 @@ fn parse_category_categories_xml_recursive(
 /// the intention is "best effort" parsing and not "validating" xml marker packs.
 /// we will ignore any issues like unknown attributes or xml tags. "unknown" attributes means Any attributes that jokolay doesn't parse into Zpack.
 #[instrument(skip_all)]
-pub(crate) fn get_pack_from_taco_zip(taco: &[u8]) -> Result<PackCore> {
+fn _get_pack_from_taco_zip(mut zip_archive: zip::ZipArchive<std::io::Cursor<Vec<u8>>>) -> Result<PackCore> {
+    //TODO: simply extract the file into a working folder ?
     //called to import a new pack
     // all the contents of ZPack
     let mut pack = PackCore::new();
-    // parse zip file
-    let mut zip_archive = zip::ZipArchive::new(std::io::Cursor::new(taco))
-        .into_diagnostic()
-        .wrap_err("failed to read zip archive")?;
 
     // file paths of different file types
     let mut images = vec![];

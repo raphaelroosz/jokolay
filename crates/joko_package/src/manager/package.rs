@@ -24,6 +24,9 @@ use super::pack::loaded::jokolay_to_marker_dir;
 
 pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager";//name kept for compatibility purpose
 pub const PACKAGES_DIRECTORY_NAME: &str = "packs";//name kept for compatibility purpose
+pub const EDITABLE_PACKAGE_NAME: &str = "_work";//package automatically created and always imported as an overwrite
+pub const WORKING_PACKAGE_NAME: &str = "editable";//working dir where a package is extracted before reading
+pub const LOCAL_EXPANDED_PACKAGE_NAME: &str = "_local_expanded";//result of import of the editable package
 // pub const MARKER_MANAGER_CONFIG_NAME: &str = "marker_manager_config.json";
 
 /// It manage everything that has to do with marker packs.
@@ -616,29 +619,35 @@ impl PackageUIManager {
     }
 
     fn gui_package_details(&mut self, ui: &mut Ui, uuid: Uuid) {
-        let pack = self.packs.get(&uuid).unwrap();
-        let report = self.reports.get(&uuid).unwrap();
-
-        let collapsing = CollapsingHeader::new(format!("Last load details of package {}", pack.name));
-        let header_response = collapsing
-            .open(Some(true))
-            .show(ui, |ui| {
-                egui::Grid::new("packs details").striped(true).show(ui, |ui| {
-                    let number_of = &report.number_of;
-                    ui.label("categories");        ui.label(format!("{}", number_of.categories));        ui.end_row();
-                    ui.label("missing_categories");ui.label(format!("{}", number_of.missing_categories));ui.end_row();
-                    ui.label("textures");          ui.label(format!("{}", number_of.textures));          ui.end_row();
-                    ui.label("missing_textures");  ui.label(format!("{}", number_of.missing_textures));  ui.end_row();
-                    ui.label("entities");          ui.label(format!("{}", number_of.entities));          ui.end_row();
-                    ui.label("markers");           ui.label(format!("{}", number_of.markers));           ui.end_row();
-                    ui.label("trails");            ui.label(format!("{}", number_of.trails));            ui.end_row();
-                    ui.label("routes");            ui.label(format!("{}", number_of.routes));            ui.end_row();
-                    ui.label("maps");              ui.label(format!("{}", number_of.maps));              ui.end_row();
-                    ui.label("source_files");      ui.label(format!("{}", number_of.source_files));      ui.end_row();
-                })
-            })
-            .header_response;
-        if header_response.clicked() {
+        // protection against deletion while displaying details
+        if let Some(pack) = self.packs.get(&uuid) {
+            if let Some(report) = self.reports.get(&uuid) {
+                let collapsing = CollapsingHeader::new(format!("Last load details of package {}", pack.name));
+                let header_response = collapsing
+                    .open(Some(true))
+                    .show(ui, |ui| {
+                        egui::Grid::new("packs details").striped(true).show(ui, |ui| {
+                            let number_of = &report.number_of;
+                            ui.label("categories");        ui.label(format!("{}", number_of.categories));        ui.end_row();
+                            ui.label("missing_categories");ui.label(format!("{}", number_of.missing_categories));ui.end_row();
+                            ui.label("textures");          ui.label(format!("{}", number_of.textures));          ui.end_row();
+                            ui.label("missing_textures");  ui.label(format!("{}", number_of.missing_textures));  ui.end_row();
+                            ui.label("entities");          ui.label(format!("{}", number_of.entities));          ui.end_row();
+                            ui.label("markers");           ui.label(format!("{}", number_of.markers));           ui.end_row();
+                            ui.label("trails");            ui.label(format!("{}", number_of.trails));            ui.end_row();
+                            ui.label("routes");            ui.label(format!("{}", number_of.routes));            ui.end_row();
+                            ui.label("maps");              ui.label(format!("{}", number_of.maps));              ui.end_row();
+                            ui.label("source_files");      ui.label(format!("{}", number_of.source_files));      ui.end_row();
+                        })
+                    })
+                    .header_response;
+                if header_response.clicked() {
+                    self.pack_details = None;
+                }
+            } else {
+                self.pack_details = None;
+            }
+        } else {
             self.pack_details = None;
         }
     }

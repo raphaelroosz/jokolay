@@ -6,12 +6,12 @@ use std::{
 };
 
 use cap_std::fs_utf8::Dir;
-use egui_window_glfw_passthrough::{glfw::{ffi::glfwGetVideoMode, Context as _}, GlfwBackend, GlfwConfig};
+use egui_window_glfw_passthrough::{glfw::Context as _, GlfwBackend, GlfwConfig};
 mod init;
 mod wm;
 mod mumble;
 use uuid::Uuid;
-use init::get_jokolay_dir;
+use init::{get_jokolay_dir, get_jokolay_path};
 use jmf::{message::{UIToBackMessage, UIToUIMessage}, PackageDataManager, PackageUIManager};
 //use jmf::FileManager;
 use crate::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
@@ -22,7 +22,7 @@ use joko_render::renderer::JokoRenderer;
 use jokolink::{MumbleChanges, MumbleLink, MumbleManager};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{error, info, info_span};
-use jmf::{LoadedPackData, LoadedPackTexture, build_from_core};
+use jmf::{LoadedPackData, LoadedPackTexture, build_from_core, jokolay_to_working_path};
 use jmf::{ImportStatus, import_pack_from_zip_file_path};
 
 
@@ -48,6 +48,7 @@ struct JokolayBackState {
     choice_of_category_changed: bool,//Meant as an optimisation to only update when there is a change in UI
     read_ui_link: bool,
     copy_of_ui_link: Option<MumbleLink>,
+    working_path: std::path::PathBuf,
 }
 struct JokolayApp {
     mumble_manager: MumbleManager,
@@ -74,7 +75,7 @@ pub struct Jokolay {
 
 
 impl Jokolay {
-    pub fn new(jokolay_dir: Arc<Dir>) -> Result<Self> {
+    pub fn new(jokolay_dir: Arc<Dir>, working_path: std::path::PathBuf) -> Result<Self> {
         /*
             We have two mumble_managers, one for UI, one for backend, each keeping its own copy
             this avoid transmition between threads to read same data from system
@@ -90,7 +91,7 @@ impl Jokolay {
         let package_data_manager = PackageDataManager::new(data_packages, Arc::clone(&jokolay_dir))?;
         let mut package_ui_manager = PackageUIManager::new(texture_packages);
         let mut theme_manager = ThemeManager::new(Arc::clone(&jokolay_dir)).wrap_err("failed to create theme manager")?;
-        
+
         let egui_context = egui::Context::default();
         theme_manager.init_egui(&egui_context);
         let mut glfw_backend = GlfwBackend::new(GlfwConfig {
@@ -153,13 +154,14 @@ impl Jokolay {
                 nb_running_tasks_on_back: 0,
                 nb_running_tasks_on_network: 0,
                 import_status: Default::default(),
-                maximal_window_width: video_mode.unwrap().width,
+                maximal_window_width: video_mode.unwrap().width, //TODO: what happens if change of screen ?
                 maximal_window_height: video_mode.unwrap().height,
             },
             state_back: JokolayBackState {
                 choice_of_category_changed: false,
                 read_ui_link: false,
                 copy_of_ui_link: Default::default(),
+                working_path,
             }
         })
     }
@@ -234,7 +236,7 @@ impl Jokolay {
                 tracing::trace!("Handling of UIToBackMessage::ImportPack");
                 let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
                 let start = std::time::SystemTime::now();
-                let result = import_pack_from_zip_file_path(file_path);
+                let result = import_pack_from_zip_file_path(file_path, &local_state.working_path);
                 let elaspsed = start.elapsed().unwrap_or_default();
                 tracing::info!("Loading of taco package from disk took {} ms", elaspsed.as_millis());
                 match result {
@@ -729,6 +731,7 @@ impl Jokolay {
                 etx.tessellate(shapes, etx.pixels_per_point()),
                 textures_delta,
                 glfw_backend.window_size_logical,
+                latest_time
             );
             joko_renderer.present();
             glfw_backend.window.swap_buffers();
@@ -740,14 +743,17 @@ impl Jokolay {
 }
 
 pub fn start_jokolay() {
-    let jdir = match get_jokolay_dir() {
+    let jokolay_dir = match get_jokolay_dir() {
         Ok(jdir) => jdir,
         Err(e) => {
             eprintln!("failed to create jokolay dir: {e:#?}");
             panic!("failed to create jokolay_dir: {e:#?}");
         }
     };
-    let log_file_flush_guard = match JokolayTracingLayer::install_tracing(&jdir) {
+    let jokolay_path = get_jokolay_path().unwrap().as_std_path().to_path_buf();
+    let working_path = jokolay_to_working_path(&jokolay_path);
+        
+    let log_file_flush_guard = match JokolayTracingLayer::install_tracing(&jokolay_dir) {
         Ok(g) => g,
         Err(e) => {
             eprintln!("failed to install tracing: {e:#?}");
@@ -767,7 +773,7 @@ pub fn start_jokolay() {
         );
     }
 
-    match Jokolay::new(jdir.into()) {
+    match Jokolay::new(jokolay_dir.into(), working_path) {
         Ok(jokolay) => {
             jokolay.enter_event_loop();
         }

@@ -13,6 +13,7 @@ pub use manager::{
     LoadedPackTexture, 
     load_all_from_dir, 
     build_from_core, 
+    jokolay_to_working_path,
     ImportStatus,
     import_pack_from_zip_file_path
 };

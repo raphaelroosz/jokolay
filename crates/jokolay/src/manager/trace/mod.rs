@@ -31,7 +31,7 @@ impl JokolayTracingLayer {
             };
             eprintln!("{output}");
             eprintln!("Backtrace: {backtrace:}");
-            let mut w = File::create("jokolay.errror").unwrap();
+            let mut w = File::create("jokolay.error").unwrap();
             writeln!(&mut w, "{output}").unwrap();
             writeln!(&mut w, "Backtrace: {backtrace:}").unwrap();
         }));

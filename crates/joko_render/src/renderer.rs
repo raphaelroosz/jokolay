@@ -249,6 +249,7 @@ impl JokoRenderer {
         meshes: Vec<egui::ClippedPrimitive>,
         textures_delta: egui::TexturesDelta,
         logical_screen_size: [f32; 2],
+        latest_time: f64,
     ) {
         if self.has_link && !self.is_map_open {
             self.billboard_renderer
@@ -258,6 +259,7 @@ impl JokoRenderer {
                 self.cam_pos,
                 &self.view_proj,
                 &self.gl.glow_backend.painter.managed_textures,
+                latest_time
             );
         }
         self.gl

@@ -26,7 +26,7 @@ use miette::{bail, Context, IntoDiagnostic, Result};
 use super::activation::{ActivationData, ActivationType};
 use super::active::{CurrentMapData, ActiveMarker, ActiveTrail};
 use crate::manager::pack::category_selection::CategorySelection;
-use crate::manager::package::{PACKAGES_DIRECTORY_NAME, PACKAGE_MANAGER_DIRECTORY_NAME};
+use crate::manager::package::{PACKAGES_DIRECTORY_NAME, PACKAGE_MANAGER_DIRECTORY_NAME, EDITABLE_PACKAGE_NAME, WORKING_PACKAGE_NAME, LOCAL_EXPANDED_PACKAGE_NAME};
 
 
 type ImportAllTriplet = (BTreeMap<Uuid, LoadedPackData>, BTreeMap<Uuid, LoadedPackTexture>, BTreeMap<Uuid, PackageImportReport>);
@@ -711,6 +711,15 @@ impl LoadedPackTexture {
 
 }
 
+pub fn jokolay_to_working_path(jokolay_path: &std::path::PathBuf) -> std::path::PathBuf {
+    let marker_manager_path = jokolay_to_marker_path(jokolay_path);
+    marker_manager_path.join(WORKING_PACKAGE_NAME)
+}
+
+pub fn jokolay_to_marker_path(jokolay_path: &std::path::PathBuf) -> std::path::PathBuf{
+    jokolay_path.join(PACKAGE_MANAGER_DIRECTORY_NAME).join(PACKAGES_DIRECTORY_NAME)
+}
+
 pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
     jokolay_dir.create_dir_all(PACKAGE_MANAGER_DIRECTORY_NAME)
         .into_diagnostic()
@@ -719,6 +728,7 @@ pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
         .open_dir(PACKAGE_MANAGER_DIRECTORY_NAME)
         .into_diagnostic()
         .wrap_err(format!("failed to open marker manager directory {}", PACKAGE_MANAGER_DIRECTORY_NAME))?;
+
     marker_manager_dir
         .create_dir_all(PACKAGES_DIRECTORY_NAME)
         .into_diagnostic()
@@ -727,6 +737,18 @@ pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
         .open_dir(PACKAGES_DIRECTORY_NAME)
         .into_diagnostic()
         .wrap_err(format!("failed to open marker packs dir {}", PACKAGES_DIRECTORY_NAME))?;
+
+    marker_packs_dir.create_dir_all(EDITABLE_PACKAGE_NAME)
+            .into_diagnostic()
+            .wrap_err("failed to create editable package directory")?;
+    let editable_package = marker_packs_dir.open_dir(EDITABLE_PACKAGE_NAME)
+        .into_diagnostic()
+        .wrap_err("failed to create editable package directory")?;
+
+    editable_package.create_dir_all("data")
+        .into_diagnostic()
+        .wrap_err("failed to create data folder for editable package")?;
+
     Ok(marker_packs_dir)
 }
 
@@ -737,7 +759,6 @@ pub fn load_all_from_dir(jokolay_dir: Arc<Dir>)
     let mut data_packs: BTreeMap<Uuid, LoadedPackData> = Default::default();
     let mut texture_packs: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
     let mut report_packs: BTreeMap<Uuid, PackageImportReport> = Default::default();
-
 
     for entry in marker_packs_dir
         .entries()
@@ -754,20 +775,33 @@ pub fn load_all_from_dir(jokolay_dir: Arc<Dir>)
                 .into_diagnostic()
                 .wrap_err(format!("failed to open pack entry as directory: {}", name))?;
             {
-                let span_guard = info_span!("loading pack from dir", name).entered();
-
-                match build_from_dir(name.clone(), pack_dir.into()) {
-                    Ok(lp) => {
+                if name == EDITABLE_PACKAGE_NAME {
+                    //TODO: have a version of loading that does not involve already ingested packages
+                    if let Ok(pack_core) = load_pack_core_from_dir(&pack_dir, None) {
+                        let lp = build_from_core(name.clone(), pack_dir.into(), pack_core);
                         let (data, tex, report) = lp;
                         data_packs.insert(data.uuid, data);
                         texture_packs.insert(tex.uuid, tex);
                         report_packs.insert(report.uuid, report);
                     }
-                    Err(e) => {
-                        error!(?e, "failed to load pack from directory: {}", name);
+                } else if name == LOCAL_EXPANDED_PACKAGE_NAME {
+                    //ignore this package, it'll be overwriten
+                } else {
+                    let span_guard = info_span!("loading pack from dir", name).entered();
+
+                    match build_from_dir(name.clone(), pack_dir.into()) {
+                        Ok(lp) => {
+                            let (data, tex, report) = lp;
+                            data_packs.insert(data.uuid, data);
+                            texture_packs.insert(tex.uuid, tex);
+                            report_packs.insert(report.uuid, report);
+                        }
+                        Err(e) => {
+                            error!(?e, "failed to load pack from directory: {}", name);
+                        }
                     }
+                    drop(span_guard);
                 }
-                drop(span_guard);
             }
         }
     }

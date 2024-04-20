@@ -1,8 +1,7 @@
-use std::io::Read;
 use joko_package_models::package::PackCore;
 use tracing::info;
 
-use miette::{IntoDiagnostic, Result};
+use miette::Result;
 
 
 #[derive(Debug, Default)]
@@ -16,15 +15,9 @@ pub enum ImportStatus {
     PackError(miette::Report),
 }
 
-pub fn import_pack_from_zip_file_path(file_path: std::path::PathBuf) -> Result<(String, PackCore)> {
-    let mut taco_zip = vec![];
-    std::fs::File::open(&file_path)
-        .into_diagnostic()?
-        .read_to_end(&mut taco_zip)
-        .into_diagnostic()?;
-
+pub fn import_pack_from_zip_file_path(file_path: std::path::PathBuf, working_path: &std::path::PathBuf) -> Result<(String, PackCore)> {
     info!("starting to get pack from taco");
-    crate::io::get_pack_from_taco_zip(&taco_zip).map(|pack| {
+    crate::io::get_pack_from_taco_zip(file_path.clone(), working_path).map(|pack| {
         (
             file_path
                 .file_name()
