@@ -43,4 +43,6 @@ egui = { workspace = true, features = ["serde"] }
 egui_extras = { workspace = true }
 
 uuid = { workspace = true }
+toml = "0.8.12"
+directories-next = "2.0.0"
 

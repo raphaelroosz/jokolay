@@ -1,7 +1,7 @@
+use crate::{attributes::CommonAttributes, package::PackageImportReport};
 use ordered_hash_map::OrderedHashMap;
 use tracing::debug;
 use uuid::Uuid;
-use crate::{attributes::CommonAttributes, package::PackageImportReport};
 
 #[derive(Debug, Clone)]
 pub struct RawCategory {
@@ -26,21 +26,20 @@ pub struct Category {
     pub separator: bool,
     pub default_enabled: bool,
     pub props: CommonAttributes,
-    pub children: OrderedHashMap<Uuid, Category>,//TODO: make a branch to test if having an Vec<Uuid> associated with global list of categories is faster.
+    pub children: OrderedHashMap<Uuid, Category>, //TODO: make a branch to test if having an Vec<Uuid> associated with global list of categories is faster.
 }
 
 pub fn nth_chunk(s: &str, pat: char, n: usize) -> String {
     let nb_matches = s.matches(pat).count();
     assert!(nb_matches + 1 > n);
-    let res = s.split(pat)
-        .nth(n)
-    ;
+    let res = s.split(pat).nth(n);
     debug!("nth_chunk {} {} {:?}", s, n, res);
     res.unwrap().to_string()
 }
 
 pub fn prefix_until_nth_char(s: &str, pat: char, n: usize) -> Option<String> {
-    let res = s.match_indices(pat)
+    let res = s
+        .match_indices(pat)
         .nth(n)
         .map(|(index, _)| s.split_at(index))
         .map(|(left, _)| left.to_string());
@@ -51,15 +50,14 @@ pub fn prefix_until_nth_char(s: &str, pat: char, n: usize) -> Option<String> {
 pub fn prefix_parent(s: &str, pat: char) -> Option<String> {
     let n = s.matches(pat).count();
     assert!(n > 0);
-    let res = s.match_indices(pat)
+    let res = s
+        .match_indices(pat)
         .nth(n - 1)
         .map(|(index, _)| s.split_at(index))
         .map(|(left, _)| left.to_string());
     debug!("prefix_parent {} {} {:?}", s, n, res);
     res
 }
-
-
 
 impl Category {
     // Required method
@@ -73,15 +71,23 @@ impl Category {
             relative_category_name: value.relative_category_name.clone(),
             full_category_name: value.full_category_name.clone(),
             parent: parent,
-            children: Default::default()
+            children: Default::default(),
         }
     }
-    fn per_route<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, route: &Vec<&str>, depth: usize) -> Option<&'a mut Category> {
+    fn per_route<'a>(
+        categories: &'a mut OrderedHashMap<Uuid, Category>,
+        route: &Vec<&str>,
+        depth: usize,
+    ) -> Option<&'a mut Category> {
         let mut route = route.clone();
         route.reverse();
         Category::_per_route(categories, &mut route, depth)
     }
-    fn _per_route<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, route: &mut Vec<&str>, depth: usize) -> Option<&'a mut Category> {
+    fn _per_route<'a>(
+        categories: &'a mut OrderedHashMap<Uuid, Category>,
+        route: &mut Vec<&str>,
+        depth: usize,
+    ) -> Option<&'a mut Category> {
         if let Some(relative_category_name) = route.pop() {
             for (_, cat) in categories {
                 if cat.relative_category_name == relative_category_name {
@@ -95,7 +101,11 @@ impl Category {
         }
         return None;
     }
-    fn per_uuid<'a>(categories: &'a mut OrderedHashMap<Uuid, Category>, uuid: &Uuid, depth: usize) -> Option<&'a mut Category> {
+    fn per_uuid<'a>(
+        categories: &'a mut OrderedHashMap<Uuid, Category>,
+        uuid: &Uuid,
+        depth: usize,
+    ) -> Option<&'a mut Category> {
         /*
         Do a look up in the tree based on uuid. Whole tree is scanned until a match is found.
 
@@ -120,14 +130,14 @@ impl Category {
         let mut first_pass_categories = input_first_pass_categories.clone();
         let mut second_pass_categories: OrderedHashMap<String, RawCategory> = Default::default();
         let mut need_a_pass: bool = true;
-    
+
         let mut third_pass_categories: OrderedHashMap<Uuid, Category> = Default::default();
         let mut third_pass_categories_ref: Vec<Uuid> = Default::default();
         let mut root: OrderedHashMap<Uuid, Category> = Default::default();
 
         let elaspsed_initialize = start_initialize.elapsed().unwrap_or_default();
         report.telemetry.categories_reassemble.initialize = elaspsed_initialize.as_millis();
-        
+
         let start_multi_pass_missing_categories_creation = std::time::SystemTime::now();
         let mut nb_pass_done = 0;
         while need_a_pass {
@@ -136,21 +146,28 @@ impl Category {
             for (key, value) in first_pass_categories.iter() {
                 debug!("reassemble_categories pass #{} {:?}", nb_pass_done, value);
                 let mut to_insert = value.clone();
-                if value.relative_category_name.matches('.').count() > 0  && value.relative_category_name == value.full_category_name {
+                if value.relative_category_name.matches('.').count() > 0
+                    && value.relative_category_name == value.full_category_name
+                {
                     let mut n = 0;
                     let mut last_name: Option<String> = None;
                     // This is an almost duplication of code of pack/mod.rs
-                    while let Some(parent_name) = prefix_until_nth_char(&value.relative_category_name, '.', n) {
+                    while let Some(parent_name) =
+                        prefix_until_nth_char(&value.relative_category_name, '.', n)
+                    {
                         debug!("{} {}", parent_name, n);
                         if let Some(parent_category) = first_pass_categories.get(&parent_name) {
                             report.found_category_late(&parent_name, parent_category.guid);
                             last_name = Some(parent_name.clone());
-                        } else if let Some(parent_category) = second_pass_categories.get(&parent_name) {
+                        } else if let Some(parent_category) =
+                            second_pass_categories.get(&parent_name)
+                        {
                             report.found_category_late(&parent_name, parent_category.guid);
                             last_name = Some(parent_name.clone());
-                        }else{
+                        } else {
                             let new_uuid = Uuid::new_v4();
-                            let relative_category_name = nth_chunk(&value.relative_category_name, '.', n);
+                            let relative_category_name =
+                                nth_chunk(&value.relative_category_name, '.', n);
                             debug!("reassemble_categories Partial create missing parent category: {} {} {} {}", parent_name, relative_category_name, n, new_uuid);
                             let sources: OrderedHashMap<Uuid, Uuid> = OrderedHashMap::new();
                             let to_insert = RawCategory {
@@ -158,7 +175,7 @@ impl Category {
                                 guid: new_uuid,
                                 relative_category_name: relative_category_name.clone(),
                                 display_name: relative_category_name.clone(),
-                                parent_name: prefix_until_nth_char(&parent_name, '.', n-1),
+                                parent_name: prefix_until_nth_char(&parent_name, '.', n - 1),
                                 props: value.props.clone(),
                                 separator: false,
                                 full_category_name: parent_name.clone(),
@@ -172,12 +189,21 @@ impl Category {
                         n += 1;
                     }
                     for (requester_uuid, source_file_uuid) in value.sources.iter() {
-                        report.found_category_late_with_details(&value.full_category_name, value.guid, requester_uuid, source_file_uuid);
+                        report.found_category_late_with_details(
+                            &value.full_category_name,
+                            value.guid,
+                            requester_uuid,
+                            source_file_uuid,
+                        );
                     }
                     report.found_category_late(&value.full_category_name, value.guid);
-                    to_insert.relative_category_name = nth_chunk(&value.relative_category_name, '.', n);
+                    to_insert.relative_category_name =
+                        nth_chunk(&value.relative_category_name, '.', n);
                     to_insert.display_name = to_insert.relative_category_name.clone();
-                    debug!("parent_name: {:?}, new name: {}, old name: {}", last_name, to_insert.relative_category_name, &value.relative_category_name);
+                    debug!(
+                        "parent_name: {:?}, new name: {}, old name: {}",
+                        last_name, to_insert.relative_category_name, &value.relative_category_name
+                    );
                     assert!(last_name.is_some());
                     to_insert.parent_name = last_name;
                 } else {
@@ -187,7 +213,7 @@ impl Category {
                         } else {
                             None
                         }
-                    }else {
+                    } else {
                         None
                     };
                     debug!("insert as is {:?}", to_insert);
@@ -199,8 +225,15 @@ impl Category {
                 second_pass_categories.clear();
             }
         }
-        let elaspsed_multi_pass_missing_categories_creation = start_multi_pass_missing_categories_creation.elapsed().unwrap_or_default();
-        report.telemetry.categories_reassemble.missing_categories_creation = elaspsed_multi_pass_missing_categories_creation.as_millis();
+        let elaspsed_multi_pass_missing_categories_creation =
+            start_multi_pass_missing_categories_creation
+                .elapsed()
+                .unwrap_or_default();
+        report
+            .telemetry
+            .categories_reassemble
+            .missing_categories_creation =
+            elaspsed_multi_pass_missing_categories_creation.as_millis();
 
         debug!("nb_pass_done {}", nb_pass_done);
         let start_parent_child_relationship = std::time::SystemTime::now();
@@ -214,27 +247,38 @@ impl Category {
             } else {
                 None
             };
-            
-            debug!("{} parent is {:?}", key , parent);
+
+            debug!("{} parent is {:?}", key, parent);
             let cat = Category::from(&value, parent);
             let cat_ref = cat.guid.clone();
-            if third_pass_categories.insert(cat.guid.clone(), cat).is_none() {
+            if third_pass_categories
+                .insert(cat.guid.clone(), cat)
+                .is_none()
+            {
                 third_pass_categories_ref.push(cat_ref);
             }
         }
-        let elaspsed_parent_child_relationship = start_parent_child_relationship.elapsed().unwrap_or_default();
-        report.telemetry.categories_reassemble.parent_child_relationship = elaspsed_parent_child_relationship.as_millis();
-    
+        let elaspsed_parent_child_relationship = start_parent_child_relationship
+            .elapsed()
+            .unwrap_or_default();
+        report
+            .telemetry
+            .categories_reassemble
+            .parent_child_relationship = elaspsed_parent_child_relationship.as_millis();
+
         debug!("third_pass_categories_ref");
         let start_tree_insertion = std::time::SystemTime::now();
         for full_category_uuid in third_pass_categories_ref {
             if let Some(cat) = third_pass_categories.remove(&full_category_uuid) {
                 let mut route = Vec::from_iter(cat.full_category_name.split('.'));
-                route.pop();//it is now the parent route
+                route.pop(); //it is now the parent route
                 if let Some(parent) = cat.parent {
-                    if let Some(parent_category) = Category::per_route(&mut third_pass_categories, &route, 0) {
+                    if let Some(parent_category) =
+                        Category::per_route(&mut third_pass_categories, &route, 0)
+                    {
                         parent_category.children.insert(cat.guid.clone(), cat);
-                    } else if let Some(parent_category) = Category::per_route(&mut root, &route, 0) {
+                    } else if let Some(parent_category) = Category::per_route(&mut root, &route, 0)
+                    {
                         parent_category.children.insert(cat.guid.clone(), cat);
                     } else {
                         panic!("Could not find parent {} for {:?}", parent, cat);
@@ -251,7 +295,4 @@ impl Category {
         debug!("reassemble_categories end {:?}", root);
         root
     }
-    
-
 }
-

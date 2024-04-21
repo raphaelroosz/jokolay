@@ -42,7 +42,6 @@ pub struct MumbleManager {
     backend: MumblePlatformImpl,
     /// latest mumble link
     link: MumbleLink,
-
 }
 impl MumbleManager {
     pub fn new(name: &str, _jokolay_window_id: Option<u32>) -> Result<Self> {
@@ -109,14 +108,8 @@ impl MumbleManager {
         if new_link.map_id != cml.context.map_id {
             changes.insert(MumbleChanges::Map);
         }
-        let client_pos = IVec2::new(
-            cml.context.client_pos[0],
-            cml.context.client_pos[1],
-        );
-        let client_size = UVec2::new(
-            cml.context.client_size[0],
-            cml.context.client_size[1],
-        );
+        let client_pos = IVec2::new(cml.context.client_pos[0], cml.context.client_pos[1]);
+        let client_size = UVec2::new(cml.context.client_size[0], cml.context.client_size[1]);
 
         if new_link.client_pos != client_pos {
             changes.insert(MumbleChanges::WindowPosition);
@@ -181,4 +174,3 @@ impl MumbleManager {
         })
     }
 }
-

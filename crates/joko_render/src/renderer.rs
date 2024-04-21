@@ -1,5 +1,5 @@
-use crate::gl_error;
 use crate::billboard::BillBoardRenderer;
+use crate::gl_error;
 use egui_render_three_d::three_d;
 use egui_render_three_d::three_d::context::COLOR_BUFFER_BIT;
 use egui_render_three_d::three_d::context::DEPTH_BUFFER_BIT;
@@ -16,10 +16,7 @@ use jokolink::MumbleLink;
 use jokolink::UIState;
 use three_d::prelude::*;
 
-use joko_render_models::{
-    marker::MarkerObject,
-    trail::TrailObject,
-};
+use joko_render_models::{marker::MarkerObject, trail::TrailObject};
 
 pub struct JokoRenderer {
     pub view_proj: Mat4,
@@ -74,41 +71,41 @@ impl JokoRenderer {
     }
 
     /*
-    CRect GetMinimapRectangle()
-{
-  int w = mumbleLink.miniMap.compassWidth;
-  int h = mumbleLink.miniMap.compassHeight;
+        CRect GetMinimapRectangle()
+    {
+      int w = mumbleLink.miniMap.compassWidth;
+      int h = mumbleLink.miniMap.compassHeight;
 
-  CRect pos;
-  CRect size = App->GetRoot()->GetClientRect();
-  float scale = GetWindowTooSmallScale();
+      CRect pos;
+      CRect size = App->GetRoot()->GetClientRect();
+      float scale = GetWindowTooSmallScale();
 
-  pos.x1 = int( size.Width() - w * scale );
-  pos.x2 = size.Width();
+      pos.x1 = int( size.Width() - w * scale );
+      pos.x2 = size.Width();
 
 
-  if ( mumbleLink.isMinimapTopRight )
-  {
-    pos.y1 = 1;
-    pos.y2 = int( h * scale + 1 );
-  }
-  else
-  {
-    int delta = 37;
-    if ( mumbleLink.uiSize == 0 )
-      delta = 33;
-    if ( mumbleLink.uiSize == 2 )
-      delta = 41;
-    if ( mumbleLink.uiSize == 3 )
-      delta = 45;
+      if ( mumbleLink.isMinimapTopRight )
+      {
+        pos.y1 = 1;
+        pos.y2 = int( h * scale + 1 );
+      }
+      else
+      {
+        int delta = 37;
+        if ( mumbleLink.uiSize == 0 )
+          delta = 33;
+        if ( mumbleLink.uiSize == 2 )
+          delta = 41;
+        if ( mumbleLink.uiSize == 3 )
+          delta = 45;
 
-    pos.y1 = int( size.Height() - h * scale - delta * scale );
-    pos.y2 = int( size.Height() - delta * scale );
-  }
+        pos.y1 = int( size.Height() - h * scale - delta * scale );
+        pos.y2 = int( size.Height() - delta * scale );
+      }
 
-  return pos;
-}
- */
+      return pos;
+    }
+     */
     pub fn get_z_near() -> f32 {
         1.0
     }
@@ -162,7 +159,7 @@ impl JokoRenderer {
 
             let client_width = (link.client_size.x) as f32;
             let client_height = (link.client_size.y) as f32;
-            
+
             let cam_pos = if self.is_map_open {
                 //TODO: validate values
                 glam::Vec3{
@@ -225,7 +222,7 @@ impl JokoRenderer {
     pub fn add_trail(&mut self, trail_object: TrailObject) {
         self.billboard_renderer.trails_wip.push(trail_object);
     }
-    
+
     pub fn prepare_frame(&mut self, latest_framebuffer_size_getter: impl FnMut() -> [u32; 2]) {
         self.gl.prepare_frame(latest_framebuffer_size_getter);
         unsafe {
@@ -259,7 +256,7 @@ impl JokoRenderer {
                 self.cam_pos,
                 &self.view_proj,
                 &self.gl.glow_backend.painter.managed_textures,
-                latest_time
+                latest_time,
             );
         }
         self.gl

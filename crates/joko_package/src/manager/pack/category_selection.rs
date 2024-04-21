@@ -1,6 +1,10 @@
-use std::collections::{HashSet, HashMap};
-use joko_package_models::{attributes::CommonAttributes, category::Category, package::{PackageImportReport, PackCore}};
+use joko_package_models::{
+    attributes::CommonAttributes,
+    category::Category,
+    package::{PackCore, PackageImportReport},
+};
 use ordered_hash_map::OrderedHashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,11 +14,11 @@ use crate::message::{UIToBackMessage, UIToUIMessage};
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct CategorySelection {
     //#[serde(skip)]
-    pub uuid: Uuid,//FIXME: if not present, one MUST fix it or mark the current import as a failure and reset all information
+    pub uuid: Uuid, //FIXME: if not present, one MUST fix it or mark the current import as a failure and reset all information
     #[serde(skip)]
     pub parent: Option<Uuid>,
-    pub is_selected: bool,//has it been selected in configuration to be displayed
-    pub is_active: bool,//currently being displayed (i.e.: active)
+    pub is_selected: bool, //has it been selected in configuration to be displayed
+    pub is_active: bool,   //currently being displayed (i.e.: active)
     pub separator: bool,
     pub display_name: String,
     pub children: OrderedHashMap<String, CategorySelection>,
@@ -22,12 +26,11 @@ pub struct CategorySelection {
 
 pub struct SelectedCategoryManager {
     data: OrderedHashMap<Uuid, CommonAttributes>,
-
 }
 impl<'a> SelectedCategoryManager {
     pub fn new(
         selected_categories: &OrderedHashMap<String, CategorySelection>,
-        categories: &OrderedHashMap<Uuid, Category>
+        categories: &OrderedHashMap<Uuid, Category>,
     ) -> Self {
         let mut list_of_enabled_categories = Default::default();
         CategorySelection::get_list_of_enabled_categories(
@@ -36,8 +39,10 @@ impl<'a> SelectedCategoryManager {
             &mut list_of_enabled_categories,
             &Default::default(),
         );
-        
-        Self { data: list_of_enabled_categories }
+
+        Self {
+            data: list_of_enabled_categories,
+        }
     }
     pub fn cloned_data(&self) -> OrderedHashMap<Uuid, CommonAttributes> {
         self.data.clone()
@@ -51,12 +56,10 @@ impl<'a> SelectedCategoryManager {
     pub fn len(&self) -> usize {
         self.data.len()
     }
-    pub fn keys(&'a self ) -> ordered_hash_map::ordered_map::Keys<'a, Uuid, CommonAttributes> {
+    pub fn keys(&'a self) -> ordered_hash_map::ordered_map::Keys<'a, Uuid, CommonAttributes> {
         self.data.keys()
     }
 }
-
-
 
 impl CategorySelection {
     pub fn default_from_pack_core(pack: &PackCore) -> OrderedHashMap<String, CategorySelection> {
@@ -87,7 +90,10 @@ impl CategorySelection {
             }
         }
     }
-    pub fn get(selection: &mut OrderedHashMap<String, CategorySelection>, uuid: Uuid) -> Option<&mut CategorySelection> {
+    pub fn get(
+        selection: &mut OrderedHashMap<String, CategorySelection>,
+        uuid: Uuid,
+    ) -> Option<&mut CategorySelection> {
         if selection.is_empty() {
             return None;
         } else {
@@ -98,7 +104,7 @@ impl CategorySelection {
                 if let Some(res) = Self::get(&mut cat.children, uuid) {
                     return Some(res);
                 }
-            }    
+            }
             return None;
         }
     }
@@ -129,7 +135,7 @@ impl CategorySelection {
                     uuid: cat.guid,
                     parent: cat.parent,
                     is_selected: cat.default_enabled,
-                    is_active: !cat.separator,//by default separators are not considered active since they contain nothing
+                    is_active: !cat.separator, //by default separators are not considered active since they contain nothing
                     separator: cat.separator,
                     display_name: cat.display_name.clone(),
                     children: Default::default(),
@@ -137,12 +143,18 @@ impl CategorySelection {
                 //println!("recursive_create_category_selection {} {}", cat_name, to_insert.uuid);
                 selectable_categories.insert(cat.relative_category_name.clone(), to_insert);
             }
-            let s = selectable_categories.get_mut(&cat.relative_category_name).unwrap();
+            let s = selectable_categories
+                .get_mut(&cat.relative_category_name)
+                .unwrap();
             Self::recursive_create_selectable_categories(&mut s.children, &cat.children);
         }
     }
 
-    pub fn recursive_set(selection: &mut OrderedHashMap<String, CategorySelection>, uuid: Uuid, status: bool) -> bool {
+    pub fn recursive_set(
+        selection: &mut OrderedHashMap<String, CategorySelection>,
+        uuid: Uuid,
+        status: bool,
+    ) -> bool {
         if selection.is_empty() {
             return false;
         } else {
@@ -157,11 +169,14 @@ impl CategorySelection {
                 if Self::recursive_set(&mut cat.children, uuid, status) {
                     return true;
                 }
-            }    
+            }
             return false;
         }
     }
-    pub fn recursive_set_all(selection: &mut OrderedHashMap<String, CategorySelection>, status: bool) {
+    pub fn recursive_set_all(
+        selection: &mut OrderedHashMap<String, CategorySelection>,
+        status: bool,
+    ) {
         if selection.is_empty() {
             return;
         }
@@ -174,14 +189,18 @@ impl CategorySelection {
         }
     }
 
-    pub fn recursive_update_active_categories(selection: &mut OrderedHashMap<String, CategorySelection>, active_elements: &HashSet<Uuid>) -> bool {
+    pub fn recursive_update_active_categories(
+        selection: &mut OrderedHashMap<String, CategorySelection>,
+        active_elements: &HashSet<Uuid>,
+    ) -> bool {
         let mut is_active = false;
         if selection.is_empty() {
             //println!("recursive_update_active_categories is_empty");
             return is_active;
         }
         for cat in selection.values_mut() {
-            cat.is_active = active_elements.contains(&cat.uuid) || Self::recursive_update_active_categories(&mut cat.children, active_elements);
+            cat.is_active = active_elements.contains(&cat.uuid)
+                || Self::recursive_update_active_categories(&mut cat.children, active_elements);
             if cat.is_active {
                 is_active = true;
             }
@@ -191,19 +210,23 @@ impl CategorySelection {
 
     fn context_menu(
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        cs: &mut CategorySelection, 
-        ui: &mut egui::Ui
+        cs: &mut CategorySelection,
+        ui: &mut egui::Ui,
     ) {
         if ui.button("Activate branch").clicked() {
             cs.is_selected = true;
             CategorySelection::recursive_set_all(&mut cs.children, true);
-            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, true));
+            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(
+                cs.uuid, true,
+            ));
             ui.close_menu();
         }
         if ui.button("Deactivate branch").clicked() {
             CategorySelection::recursive_set_all(&mut cs.children, false);
             cs.is_selected = false;
-            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(cs.uuid, false));
+            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(
+                cs.uuid, false,
+            ));
             ui.close_menu();
         }
     }
@@ -231,7 +254,12 @@ impl CategorySelection {
                     } else {
                         let cb = ui.checkbox(&mut cat.is_selected, "");
                         if cb.changed() {
-                            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationElementStatusChange(cat.uuid, cat.is_selected));
+                            let _ = u2b_sender.send(
+                                UIToBackMessage::CategoryActivationElementStatusChange(
+                                    cat.uuid,
+                                    cat.is_selected,
+                                ),
+                            );
                             *is_dirty = true;
                         }
                     }
@@ -251,17 +279,18 @@ impl CategorySelection {
                             Self::recursive_selection_ui(
                                 u2b_sender,
                                 u2u_sender,
-                                &mut cat.children, 
-                                ui, 
-                                is_dirty, 
-                                show_only_active, 
-                                import_quality_report
+                                &mut cat.children,
+                                ui,
+                                is_dirty,
+                                show_only_active,
+                                import_quality_report,
                             );
-                        }).response.context_menu(|ui| Self::context_menu(u2b_sender, cat, ui));
+                        })
+                        .response
+                        .context_menu(|ui| Self::context_menu(u2b_sender, cat, ui));
                     }
                 });
             }
         });
     }
 }
-

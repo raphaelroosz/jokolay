@@ -1,33 +1,34 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet}, sync::{Arc, Mutex}
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::{Arc, Mutex},
 };
 
-use glam::Vec3;
-use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Ui, Window};
+use glam::Vec3;
 use image::EncodableLayout;
+use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 
 use tracing::{info_span, trace};
 
+use crate::message::{UIToBackMessage, UIToUIMessage};
 use joko_core::RelativePath;
 use jokolink::MumbleLink;
 use miette::Result;
 use uuid::Uuid;
-use crate::message::{UIToBackMessage, UIToUIMessage};
 
-use crate::message::BackToUIMessage;
-use crate::manager::pack::loaded::{LoadedPackData, PackTasks, LoadedPackTexture};
 use crate::manager::pack::import::ImportStatus;
+use crate::manager::pack::loaded::{LoadedPackData, LoadedPackTexture, PackTasks};
+use crate::message::BackToUIMessage;
 
 use super::pack::loaded::jokolay_to_marker_dir;
 
-pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager";//name kept for compatibility purpose
-pub const PACKAGES_DIRECTORY_NAME: &str = "packs";//name kept for compatibility purpose
-pub const EDITABLE_PACKAGE_NAME: &str = "_work";//package automatically created and always imported as an overwrite
-pub const WORKING_PACKAGE_NAME: &str = "editable";//working dir where a package is extracted before reading
-pub const LOCAL_EXPANDED_PACKAGE_NAME: &str = "_local_expanded";//result of import of the editable package
-// pub const MARKER_MANAGER_CONFIG_NAME: &str = "marker_manager_config.json";
+pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager"; //name kept for compatibility purpose
+pub const PACKAGES_DIRECTORY_NAME: &str = "packs"; //name kept for compatibility purpose
+pub const EXTRACT_DIRECTORY_NAME: &str = "_work"; //working dir where a package is extracted before reading
+pub const EDITABLE_PACKAGE_NAME: &str = "editable"; //package automatically created and always imported as an overwrite
+pub const LOCAL_EXPANDED_PACKAGE_NAME: &str = "_local_expanded"; //result of import of the editable package
+                                                                 // pub const MARKER_MANAGER_CONFIG_NAME: &str = "marker_manager_config.json";
 
 /// It manage everything that has to do with marker packs.
 /// 1. imports, loads, saves and exports marker packs.
@@ -68,7 +69,7 @@ pub struct PackageUIManager {
     tasks: PackTasks,
 
     currently_used_files: BTreeMap<Uuid, bool>,
-    all_files_activation_status: bool,// this consume a change of display event
+    all_files_activation_status: bool, // this consume a change of display event
     show_only_active: bool,
     pack_details: Option<Uuid>, // if filled, display the details of the package
 }
@@ -129,7 +130,8 @@ impl PackageDataManager {
         self.parents.get(element)
     }
     pub fn get_parents<'a, I>(&self, input: I) -> HashSet<Uuid>
-    where I: Iterator<Item=&'a Uuid>
+    where
+        I: Iterator<Item = &'a Uuid>,
     {
         let iter = input.into_iter();
         let mut result: HashSet<Uuid> = HashSet::new();
@@ -159,8 +161,14 @@ impl PackageDataManager {
         unreachable!("The loop should always return");
     }
 
-    pub fn get_active_elements_parents(&mut self, categories_and_elements_to_be_loaded: HashSet<Uuid>) {
-        trace!("There are {} active elements", categories_and_elements_to_be_loaded.len());
+    pub fn get_active_elements_parents(
+        &mut self,
+        categories_and_elements_to_be_loaded: HashSet<Uuid>,
+    ) {
+        trace!(
+            "There are {} active elements",
+            categories_and_elements_to_be_loaded.len()
+        );
 
         //first merge the parents to iterate overit
         let mut parents: HashMap<Uuid, Uuid> = Default::default();
@@ -181,7 +189,7 @@ impl PackageDataManager {
     ) {
         let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
         let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
-        
+
         match link {
             Some(link) => {
                 //TODO: how to save/load the active files ?
@@ -191,18 +199,32 @@ impl PackageDataManager {
                 for pack in self.packs.values_mut() {
                     if let Some(current_map) = pack.maps.get(&link.map_id) {
                         for marker in current_map.markers.values() {
-                            if let Some(is_active) = pack.source_files.get(&marker.source_file_uuid) {
+                            if let Some(is_active) = pack.source_files.get(&marker.source_file_uuid)
+                            {
                                 currently_used_files.insert(
-                                    marker.source_file_uuid.clone(), 
-                                    *self.currently_used_files.get(&marker.source_file_uuid).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
+                                    marker.source_file_uuid.clone(),
+                                    *self
+                                        .currently_used_files
+                                        .get(&marker.source_file_uuid)
+                                        .unwrap_or_else(|| {
+                                            have_used_files_list_changed = true;
+                                            is_active
+                                        }),
                                 );
                             }
                         }
                         for trail in current_map.trails.values() {
-                            if let Some(is_active) = pack.source_files.get(&trail.source_file_uuid) {
+                            if let Some(is_active) = pack.source_files.get(&trail.source_file_uuid)
+                            {
                                 currently_used_files.insert(
-                                    trail.source_file_uuid.clone(), 
-                                    *self.currently_used_files.get(&trail.source_file_uuid).unwrap_or_else(|| {have_used_files_list_changed = true; is_active})
+                                    trail.source_file_uuid.clone(),
+                                    *self
+                                        .currently_used_files
+                                        .get(&trail.source_file_uuid)
+                                        .unwrap_or_else(|| {
+                                            have_used_files_list_changed = true;
+                                            is_active
+                                        }),
                                 );
                             }
                         }
@@ -220,23 +242,27 @@ impl PackageDataManager {
                         &currently_used_files,
                         have_used_files_list_changed || choice_of_category_changed,
                         map_changed,
-                        &tasks, 
+                        &tasks,
                         &mut categories_and_elements_to_be_loaded,
                     );
                     std::mem::drop(span_guard);
                 }
                 if map_changed {
                     self.get_active_elements_parents(categories_and_elements_to_be_loaded);
-                    let _ = b2u_sender.send(BackToUIMessage::ActiveElements(self.loaded_elements.clone()));
+                    let _ = b2u_sender.send(BackToUIMessage::ActiveElements(
+                        self.loaded_elements.clone(),
+                    ));
                 }
                 if map_changed || have_used_files_list_changed || choice_of_category_changed {
                     //there is no point in sending a new list if nothing changed
-                    let _ = b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(currently_used_files.clone()));
+                    let _ = b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(
+                        currently_used_files.clone(),
+                    ));
                     self.currently_used_files = currently_used_files;
                     let _ = b2u_sender.send(BackToUIMessage::TextureSwapChain);
                 }
-            },
-            None => {},
+            }
+            None => {}
         };
     }
 
@@ -253,11 +279,17 @@ impl PackageDataManager {
             }
         }
         self.delete_packs(to_delete);
-        self.tasks.save_report(Arc::clone(&data_pack.dir), report, true);
+        self.tasks
+            .save_report(Arc::clone(&data_pack.dir), report, true);
         self.tasks.save_data(&mut data_pack, true);
         let mut uuid_to_insert = data_pack.uuid.clone();
-        while self.packs.contains_key(&uuid_to_insert) {//collision avoidance
-            trace!("Uuid collision detected for {} for package {}", uuid_to_insert, data_pack.name);
+        while self.packs.contains_key(&uuid_to_insert) {
+            //collision avoidance
+            trace!(
+                "Uuid collision detected for {} for package {}",
+                uuid_to_insert,
+                data_pack.name
+            );
             uuid_to_insert = Uuid::new_v4();
         }
         data_pack.uuid = uuid_to_insert;
@@ -274,21 +306,22 @@ impl PackageDataManager {
         // Called only once at application start.
         let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
         self.tasks.load_all_packs(jokolay_dir);
-        if let Ok((data_packages, texture_packages, report_packages)) = self.tasks.wait_for_load_all_packs() {
+        if let Ok((data_packages, texture_packages, report_packages)) =
+            self.tasks.wait_for_load_all_packs()
+        {
             for (uuid, data_pack) in data_packages {
                 self.packs.insert(uuid, data_pack);
             }
-            for ((_, texture_pack), (_, report)) in std::iter::zip(texture_packages, report_packages) {
+            for ((_, texture_pack), (_, report)) in
+                std::iter::zip(texture_packages, report_packages)
+            {
                 let _ = b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack, report));
             }
             let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
         }
         let _ = b2u_sender.send(BackToUIMessage::FirstLoadDone);
-        
     }
-
 }
-
 
 impl PackageUIManager {
     pub fn new(packs: BTreeMap<Uuid, LoadedPackTexture>) -> Self {
@@ -301,15 +334,12 @@ impl PackageUIManager {
 
             all_files_activation_status: false,
             show_only_active: true,
-            currently_used_files: Default::default(),// UI copy to (de-)activate files
+            currently_used_files: Default::default(), // UI copy to (de-)activate files
             pack_details: None,
         }
     }
 
-    pub fn late_init(
-        &mut self,
-        etx: &egui::Context,
-    ) {
+    pub fn late_init(&mut self, etx: &egui::Context) {
         if self.default_marker_texture.is_none() {
             let img = image::load_from_memory(include_bytes!("../../images/marker.png")).unwrap();
             let size = [img.width() as _, img.height() as _];
@@ -324,7 +354,8 @@ impl PackageUIManager {
             ));
         }
         if self.default_trail_texture.is_none() {
-            let img = image::load_from_memory(include_bytes!("../../images/trail_rainbow.png")).unwrap();
+            let img =
+                image::load_from_memory(include_bytes!("../../images/trail_rainbow.png")).unwrap();
             let size = [img.width() as _, img.height() as _];
             self.default_trail_texture = Some(etx.load_texture(
                 "default trail",
@@ -355,7 +386,11 @@ impl PackageUIManager {
         }
     }
 
-    pub fn update_pack_active_categories(&mut self, pack_uuid: Uuid, active_elements: &HashSet<Uuid>) {
+    pub fn update_pack_active_categories(
+        &mut self,
+        pack_uuid: Uuid,
+        active_elements: &HashSet<Uuid>,
+    ) {
         trace!("There are {} active elements", active_elements.len());
         for (uuid, pack) in self.packs.iter_mut() {
             if uuid == &pack_uuid {
@@ -371,53 +406,47 @@ impl PackageUIManager {
     }
 
     pub fn load_marker_texture(
-        &mut self, 
-        egui_context: &egui::Context, 
-        pack_uuid: Uuid, 
-        tex_path: RelativePath, 
-        marker_uuid: Uuid, 
+        &mut self,
+        egui_context: &egui::Context,
+        pack_uuid: Uuid,
+        tex_path: RelativePath,
+        marker_uuid: Uuid,
         position: Vec3,
         common_attributes: CommonAttributes,
     ) {
-        self.packs
-            .get_mut(&pack_uuid)
-            .map( |pack| {
-                pack.load_marker_texture(
-                    egui_context, 
-                    self.default_marker_texture.as_ref().unwrap(),
-                    &tex_path, 
-                    marker_uuid,
-                    position,
-                    common_attributes,
-                );
-            });
+        self.packs.get_mut(&pack_uuid).map(|pack| {
+            pack.load_marker_texture(
+                egui_context,
+                self.default_marker_texture.as_ref().unwrap(),
+                &tex_path,
+                marker_uuid,
+                position,
+                common_attributes,
+            );
+        });
     }
     pub fn load_trail_texture(
-        &mut self, 
-        egui_context: &egui::Context, 
-        pack_uuid: Uuid, 
-        tex_path: RelativePath, 
-        trail_uuid: Uuid, 
+        &mut self,
+        egui_context: &egui::Context,
+        pack_uuid: Uuid,
+        tex_path: RelativePath,
+        trail_uuid: Uuid,
         common_attributes: CommonAttributes,
     ) {
-        self.packs
-            .get_mut(&pack_uuid)
-            .map( |pack| {
-                pack.load_trail_texture(
-                    egui_context, 
-                    &self.default_trail_texture.as_ref().unwrap(),
-                    &tex_path, 
-                    trail_uuid,
-                    common_attributes,
-                );
-            });
+        self.packs.get_mut(&pack_uuid).map(|pack| {
+            pack.load_trail_texture(
+                egui_context,
+                &self.default_trail_texture.as_ref().unwrap(),
+                &tex_path,
+                trail_uuid,
+                common_attributes,
+            );
+        });
     }
 
-    fn pack_importer(
-        import_status: Arc<Mutex<ImportStatus>>,
-    ) {
+    fn pack_importer(import_status: Arc<Mutex<ImportStatus>>) {
         //called when a new pack is imported
-        rayon::spawn( move || {
+        rayon::spawn(move || {
             *import_status.lock().unwrap() = ImportStatus::WaitingForFileChooser;
 
             if let Some(file_path) = rfd::FileDialog::new()
@@ -449,13 +478,7 @@ impl PackageUIManager {
         for pack in self.packs.values_mut() {
             let span_guard = info_span!("Updating package status").entered();
             tasks.save_texture(pack, pack.is_dirty());
-            pack.tick(
-                &u2u_sender,
-                timestamp,
-                link,
-                z_near,
-                &tasks
-            );
+            pack.tick(&u2u_sender, timestamp, link, z_near, &tasks);
             std::mem::drop(span_guard);
         }
         let _ = u2u_sender.send(UIToUIMessage::RenderSwapChain);
@@ -463,7 +486,7 @@ impl PackageUIManager {
     }
 
     pub fn menu_ui(
-        &mut self, 
+        &mut self,
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         ui: &mut egui::Ui,
@@ -489,19 +512,34 @@ impl PackageUIManager {
                 let _ = u2b_sender.send(UIToBackMessage::CategorySetAll(false));
             }
 
-            for (pack, import_quality_report) in std::iter::zip(self.packs.values_mut(), self.reports.values()) {
+            for (pack, import_quality_report) in
+                std::iter::zip(self.packs.values_mut(), self.reports.values())
+            {
                 //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
                 //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
-                pack.category_sub_menu(u2b_sender, u2u_sender, ui, self.show_only_active, &import_quality_report);
+                pack.category_sub_menu(
+                    u2b_sender,
+                    u2u_sender,
+                    ui,
+                    self.show_only_active,
+                    &import_quality_report,
+                );
             }
-            
         });
-        if self.tasks.is_running() || nb_running_tasks_on_back > 0 || nb_running_tasks_on_network > 0{
-            let sp = egui::Spinner::new().color(self.status_as_color(nb_running_tasks_on_back, nb_running_tasks_on_network));
+        if self.tasks.is_running()
+            || nb_running_tasks_on_back > 0
+            || nb_running_tasks_on_network > 0
+        {
+            let sp = egui::Spinner::new()
+                .color(self.status_as_color(nb_running_tasks_on_back, nb_running_tasks_on_network));
             ui.add(sp);
         }
     }
-    pub fn status_as_color(&self, nb_running_tasks_on_back: i32, nb_running_tasks_on_network: i32) -> egui::Color32 {
+    pub fn status_as_color(
+        &self,
+        nb_running_tasks_on_back: i32,
+        nb_running_tasks_on_network: i32,
+    ) -> egui::Color32 {
         //we can choose whatever color code we want to focus on load, save, network queries, anything.
         let nb_running_tasks_on_ui = self.tasks.count();
         //Integer overflow avoidance example: value * 0x80 / 4 <=> value * 0x20
@@ -512,7 +550,7 @@ impl PackageUIManager {
         } else {
             0
         };
-        
+
         let color_back = if nb_running_tasks_on_back > 0 {
             let nb_bask_tasks = nb_running_tasks_on_back.clamp(0, 1) as u8;
             let res = nb_bask_tasks * 0x80;
@@ -520,7 +558,7 @@ impl PackageUIManager {
         } else {
             0
         };
-        
+
         let color_network = if nb_running_tasks_on_network > 0 {
             let nb_network_tasks = nb_running_tasks_on_network.clamp(0, 1) as u8;
             let res = nb_network_tasks * 0x80;
@@ -533,88 +571,102 @@ impl PackageUIManager {
     }
 
     fn gui_file_manager(
-        &mut self, 
+        &mut self,
         event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        etx: &egui::Context, 
-        open: &mut bool, 
+        etx: &egui::Context,
+        open: &mut bool,
     ) {
         let mut files_changed = false;
-        Window::new("File Manager").open(open).show(etx, |ui| -> Result<()> {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                egui::Grid::new("link grid")
-                    .num_columns(4)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        let mut all_files_toggle = false;
-                        ui.horizontal(|ui|{
-                            if ui.button("activate all").clicked() {
-                                self.all_files_activation_status = true;
-                                all_files_toggle = true;
-                                files_changed = true;
-                            }
-                            if ui.button("deactivate all").clicked() {
-                                self.all_files_activation_status = false;
-                                all_files_toggle = true;
-                                files_changed = true;
-                            }
-                        });
-                        //ui.label("Trails");
-                        //ui.label("Markers");
-                        ui.end_row();
-                        
-                        for pack in self.packs.values_mut() {
-                            //TODO: first loop to list what is active per pack, to not display all packs
-                            let report = self.reports.get(&pack.uuid).unwrap();
-                            let mut pack_files_toggle = false;
-                            let mut pack_files_activation_status = true;
-                            ui.horizontal(|ui|{
-                                ui.label(&pack.name);
+        Window::new("File Manager")
+            .open(open)
+            .show(etx, |ui| -> Result<()> {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::Grid::new("link grid")
+                        .num_columns(4)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            let mut all_files_toggle = false;
+                            ui.horizontal(|ui| {
                                 if ui.button("activate all").clicked() {
-                                    pack_files_activation_status = true;
-                                    pack_files_toggle = true;
+                                    self.all_files_activation_status = true;
+                                    all_files_toggle = true;
                                     files_changed = true;
                                 }
                                 if ui.button("deactivate all").clicked() {
-                                    pack_files_activation_status = false;
-                                    pack_files_toggle = true;
+                                    self.all_files_activation_status = false;
+                                    all_files_toggle = true;
                                     files_changed = true;
                                 }
                             });
+                            //ui.label("Trails");
+                            //ui.label("Markers");
                             ui.end_row();
-                            for source_file_uuid in pack.source_files.keys() {
-                                if let Some(is_selected) = self.currently_used_files.get_mut(source_file_uuid) {
-                                    if all_files_toggle {
-                                        *is_selected = self.all_files_activation_status;
+
+                            for pack in self.packs.values_mut() {
+                                //TODO: first loop to list what is active per pack, to not display all packs
+                                let report = self.reports.get(&pack.uuid).unwrap();
+                                let mut pack_files_toggle = false;
+                                let mut pack_files_activation_status = true;
+                                ui.horizontal(|ui| {
+                                    ui.label(&pack.name);
+                                    if ui.button("activate all").clicked() {
+                                        pack_files_activation_status = true;
+                                        pack_files_toggle = true;
+                                        files_changed = true;
                                     }
-                                    if pack_files_toggle {
-                                        *is_selected = pack_files_activation_status;
+                                    if ui.button("deactivate all").clicked() {
+                                        pack_files_activation_status = false;
+                                        pack_files_toggle = true;
+                                        files_changed = true;
                                     }
-                                    ui.add_space(3.0);
-                                    //reports may be corrupted or not loaded, files are there
-                                    if let Some(source_file_name) = report.source_file_uuid_to_name(source_file_uuid) {
-                                        //format the file from reports and packages + prefix with the package name
-                                        let cb = ui.checkbox(is_selected, format!("{}: {}", pack.name, source_file_name));
-                                        if cb.changed() {
-                                            files_changed = true;
+                                });
+                                ui.end_row();
+                                for source_file_uuid in pack.source_files.keys() {
+                                    if let Some(is_selected) =
+                                        self.currently_used_files.get_mut(source_file_uuid)
+                                    {
+                                        if all_files_toggle {
+                                            *is_selected = self.all_files_activation_status;
                                         }
-                                    } else {
-                                        // Import report is corrupted, only print reference
-                                        let cb = ui.checkbox(is_selected, format!("{}: {}", pack.name, source_file_uuid));
-                                        if cb.changed() {
-                                            files_changed = true;
+                                        if pack_files_toggle {
+                                            *is_selected = pack_files_activation_status;
                                         }
+                                        ui.add_space(3.0);
+                                        //reports may be corrupted or not loaded, files are there
+                                        if let Some(source_file_name) =
+                                            report.source_file_uuid_to_name(source_file_uuid)
+                                        {
+                                            //format the file from reports and packages + prefix with the package name
+                                            let cb = ui.checkbox(
+                                                is_selected,
+                                                format!("{}: {}", pack.name, source_file_name),
+                                            );
+                                            if cb.changed() {
+                                                files_changed = true;
+                                            }
+                                        } else {
+                                            // Import report is corrupted, only print reference
+                                            let cb = ui.checkbox(
+                                                is_selected,
+                                                format!("{}: {}", pack.name, source_file_uuid),
+                                            );
+                                            if cb.changed() {
+                                                files_changed = true;
+                                            }
+                                        }
+                                        ui.end_row();
                                     }
-                                    ui.end_row();
                                 }
                             }
-                        }
-                        ui.end_row();
-                    })
+                            ui.end_row();
+                        })
+                });
+                Ok(())
             });
-            Ok(())
-        });
         if files_changed {
-            let _ = event_sender.send(UIToBackMessage::ActiveFiles(self.currently_used_files.clone()));
+            let _ = event_sender.send(UIToBackMessage::ActiveFiles(
+                self.currently_used_files.clone(),
+            ));
         }
     }
 
@@ -622,23 +674,46 @@ impl PackageUIManager {
         // protection against deletion while displaying details
         if let Some(pack) = self.packs.get(&uuid) {
             if let Some(report) = self.reports.get(&uuid) {
-                let collapsing = CollapsingHeader::new(format!("Last load details of package {}", pack.name));
+                let collapsing =
+                    CollapsingHeader::new(format!("Last load details of package {}", pack.name));
                 let header_response = collapsing
                     .open(Some(true))
                     .show(ui, |ui| {
-                        egui::Grid::new("packs details").striped(true).show(ui, |ui| {
-                            let number_of = &report.number_of;
-                            ui.label("categories");        ui.label(format!("{}", number_of.categories));        ui.end_row();
-                            ui.label("missing_categories");ui.label(format!("{}", number_of.missing_categories));ui.end_row();
-                            ui.label("textures");          ui.label(format!("{}", number_of.textures));          ui.end_row();
-                            ui.label("missing_textures");  ui.label(format!("{}", number_of.missing_textures));  ui.end_row();
-                            ui.label("entities");          ui.label(format!("{}", number_of.entities));          ui.end_row();
-                            ui.label("markers");           ui.label(format!("{}", number_of.markers));           ui.end_row();
-                            ui.label("trails");            ui.label(format!("{}", number_of.trails));            ui.end_row();
-                            ui.label("routes");            ui.label(format!("{}", number_of.routes));            ui.end_row();
-                            ui.label("maps");              ui.label(format!("{}", number_of.maps));              ui.end_row();
-                            ui.label("source_files");      ui.label(format!("{}", number_of.source_files));      ui.end_row();
-                        })
+                        egui::Grid::new("packs details")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                let number_of = &report.number_of;
+                                ui.label("categories");
+                                ui.label(format!("{}", number_of.categories));
+                                ui.end_row();
+                                ui.label("missing_categories");
+                                ui.label(format!("{}", number_of.missing_categories));
+                                ui.end_row();
+                                ui.label("textures");
+                                ui.label(format!("{}", number_of.textures));
+                                ui.end_row();
+                                ui.label("missing_textures");
+                                ui.label(format!("{}", number_of.missing_textures));
+                                ui.end_row();
+                                ui.label("entities");
+                                ui.label(format!("{}", number_of.entities));
+                                ui.end_row();
+                                ui.label("markers");
+                                ui.label(format!("{}", number_of.markers));
+                                ui.end_row();
+                                ui.label("trails");
+                                ui.label(format!("{}", number_of.trails));
+                                ui.end_row();
+                                ui.label("routes");
+                                ui.label(format!("{}", number_of.routes));
+                                ui.end_row();
+                                ui.label("maps");
+                                ui.label(format!("{}", number_of.maps));
+                                ui.end_row();
+                                ui.label("source_files");
+                                ui.label(format!("{}", number_of.source_files));
+                                ui.end_row();
+                            })
                     })
                     .header_response;
                 if header_response.clicked() {
@@ -652,9 +727,9 @@ impl PackageUIManager {
         }
     }
     fn gui_package_list(
-        &mut self, 
+        &mut self,
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        etx: &egui::Context, 
+        etx: &egui::Context,
         import_status: &Arc<Mutex<ImportStatus>>,
         open: &mut bool,
         first_load_done: bool,
@@ -733,15 +808,21 @@ impl PackageUIManager {
         });
     }
     pub fn gui(
-        &mut self, 
+        &mut self,
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        etx: &egui::Context, 
-        is_marker_open: &mut bool, 
+        etx: &egui::Context,
+        is_marker_open: &mut bool,
         import_status: &Arc<Mutex<ImportStatus>>,
-        is_file_open: &mut bool, 
+        is_file_open: &mut bool,
         first_load_done: bool,
     ) {
-        self.gui_package_list(u2b_sender, etx, import_status, is_marker_open, first_load_done);
+        self.gui_package_list(
+            u2b_sender,
+            etx,
+            import_status,
+            is_marker_open,
+            first_load_done,
+        );
         self.gui_file_manager(u2b_sender, etx, is_file_open);
     }
 
@@ -762,5 +843,3 @@ impl PackageUIManager {
         self.reports.insert(report.uuid, report);
     }
 }
-
-

@@ -6,12 +6,10 @@ use itertools::Itertools;
 use tracing::info;
 use xot::{Element, NameId, Xot};
 
-
 use joko_core::RelativePath;
 use jokoapi::end_point::mounts::Mount;
 use jokoapi::end_point::races::Race;
 use smol_str::SmolStr;
-
 
 pub struct XotAttributeNameIDs {
     // xml tags
@@ -32,7 +30,7 @@ pub struct XotAttributeNameIDs {
     pub default_enabled: NameId,
     pub display_name: NameId,
     pub name: NameId,
-    pub capital_name: NameId,//same than "name" but with a starting capital letter
+    pub capital_name: NameId, //same than "name" but with a starting capital letter
     pub separator: NameId,
     // inheritable attributes
     pub achievement_id: NameId,
@@ -422,23 +420,18 @@ macro_rules! update_attribute_from_ele {
 fn parse_boolean(raw_value: &str) -> Option<bool> {
     let trimmed = raw_value.trim().to_lowercase();
     match trimmed.as_ref() {
-        "true" => {Some(true)},
-        "false" => {Some(false)},
+        "true" => Some(true),
+        "false" => Some(false),
         _ => {
-            match trimmed.parse::<i8>() {//might entirely get rid of parsing
-                Ok(parsed_value) => {
-                    match parsed_value {
-                        0 | 1 => {
-                            Some(parsed_value == 1)
-                        }
-                        _ => None
-                    }
-                }
-                Err(_e) => {
-                    None
-                }
+            match trimmed.parse::<i8>() {
+                //might entirely get rid of parsing
+                Ok(parsed_value) => match parsed_value {
+                    0 | 1 => Some(parsed_value == 1),
+                    _ => None,
+                },
+                Err(_e) => None,
             }
-        },
+        }
     }
 }
 macro_rules! update_attribute_bool_from_ele {

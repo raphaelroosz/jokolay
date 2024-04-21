@@ -4,7 +4,10 @@ use crate::{
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
-use joko_package_models::{attributes::XotAttributeNameIDs, category::Category, marker::Marker, package::PackCore, route::Route, trail::Trail};
+use joko_package_models::{
+    attributes::XotAttributeNameIDs, category::Category, marker::Marker, package::PackCore,
+    route::Route, trail::Trail,
+};
 use miette::{Context, IntoDiagnostic, Result};
 use ordered_hash_map::OrderedHashMap;
 use std::io::Write;
@@ -27,7 +30,12 @@ pub(crate) fn export_package_v1(
     writing_directory: &Dir,
 ) -> Result<()> {
     // save categories
-    info!("Saving data pack {}, {} categories, {} maps", pack_data.name, pack_data.categories.len(), pack_data.maps.len());
+    info!(
+        "Saving data pack {}, {} categories, {} maps",
+        pack_data.name,
+        pack_data.categories.len(),
+        pack_data.maps.len()
+    );
     let mut tree = Xot::new();
     let names = XotAttributeNameIDs::register_with_xot(&mut tree);
     let od = tree.new_element(names.overlay_data);
@@ -42,7 +50,8 @@ pub(crate) fn export_package_v1(
         .to_string(root_node)
         .into_diagnostic()
         .wrap_err("failed to convert cats xot to string")?;
-    writing_directory.create("categories.xml")
+    writing_directory
+        .create("categories.xml")
         .into_diagnostic()
         .wrap_err("failed to create categories.xml")?
         .write_all(cats.as_bytes())
@@ -96,7 +105,8 @@ pub(crate) fn export_package_v1(
             .to_string(root_node)
             .into_diagnostic()
             .wrap_err("failed to serialize map data to string")?;
-        writing_directory.create(format!("{map_id}.xml"))
+        writing_directory
+            .create(format!("{map_id}.xml"))
             .into_diagnostic()
             .wrap_err("failed to create map xml file")?
             .write_all(map_xml.as_bytes())
@@ -109,30 +119,35 @@ pub(crate) fn save_pack_texture_to_dir(
     pack_texture: &LoadedPackTexture,
     writing_directory: &Dir,
 ) -> Result<()> {
-
-    info!("Saving texture pack {}, {} textures, {} tbins", pack_texture.name, pack_texture.textures.len(), pack_texture.tbins.len());
+    info!(
+        "Saving texture pack {}, {} textures, {} tbins",
+        pack_texture.name,
+        pack_texture.textures.len(),
+        pack_texture.tbins.len()
+    );
     // save images
     for (img_path, img) in pack_texture.textures.iter() {
         if let Some(parent) = img_path.parent() {
-            writing_directory.create_dir_all(parent)
+            writing_directory
+                .create_dir_all(parent)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     miette::miette!("failed to create parent dir for an image: {img_path}")
                 })?;
         }
-        writing_directory.create(img_path.as_str())
+        writing_directory
+            .create(img_path.as_str())
             .into_diagnostic()
             .wrap_err_with(|| miette::miette!("failed to create file for image: {img_path}"))?
             .write(img)
             .into_diagnostic()
-            .wrap_err_with(|| {
-                miette::miette!("failed to write image bytes to file: {img_path}")
-            })?;
+            .wrap_err_with(|| miette::miette!("failed to write image bytes to file: {img_path}"))?;
     }
     // save tbins
     for (tbin_path, tbin) in pack_texture.tbins.iter() {
         if let Some(parent) = tbin_path.parent() {
-            writing_directory.create_dir_all(parent)
+            writing_directory
+                .create_dir_all(parent)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     miette::miette!("failed to create parent dir of tbin: {tbin_path}")
@@ -147,7 +162,8 @@ pub(crate) fn save_pack_texture_to_dir(
             bytes.extend_from_slice(&node[1].to_ne_bytes());
             bytes.extend_from_slice(&node[2].to_ne_bytes());
         }
-        writing_directory.create(tbin_path.as_str())
+        writing_directory
+            .create(tbin_path.as_str())
             .into_diagnostic()
             .wrap_err_with(|| miette::miette!("failed to create tbin file: {tbin_path}"))?
             .write_all(&bytes)
@@ -189,7 +205,10 @@ fn serialize_trail_to_element(trail: &Trail, ele: &mut Element, names: &XotAttri
     ele.set_attribute(names.guid, BASE64_ENGINE.encode(trail.guid));
     ele.set_attribute(names.category, &trail.category);
     ele.set_attribute(names.map_id, format!("{}", trail.map_id));
-    ele.set_attribute(names._source_file_name, format!("{}", trail.source_file_uuid));
+    ele.set_attribute(
+        names._source_file_name,
+        format!("{}", trail.source_file_uuid),
+    );
     trail.props.serialize_to_element(ele, names);
 }
 
@@ -200,17 +219,25 @@ fn serialize_marker_to_element(marker: &Marker, ele: &mut Element, names: &XotAt
     ele.set_attribute(names.guid, BASE64_ENGINE.encode(marker.guid));
     ele.set_attribute(names.map_id, format!("{}", marker.map_id));
     ele.set_attribute(names.category, &marker.category);
-    ele.set_attribute(names._source_file_name, format!("{}", marker.source_file_uuid));
+    ele.set_attribute(
+        names._source_file_name,
+        format!("{}", marker.source_file_uuid),
+    );
     marker.attrs.serialize_to_element(ele, names);
 }
 
-fn serialize_route_to_element(tree: &mut Xot, route: &Route, parent: &Node, names: &XotAttributeNameIDs) -> Result<()> {
+fn serialize_route_to_element(
+    tree: &mut Xot,
+    route: &Route,
+    parent: &Node,
+    names: &XotAttributeNameIDs,
+) -> Result<()> {
     let route_node = tree.new_element(names.route);
     tree.append(*parent, route_node)
         .into_diagnostic()
         .wrap_err("failed to append route to pois")?;
     let ele = tree.element_mut(route_node).unwrap();
-    
+
     ele.set_attribute(names.category, route.category.clone());
     ele.set_attribute(names.resetposx, format!("{}", route.reset_position[0]));
     ele.set_attribute(names.resetposy, format!("{}", route.reset_position[1]));
@@ -220,7 +247,10 @@ fn serialize_route_to_element(tree: &mut Xot, route: &Route, parent: &Node, name
     ele.set_attribute(names.guid, BASE64_ENGINE.encode(route.guid));
     ele.set_attribute(names.map_id, format!("{}", route.map_id));
     ele.set_attribute(names.texture, "default_trail_texture.png");
-    ele.set_attribute(names._source_file_name, format!("{}", route.source_file_uuid));
+    ele.set_attribute(
+        names._source_file_name,
+        format!("{}", route.source_file_uuid),
+    );
     for pos in &route.path {
         let child = tree.new_element(names.poi);
         tree.append(route_node, child);
@@ -232,4 +262,3 @@ fn serialize_route_to_element(tree: &mut Xot, route: &Route, parent: &Node, name
     }
     Ok(())
 }
-

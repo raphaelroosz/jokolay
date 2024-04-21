@@ -5,8 +5,8 @@ use egui_render_three_d::{
 };
 use glam::Vec2;
 use joko_render_models::{
-    marker::{MarkerVertex, MarkerObject}, 
-    trail::TrailObject
+    marker::{MarkerObject, MarkerVertex},
+    trail::TrailObject,
 };
 use tracing::{error, info, trace, warn};
 
@@ -16,17 +16,16 @@ const MARKER_VERTEX_STRIDE: i32 = std::mem::size_of::<MarkerVertex>() as _;
 pub struct BillBoardRenderer {
     pub markers: Vec<MarkerObject>,
     pub trails: Vec<TrailObject>,
-    pub markers_wip: Vec<MarkerObject>,//work in progress: this is where the markers are inserted
-    pub trails_wip: Vec<TrailObject>,//work in progress: this is where the markers are inserted
+    pub markers_wip: Vec<MarkerObject>, //work in progress: this is where the markers are inserted
+    pub trails_wip: Vec<TrailObject>,   //work in progress: this is where the markers are inserted
     marker_program: NativeProgram,
     marker_vertex_buffer: NativeBuffer,
     marker_vertex_array: NativeVertexArray,
- 
+
     trail_program: NativeProgram,
     trail_vertex_buffers: Vec<NativeBuffer>,
     trail_vertex_arrays: Vec<NativeVertexArray>,
 }
- 
 
 const MARKER_VERTEX_SHADER: &str = include_str!("../shaders/marker.vs");
 const MARKER_FRAGMENT_SHADER: &str = include_str!("../shaders/marker.fs");
@@ -36,15 +35,17 @@ const TRAIL_FRAGMENT_SHADER: &str = include_str!("../shaders/trail.fs");
 impl BillBoardRenderer {
     pub fn new(gl: &Context) -> Self {
         unsafe {
-            let marker_program = new_program(gl, MARKER_VERTEX_SHADER, MARKER_FRAGMENT_SHADER, None);
+            let marker_program =
+                new_program(gl, MARKER_VERTEX_SHADER, MARKER_FRAGMENT_SHADER, None);
             gl_error!(gl);
 
-            let trail_shift_program = new_program(gl, TRAIL_VERTEX_SHADER, TRAIL_FRAGMENT_SHADER, None);
+            let trail_shift_program =
+                new_program(gl, TRAIL_VERTEX_SHADER, TRAIL_FRAGMENT_SHADER, None);
             gl_error!(gl);
-            
+
             let marker_vertex_buffer = create_buffer(gl);
             let marker_vertex_array = create_marker_array(gl, marker_vertex_buffer);
-            
+
             Self {
                 markers: Vec::new(),
                 markers_wip: Vec::new(),
@@ -62,10 +63,11 @@ impl BillBoardRenderer {
             }
         }
     }
-    
+
     pub fn swap(&mut self) {
-        trace!("swap UI to display {} markers, {} trails", 
-            self.markers_wip.len(), 
+        trace!(
+            "swap UI to display {} markers, {} trails",
+            self.markers_wip.len(),
             self.trails_wip.len()
         );
         self.markers = std::mem::take(&mut self.markers_wip);
@@ -109,9 +111,7 @@ impl BillBoardRenderer {
             for _ in 0..needs {
                 let vb = unsafe { create_buffer(gl) };
                 self.trail_vertex_buffers.push(vb);
-                let trail_vertex_array = unsafe {
-                    create_trail_array(gl, vb, 1)
-                };
+                let trail_vertex_array = unsafe { create_trail_array(gl, vb, 1) };
                 self.trail_vertex_arrays.push(trail_vertex_array);
             }
         }
@@ -145,14 +145,20 @@ impl BillBoardRenderer {
             gl_error!(gl);
             gl.active_texture(TEXTURE0);
             gl_error!(gl);
-            let scroll_texture: Vec2 = Vec2 { x: 0.0, y: (latest_time as f32 % 2.0) - 1.0};//TODO: manage speed in some configurations. per trail ?
+            let scroll_texture: Vec2 = Vec2 {
+                x: 0.0,
+                y: (latest_time as f32 % 2.0) - 1.0,
+            }; //TODO: manage speed in some configurations. per trail ?
 
             gl.uniform_2_f32_slice(Some(&NativeUniformLocation(3)), scroll_texture.as_ref());
             //https://stackoverflow.com/questions/27771902/opengl-changing-texture-coordinates-on-the-fly
             //https://www.khronos.org/opengl/wiki/Uniform_(GLSL)
-            for ( (trail, trail_buffer), trail_array) 
-                in self.trails.iter().zip(self.trail_vertex_buffers.iter()).zip(self.trail_vertex_arrays.iter()
-            ) {
+            for ((trail, trail_buffer), trail_array) in self
+                .trails
+                .iter()
+                .zip(self.trail_vertex_buffers.iter())
+                .zip(self.trail_vertex_arrays.iter())
+            {
                 if let Some(texture) = textures.get(&trail.texture) {
                     gl.bind_vertex_array(Some(*trail_array));
                     gl.uniform_3_f32_slice(Some(&NativeUniformLocation(0)), cam_pos.as_ref());
@@ -162,8 +168,7 @@ impl BillBoardRenderer {
                         view_proj.to_cols_array().as_ref(),
                     );
                     gl_error!(gl);
-        
-                        
+
                     gl.bind_vertex_buffer(0, Some(*trail_buffer), 0, MARKER_VERTEX_STRIDE);
                     gl.bind_buffer(ARRAY_BUFFER, Some(*trail_buffer));
                     gl.bind_texture(TEXTURE_2D, Some(texture.handle));
@@ -206,8 +211,6 @@ impl BillBoardRenderer {
         }
     }
 }
-
-
 
 /// takes in strings containing vertex/fragment shaders and returns a Shaderprogram with them attached
 #[tracing::instrument(skip(gl))]
@@ -306,7 +309,11 @@ unsafe fn create_marker_array(gl: &Context, vertex_buffer: NativeBuffer) -> Nati
     create_array(gl, vertex_buffer, 1)
 }
 
-unsafe fn create_array(gl: &Context, vertex_buffer: NativeBuffer, binding_index: u32) -> NativeVertexArray {
+unsafe fn create_array(
+    gl: &Context,
+    vertex_buffer: NativeBuffer,
+    binding_index: u32,
+) -> NativeVertexArray {
     let marker_vertex_array = gl.create_vertex_array().expect("failed to create egui vao");
     gl.bind_vertex_array(Some(marker_vertex_array));
     gl.bind_vertex_buffer(binding_index, Some(vertex_buffer), 0, MARKER_VERTEX_STRIDE);
@@ -339,7 +346,11 @@ unsafe fn create_array(gl: &Context, vertex_buffer: NativeBuffer, binding_index:
     marker_vertex_array
 }
 
-unsafe fn create_trail_array(gl: &Context, vertex_buffer: NativeBuffer, binding_index: u32) -> NativeVertexArray {
+unsafe fn create_trail_array(
+    gl: &Context,
+    vertex_buffer: NativeBuffer,
+    binding_index: u32,
+) -> NativeVertexArray {
     let trail_vertex_array = create_array(gl, vertex_buffer, binding_index);
     gl.enable_vertex_array_attrib(trail_vertex_array, 5);
     gl.vertex_array_attrib_format_f32(trail_vertex_array, 5, 2, FLOAT, false, 36);

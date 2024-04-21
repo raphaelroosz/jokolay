@@ -1,8 +1,11 @@
+use glam::Vec3;
 use joko_core::RelativePath;
 use uuid::Uuid;
-use glam::Vec3;
 
-use crate::{attributes::CommonAttributes, trail::{TBin, Trail}};
+use crate::{
+    attributes::CommonAttributes,
+    trail::{TBin, Trail},
+};
 
 #[derive(Debug, Clone)]
 pub struct Route {
@@ -17,10 +20,8 @@ pub struct Route {
     pub source_file_uuid: Uuid,
 }
 
-
-
 pub(crate) fn route_to_tbin(route: &Route) -> TBin {
-    assert!( route.path.len() > 1);
+    assert!(route.path.len() > 1);
     TBin {
         map_id: route.map_id,
         version: 0,
@@ -41,8 +42,4 @@ pub(crate) fn route_to_trail(route: &Route, file_path: &RelativePath) -> Trail {
         dynamic: true,
         source_file_uuid: route.source_file_uuid.clone(),
     }
-}    
-
-
-
-
+}

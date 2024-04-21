@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use uuid::Uuid;
 
-
 /// This is the activation data per pack
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ActivationData {

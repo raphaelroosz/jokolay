@@ -2,7 +2,6 @@ use crate::attributes::CommonAttributes;
 use glam::Vec3;
 use uuid::Uuid;
 
-
 #[derive(Debug, Clone)]
 pub struct Marker {
     pub guid: Uuid,

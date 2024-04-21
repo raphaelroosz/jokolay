@@ -7,15 +7,9 @@ pub(crate) mod manager;
 pub mod message;
 
 pub use manager::{
-    PackageDataManager, 
-    PackageUIManager, 
-    LoadedPackData, 
-    LoadedPackTexture, 
-    load_all_from_dir, 
-    build_from_core, 
-    jokolay_to_working_path,
-    ImportStatus,
-    import_pack_from_zip_file_path
+    build_from_core, import_pack_from_zip_file_path, jokolay_to_editable_path,
+    jokolay_to_extract_path, load_all_from_dir, ImportStatus, LoadedPackData, LoadedPackTexture,
+    PackageDataManager, PackageUIManager,
 };
 
 // for compile time build info like pkg version or build timestamp or git hash etc..

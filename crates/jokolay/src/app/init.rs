@@ -5,9 +5,15 @@ use miette::{Context, IntoDiagnostic, Result};
 /// We will read a path from env `JOKOLAY_DATA_DIR` or create a folder at data_local_dir/jokolay, where data_local_dir is platform specific
 /// Inside this directory, we will store all of jokolay's data like configuration files, themes, logs etc..
 
-pub fn get_jokolay_path() -> Result<Utf8PathBuf, std::io::Error> {
-    let dir = get_jokolay_dir().unwrap();
-    dir.canonicalize(".")
+//TODO: isn't directories-next better for introspection ?
+pub fn get_jokolay_path() -> Result<std::path::PathBuf> {
+    if let Some(project_dir) = directories_next::ProjectDirs::from("com.jokolay", "", "jokolay") {
+        Ok(project_dir.data_local_dir().to_path_buf())
+    } else {
+        Err(miette::miette!(
+            "getting project path failed for some reason"
+        ))
+    }
 }
 
 pub fn get_jokolay_dir() -> Result<cap_std::fs_utf8::Dir> {
@@ -27,7 +33,8 @@ pub fn get_jokolay_dir() -> Result<cap_std::fs_utf8::Dir> {
             .wrap_err(jkl_path)
             .wrap_err("failed to open jokolay data dir")?
     } else {
-        let project_dir = cap_directories::ProjectDirs::from("com.jokolay", "", "jokolay", authoratah);
+        let project_dir =
+            cap_directories::ProjectDirs::from("com.jokolay", "", "jokolay", authoratah);
         let dir = project_dir
             .ok_or(miette::miette!(
                 "getting project dirs failed for some reason"

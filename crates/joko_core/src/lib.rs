@@ -13,7 +13,6 @@ each manager must have
 
 pub mod task;
 
-
 /// This newtype is used to represents relative paths in marker packs
 /// 1. It won't start with `/` or `C:` like roots, because its a relative path
 /// 2. It can be empty to represent current directory
@@ -99,5 +98,3 @@ impl FromStr for RelativePath {
         Ok(Self(path.into()))
     }
 }
-
-

@@ -115,7 +115,7 @@ impl Default for MumbleLink {
             dpi: Default::default(),
             dpi_scaling: 96,
             client_pos: Default::default(),
-            client_size: UVec2{x: 1024, y: 768},
+            client_size: UVec2 { x: 1024, y: 768 },
             changes: Default::default(),
         }
     }

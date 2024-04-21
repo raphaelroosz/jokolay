@@ -4,11 +4,10 @@ use uuid::Uuid;
 
 pub struct SelectedFileManager {
     data: BTreeMap<Uuid, bool>,
-
 }
 impl<'a> SelectedFileManager {
     pub fn new(
-        selected_files: &BTreeMap<Uuid, bool>, 
+        selected_files: &BTreeMap<Uuid, bool>,
         pack_source_files: &BTreeMap<Uuid, bool>,
         currently_used_files: &BTreeMap<Uuid, bool>,
     ) -> Self {
@@ -19,14 +18,16 @@ impl<'a> SelectedFileManager {
             &currently_used_files,
             &mut list_of_enabled_files,
         );
-        Self { data: list_of_enabled_files }
+        Self {
+            data: list_of_enabled_files,
+        }
     }
     fn recursive_get_full_names(
-        _selected_files: &BTreeMap<Uuid, bool>, 
+        _selected_files: &BTreeMap<Uuid, bool>,
         _pack_source_files: &BTreeMap<Uuid, bool>,
         currently_used_files: &BTreeMap<Uuid, bool>,
-        list_of_enabled_files: &mut BTreeMap<Uuid, bool>
-    ){
+        list_of_enabled_files: &mut BTreeMap<Uuid, bool>,
+    ) {
         for (key, v) in currently_used_files.iter() {
             list_of_enabled_files.insert(key.clone(), *v);
         }

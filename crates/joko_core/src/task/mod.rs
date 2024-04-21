@@ -1,10 +1,14 @@
 use std::{
-    result::Result, sync::{mpsc::{RecvError, SendError}, Arc, Mutex}, thread::JoinHandle
+    result::Result,
+    sync::{
+        mpsc::{RecvError, SendError},
+        Arc, Mutex,
+    },
+    thread::JoinHandle,
 };
 
 //TODO: could this be a wrapper only and a move/copy would not impact content ?
-pub struct AsyncTaskGuard<TaskItem, ResultItem>
-{
+pub struct AsyncTaskGuard<TaskItem, ResultItem> {
     task_sender: std::sync::mpsc::Sender<TaskItem>,
     result_receiver: std::sync::mpsc::Receiver<ResultItem>,
     thread_task: Option<JoinHandle<()>>,
@@ -33,12 +37,12 @@ where
             result_receiver,
             thread_task: None,
             thread_nb: None,
-            nb: Arc::clone(&nb)
+            nb: Arc::clone(&nb),
         }));
         let thread_task = std::thread::spawn(move || {
             while let Ok(elt) = th_task_receiver.recv() {
                 let _guard = scopeguard::guard(0, |_| {
-                    nb_sender.send(-1); 
+                    nb_sender.send(-1);
                 });
                 nb_sender.send(1);
                 th_result_sender.send(f(elt));
@@ -51,7 +55,7 @@ where
                 }
             }
         });
-        
+
         {
             let mut t = res.lock().unwrap();
             t.thread_task = Some(thread_task);

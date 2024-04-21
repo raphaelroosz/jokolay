@@ -11,7 +11,7 @@ pub struct JokolayTracingLayer;
 static JKL_TRACING_DATA: OnceLock<Mutex<GlobalTracingData>> = OnceLock::new();
 
 impl JokolayTracingLayer {
-    pub fn install_tracing<'l> (
+    pub fn install_tracing<'l>(
         jokolay_dir: &'l Dir,
     ) -> Result<tracing_appender::non_blocking::WorkerGuard> {
         use tracing_subscriber::prelude::*;
@@ -21,8 +21,7 @@ impl JokolayTracingLayer {
             use std::fs::File;
             use std::io::Write;
             let backtrace = std::backtrace::Backtrace::force_capture();
-            let output = 
-            if let Some(string) = info.payload().downcast_ref::<String>() {
+            let output = if let Some(string) = info.payload().downcast_ref::<String>() {
                 format!("{string}")
             } else if let Some(str) = info.payload().downcast_ref::<&'static str>() {
                 format!("{str}")
@@ -36,7 +35,6 @@ impl JokolayTracingLayer {
             writeln!(&mut w, "Backtrace: {backtrace:}").unwrap();
         }));
 
-        
         // get the log level
         let filter_layer = EnvFilter::try_from_env("JOKOLAY_LOG")
             .or_else(|_| EnvFilter::try_new("info,wgpu=warn,naga=warn"))

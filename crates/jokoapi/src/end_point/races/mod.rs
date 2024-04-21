@@ -6,7 +6,7 @@ use crate::prelude::*;
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum Race {
-    Unknown =  1 << 1,
+    Unknown = 1 << 1,
     Asura = 1 << 2,
     Charr = 1 << 3,
     Human = 1 << 4,
