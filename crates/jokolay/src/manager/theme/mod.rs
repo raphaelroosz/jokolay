@@ -81,7 +81,7 @@ impl ThemeManager {
             .into_diagnostic()
             .wrap_err("failed to open themes dir")?
             .into();
-        if !fonts_dir.exists(&format!("{}.ttf", Self::DEFAULT_FONT_NAME)) {
+        if !fonts_dir.exists(format!("{}.ttf", Self::DEFAULT_FONT_NAME)) {
             fonts_dir
                 .write(
                     format!("{}.ttf", Self::DEFAULT_FONT_NAME),
@@ -90,7 +90,7 @@ impl ThemeManager {
                 .into_diagnostic()
                 .wrap_err("failed to write roboto/default font file to fonts dir")?;
         }
-        if !themes_dir.exists(&format!("{}.json", Self::DEFAULT_THEME_NAME)) {
+        if !themes_dir.exists(format!("{}.json", Self::DEFAULT_THEME_NAME)) {
             themes_dir
                 .write(
                     format!("{}.json", Self::DEFAULT_THEME_NAME),

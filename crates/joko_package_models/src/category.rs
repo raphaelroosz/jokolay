@@ -63,30 +63,28 @@ impl Category {
     // Required method
     pub fn from(value: &RawCategory, parent: Option<Uuid>) -> Self {
         Self {
-            guid: value.guid.clone(),
+            guid: value.guid,
             props: value.props.clone(),
             separator: value.separator,
             default_enabled: value.default_enabled,
             display_name: value.display_name.clone(),
             relative_category_name: value.relative_category_name.clone(),
             full_category_name: value.full_category_name.clone(),
-            parent: parent,
+            parent,
             children: Default::default(),
         }
     }
     fn per_route<'a>(
         categories: &'a mut OrderedHashMap<Uuid, Category>,
-        route: &Vec<&str>,
-        depth: usize,
+        route: &[&str],
     ) -> Option<&'a mut Category> {
-        let mut route = route.clone();
+        let mut route = route.to_owned();
         route.reverse();
-        Category::_per_route(categories, &mut route, depth)
+        Category::_per_route(categories, &mut route)
     }
     fn _per_route<'a>(
         categories: &'a mut OrderedHashMap<Uuid, Category>,
         route: &mut Vec<&str>,
-        depth: usize,
     ) -> Option<&'a mut Category> {
         if let Some(relative_category_name) = route.pop() {
             for (_, cat) in categories {
@@ -94,17 +92,17 @@ impl Category {
                     if route.is_empty() {
                         return Some(cat);
                     } else {
-                        return Category::_per_route(&mut cat.children, route, depth + 1);
+                        return Category::_per_route(&mut cat.children, route);
                     }
                 }
             }
         }
-        return None;
+        None
     }
+    #[allow(dead_code)]
     fn per_uuid<'a>(
         categories: &'a mut OrderedHashMap<Uuid, Category>,
         uuid: &Uuid,
-        depth: usize,
     ) -> Option<&'a mut Category> {
         /*
         Do a look up in the tree based on uuid. Whole tree is scanned until a match is found.
@@ -115,12 +113,12 @@ impl Category {
             if &cat.guid == uuid {
                 return Some(cat);
             }
-            let sub_res = Category::per_uuid(&mut cat.children, uuid, depth + 1);
+            let sub_res = Category::per_uuid(&mut cat.children, uuid);
             if sub_res.is_some() {
                 return sub_res;
             }
         }
-        return None;
+        None
     }
     pub fn reassemble(
         input_first_pass_categories: &OrderedHashMap<String, RawCategory>,
@@ -208,11 +206,9 @@ impl Category {
                     to_insert.parent_name = last_name;
                 } else {
                     to_insert.parent_name = if let Some(parent_name) = &value.parent_name {
-                        if let Some(parent_category) = first_pass_categories.get(parent_name) {
-                            Some(parent_category.full_category_name.clone())
-                        } else {
-                            None
-                        }
+                        first_pass_categories
+                            .get(parent_name)
+                            .map(|parent_category| parent_category.full_category_name.clone())
                     } else {
                         None
                     };
@@ -239,22 +235,17 @@ impl Category {
         let start_parent_child_relationship = std::time::SystemTime::now();
         for (key, value) in second_pass_categories {
             let parent = if let Some(parent_name) = &value.parent_name {
-                if let Some(parent_category) = first_pass_categories.get(parent_name) {
-                    Some(parent_category.guid.clone())
-                } else {
-                    None
-                }
+                first_pass_categories
+                    .get(parent_name)
+                    .map(|parent_category| parent_category.guid)
             } else {
                 None
             };
 
             debug!("{} parent is {:?}", key, parent);
             let cat = Category::from(&value, parent);
-            let cat_ref = cat.guid.clone();
-            if third_pass_categories
-                .insert(cat.guid.clone(), cat)
-                .is_none()
-            {
+            let cat_ref = cat.guid;
+            if third_pass_categories.insert(cat.guid, cat).is_none() {
                 third_pass_categories_ref.push(cat_ref);
             }
         }
@@ -274,17 +265,16 @@ impl Category {
                 route.pop(); //it is now the parent route
                 if let Some(parent) = cat.parent {
                     if let Some(parent_category) =
-                        Category::per_route(&mut third_pass_categories, &route, 0)
+                        Category::per_route(&mut third_pass_categories, &route)
                     {
-                        parent_category.children.insert(cat.guid.clone(), cat);
-                    } else if let Some(parent_category) = Category::per_route(&mut root, &route, 0)
-                    {
-                        parent_category.children.insert(cat.guid.clone(), cat);
+                        parent_category.children.insert(cat.guid, cat);
+                    } else if let Some(parent_category) = Category::per_route(&mut root, &route) {
+                        parent_category.children.insert(cat.guid, cat);
                     } else {
                         panic!("Could not find parent {} for {:?}", parent, cat);
                     }
                 } else {
-                    root.insert(cat.guid.clone(), cat);
+                    root.insert(cat.guid, cat);
                 }
             } else {
                 panic!("Some bad logic at works");

@@ -42,10 +42,10 @@ where
         let thread_task = std::thread::spawn(move || {
             while let Ok(elt) = th_task_receiver.recv() {
                 let _guard = scopeguard::guard(0, |_| {
-                    nb_sender.send(-1);
+                    let _ = nb_sender.send(-1);
                 });
-                nb_sender.send(1);
-                th_result_sender.send(f(elt));
+                let _ = nb_sender.send(1);
+                let _ = th_result_sender.send(f(elt));
             }
         });
         let thread_nb = std::thread::spawn(move || {

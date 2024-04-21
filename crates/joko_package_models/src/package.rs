@@ -26,7 +26,7 @@ where
             serializer.serialize_str(to_do.as_str())
         }
         ElementReference::Category(full_category_name) => {
-            serializer.serialize_str(&full_category_name.as_str())
+            serializer.serialize_str(full_category_name.as_str())
         }
     }
 }
@@ -188,9 +188,9 @@ impl PackageImportReport {
         self.source_files.get_by_left(source_file_name)
     }
 
-    pub fn found_category_late(&mut self, full_category_name: &String, category_uuid: Uuid) {
+    pub fn found_category_late(&mut self, full_category_name: &str, category_uuid: Uuid) {
         self.late_discovered_categories
-            .insert(category_uuid, full_category_name.clone());
+            .insert(category_uuid, full_category_name.to_owned());
     }
     pub fn found_category_late_with_details(
         &mut self,
@@ -205,7 +205,7 @@ impl PackageImportReport {
         //for this to work we need to keep track of where each category was called and thus defined since late
         self.missing_categories.push(PackageCategorySource {
             full_category_name: full_category_name.clone(),
-            requester_uuid: requester_uuid.clone(),
+            requester_uuid: *requester_uuid,
             source_file_name: source_file_name.clone(),
         });
         if !self
@@ -226,6 +226,7 @@ impl PackageImportReport {
 }
 
 impl PackCore {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let mut res = Self {
             all_categories: Default::default(),
@@ -239,7 +240,7 @@ impl PackCore {
             uuid: Default::default(),
         };
         res.uuid = Uuid::new_v4();
-        res.report.uuid = res.uuid.clone();
+        res.report.uuid = res.uuid;
         res
     }
     pub fn partial(all_categories: &HashMap<String, Uuid>) -> Self {
@@ -273,7 +274,7 @@ impl PackCore {
         source_file_uuid: &Uuid,
     ) -> Uuid {
         if let Some(category_uuid) = self.all_categories.get(full_category_name) {
-            category_uuid.clone()
+            *category_uuid
         } else {
             //TODO: if import is "dirty", create missing category
             //TODO: default import mode is "strict" (get inspiration from HTML modes)
@@ -282,13 +283,13 @@ impl PackCore {
             let mut n = 0;
             let mut last_uuid: Option<Uuid> = None;
             while let Some(parent_full_category_name) =
-                prefix_until_nth_char(&full_category_name, '.', n)
+                prefix_until_nth_char(full_category_name, '.', n)
             {
                 n += 1;
                 if let Some(parent_uuid) = self.all_categories.get(&parent_full_category_name) {
                     //FIXME: might want to make the difference between impacted parents and actual missing category
                     self.report
-                        .found_category_late(&full_category_name, *parent_uuid);
+                        .found_category_late(full_category_name, *parent_uuid);
                     last_uuid = Some(*parent_uuid);
                 } else {
                     let new_uuid = Uuid::new_v4();
@@ -299,7 +300,7 @@ impl PackCore {
                     self.all_categories
                         .insert(parent_full_category_name.clone(), new_uuid);
                     self.report.found_category_late_with_details(
-                        &full_category_name,
+                        full_category_name,
                         new_uuid,
                         &requester_uuid,
                         source_file_uuid,
@@ -349,7 +350,7 @@ impl PackCore {
         uuid: &Uuid,
     ) -> Result<Uuid, miette::Error> {
         if let Some(parent_uuid) = self.all_categories.get(full_category_name) {
-            let mut uuid_to_insert = uuid.clone();
+            let mut uuid_to_insert = *uuid;
             while self.entities_parents.contains_key(&uuid_to_insert) {
                 trace!(
                     "Uuid collision detected {} for elements in {}",
@@ -377,8 +378,8 @@ impl PackCore {
     ) -> Result<(), miette::Error> {
         let uuid_to_insert = self.register_uuid(&full_category_name, &marker.guid)?;
         marker.guid = uuid_to_insert;
-        if !self.maps.contains_key(&marker.map_id) {
-            self.maps.insert(marker.map_id, MapData::default());
+        if let std::collections::hash_map::Entry::Vacant(e) = self.maps.entry(marker.map_id) {
+            e.insert(MapData::default());
             self.report.number_of.maps += 1;
         }
         self.maps
@@ -397,8 +398,8 @@ impl PackCore {
     ) -> Result<(), miette::Error> {
         let uuid_to_insert = self.register_uuid(&full_category_name, &trail.guid)?;
         trail.guid = uuid_to_insert;
-        if !self.maps.contains_key(&trail.map_id) {
-            self.maps.insert(trail.map_id, MapData::default());
+        if let std::collections::hash_map::Entry::Vacant(e) = self.maps.entry(trail.map_id) {
+            e.insert(MapData::default());
             self.report.number_of.maps += 1;
         }
         self.maps
@@ -419,8 +420,8 @@ impl PackCore {
         let tbin = route_to_tbin(&route);
 
         self.tbins.insert(tbin_path, tbin); //there may be duplicates since we load and save each time
-        if !self.maps.contains_key(&trail.map_id) {
-            self.maps.insert(trail.map_id, MapData::default());
+        if let std::collections::hash_map::Entry::Vacant(e) = self.maps.entry(trail.map_id) {
+            e.insert(MapData::default());
             self.report.number_of.maps += 1;
         }
         self.maps

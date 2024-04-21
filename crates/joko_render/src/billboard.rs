@@ -94,8 +94,7 @@ impl BillBoardRenderer {
             let len = (trail.vertices.len() * std::mem::size_of::<MarkerVertex>()) as u64;
             required_size_in_bytes = required_size_in_bytes.max(len);
         }
-        let mut vb = vec![];
-        vb.reserve(self.markers.len() * 6 * std::mem::size_of::<MarkerVertex>());
+        let mut vb: Vec<MarkerVertex> = Vec::with_capacity(self.markers.len() * 6);
 
         for marker_object in self.markers.iter() {
             vb.extend_from_slice(&marker_object.vertices);

@@ -25,10 +25,9 @@ pub struct RelativePath(SmolStr);
 #[allow(unused)]
 impl RelativePath {
     pub fn normalize(path: &str) -> String {
-        let normalized_slash = path.replace("\\", "/");
+        let normalized_slash = path.replace('\\', "/");
         let trimmed_path = normalized_slash.trim_start_matches('/');
-        let lower_case = trimmed_path.to_lowercase();
-        lower_case
+        trimmed_path.to_lowercase()
     }
 
     pub fn join_str(&self, path: &str) -> Self {

@@ -56,7 +56,8 @@ struct JokolayBackState {
     read_ui_link: bool,
     copy_of_ui_link: Option<MumbleLink>,
     root_dir: Arc<Dir>,
-    editable_path: std::path::PathBuf,
+    #[allow(dead_code)]
+    editable_path: std::path::PathBuf, //copy of the editable path in ui_configuration
     extract_path: std::path::PathBuf,
 }
 struct JokolayApp {
@@ -75,7 +76,7 @@ struct JokolayGui {
 }
 #[allow(unused)]
 pub struct Jokolay {
-    gui: Arc<Mutex<JokolayGui>>,
+    gui: Box<JokolayGui>,
     app: Arc<Mutex<Box<JokolayApp>>>,
     state_ui: JokolayUIState,
     state_back: JokolayBackState,
@@ -147,17 +148,21 @@ impl Jokolay {
         let menu_panel = MenuPanel::default();
 
         package_ui_manager.late_init(&egui_context);
+        let gui = JokolayGui {
+            ui_configuration,
+            joko_renderer,
+            glfw_backend,
+            egui_context,
+            menu_panel,
+            theme_manager,
+            mumble_manager: mumble_ui_manager,
+            package_manager: package_ui_manager,
+        };
+        //let gui = Mutex::new(gui);
+        //let gui = Arc::new(gui);
+        let gui = Box::new(gui);
         Ok(Self {
-            gui: Arc::new(Mutex::new(JokolayGui {
-                ui_configuration,
-                joko_renderer,
-                glfw_backend,
-                egui_context,
-                menu_panel,
-                theme_manager,
-                mumble_manager: mumble_ui_manager,
-                package_manager: package_ui_manager,
-            })),
+            gui,
             app: Arc::new(Mutex::new(Box::new(JokolayApp {
                 mumble_manager: mumble_data_manager,
                 package_manager: package_data_manager,
@@ -181,7 +186,7 @@ impl Jokolay {
                 copy_of_ui_link: Default::default(),
                 root_dir,
                 editable_path: std::path::PathBuf::from(editable_path),
-                extract_path: std::path::PathBuf::from(jokolay_to_extract_path(&root_path)),
+                extract_path: jokolay_to_extract_path(&root_path),
             },
         })
     }
@@ -350,6 +355,7 @@ impl Jokolay {
                     }
                 }
             }
+            #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!("Handling BackToUIMessage has not been implemented yet");
             }
@@ -362,7 +368,7 @@ impl Jokolay {
         u2b_receiver: std::sync::mpsc::Receiver<UIToBackMessage>,
     ) {
         tracing::info!("entering background event loop");
-        let span_guard = info_span!("background event loop").entered();
+        let _span_guard = info_span!("background event loop").entered();
         let mut loop_index: u128 = 0;
         let mut nb_messages: u128 = 0;
         loop {
@@ -403,8 +409,11 @@ impl Jokolay {
             thread::sleep(std::time::Duration::from_millis(10));
             loop_index += 1;
         }
-        unreachable!("Program broke out a never ending loop !");
-        drop(span_guard);
+        #[allow(unreachable_code)]
+        {
+            drop(_span_guard);
+            unreachable!("Program broke out a never ending loop !")
+        }
     }
 
     fn handle_u2u_message(gui: &mut JokolayGui, msg: UIToUIMessage) {
@@ -425,16 +434,17 @@ impl Jokolay {
             }
             UIToUIMessage::MarkerObject(mo) => {
                 tracing::trace!("Handling of UIToUIMessage::MarkerObject");
-                gui.joko_renderer.add_billboard(mo);
+                gui.joko_renderer.add_billboard(*mo);
             }
             UIToUIMessage::TrailObject(to) => {
                 tracing::trace!("Handling of UIToUIMessage::TrailObject");
-                gui.joko_renderer.add_trail(to);
+                gui.joko_renderer.add_trail(*to);
             }
             UIToUIMessage::RenderSwapChain => {
                 tracing::debug!("Handling of UIToUIMessage::RenderSwapChain");
                 gui.joko_renderer.swap();
             }
+            #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!("Handling UIToUIMessage has not been implemented yet");
             }
@@ -520,6 +530,7 @@ impl Jokolay {
                     common_attributes,
                 );
             }
+            #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!("Handling BackToUIMessage has not been implemented yet");
             }
@@ -544,6 +555,7 @@ impl Jokolay {
         let mut nb_messages: u128 = 0;
         let max_nb_messages_per_loop: u128 = 100;
         //u2u_sender.send(UIToUIMessage::Present);// force a first drawing
+        let mut gui = *self.gui;
         loop {
             {
                 let mut nb_message_on_curent_loop: u128 = 0;
@@ -554,19 +566,15 @@ impl Jokolay {
                 );
 
                 if let Ok(mut import_status) = local_state.import_status.lock() {
-                    match &mut *import_status {
-                        ImportStatus::LoadingPack(file_path) => {
-                            let _ = u2b_sender.send(UIToBackMessage::ImportPack(file_path.clone()));
-                            *import_status = ImportStatus::WaitingLoading(file_path.clone());
-                        }
-                        _ => {}
+                    if let ImportStatus::LoadingPack(file_path) = &mut *import_status {
+                        let _ = u2b_sender.send(UIToBackMessage::ImportPack(file_path.clone()));
+                        *import_status = ImportStatus::WaitingLoading(file_path.clone());
                     }
                 }
                 //untested and might crash due to .unwrap()
-                let mut gui = self.gui.lock().unwrap();
                 while let Ok(msg) = u2u_receiver.try_recv() {
                     nb_messages += 1;
-                    Self::handle_u2u_message(gui.deref_mut(), msg);
+                    Self::handle_u2u_message(&mut gui, msg);
                     nb_message_on_curent_loop += 1;
                     if nb_message_on_curent_loop == max_nb_messages_per_loop {
                         break;
@@ -575,12 +583,7 @@ impl Jokolay {
                 if nb_message_on_curent_loop < max_nb_messages_per_loop {
                     while let Ok(msg) = b2u_receiver.try_recv() {
                         nb_messages += 1;
-                        Self::handle_b2u_message(
-                            gui.deref_mut(),
-                            &mut local_state,
-                            &u2b_sender,
-                            msg,
-                        );
+                        Self::handle_b2u_message(&mut gui, &mut local_state, &u2b_sender, msg);
                         nb_message_on_curent_loop += 1;
                         if nb_message_on_curent_loop == max_nb_messages_per_loop {
                             break;
@@ -589,7 +592,6 @@ impl Jokolay {
                 }
             }
 
-            let mut gui = self.gui.lock().unwrap();
             let JokolayGui {
                 ui_configuration,
                 menu_panel,
@@ -599,7 +601,7 @@ impl Jokolay {
                 theme_manager,
                 mumble_manager,
                 package_manager,
-            } = &mut gui.deref_mut();
+            } = &mut gui;
             let latest_time = glfw_backend.glfw.get_time();
 
             let etx = egui_context.clone();
@@ -758,21 +760,20 @@ impl Jokolay {
                                     "File Manager",
                                 );
                                 //ui.checkbox(&mut menu_panel.show_tracing_window, "Show Logs");
-                                if menu_panel.show_parameters_manager
+                                if (menu_panel.show_parameters_manager
                                     || menu_panel.show_package_manager_window
                                     || menu_panel.show_mumble_manager_window
                                     || menu_panel.show_theme_window
                                     || menu_panel.show_file_manager_window
-                                    || menu_panel.show_tracing_window
+                                    || menu_panel.show_tracing_window)
+                                    && ui.button("Close all panels").clicked()
                                 {
-                                    if ui.button("Close all panels").clicked() {
-                                        menu_panel.show_parameters_manager = false;
-                                        menu_panel.show_package_manager_window = false;
-                                        menu_panel.show_mumble_manager_window = false;
-                                        menu_panel.show_theme_window = false;
-                                        menu_panel.show_file_manager_window = false;
-                                        menu_panel.show_tracing_window = false;
-                                    }
+                                    menu_panel.show_parameters_manager = false;
+                                    menu_panel.show_package_manager_window = false;
+                                    menu_panel.show_mumble_manager_window = false;
+                                    menu_panel.show_theme_window = false;
+                                    menu_panel.show_file_manager_window = false;
+                                    menu_panel.show_tracing_window = false;
                                 }
                                 if ui.button("exit").clicked() {
                                     info!("exiting jokolay");

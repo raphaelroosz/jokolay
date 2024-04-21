@@ -34,8 +34,8 @@ impl<'a> SelectedCategoryManager {
     ) -> Self {
         let mut list_of_enabled_categories = Default::default();
         CategorySelection::get_list_of_enabled_categories(
-            &selected_categories,
-            &categories,
+            selected_categories,
+            categories,
             &mut list_of_enabled_categories,
             &Default::default(),
         );
@@ -44,6 +44,7 @@ impl<'a> SelectedCategoryManager {
             data: list_of_enabled_categories,
         }
     }
+    #[allow(dead_code)]
     pub fn cloned_data(&self) -> OrderedHashMap<Uuid, CommonAttributes> {
         self.data.clone()
     }
@@ -53,6 +54,7 @@ impl<'a> SelectedCategoryManager {
     pub fn get(&self, key: &Uuid) -> &CommonAttributes {
         self.data.get(key).unwrap()
     }
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.data.len()
     }
@@ -95,7 +97,7 @@ impl CategorySelection {
         uuid: Uuid,
     ) -> Option<&mut CategorySelection> {
         if selection.is_empty() {
-            return None;
+            None
         } else {
             for cat in selection.values_mut() {
                 if cat.uuid == uuid {
@@ -105,22 +107,23 @@ impl CategorySelection {
                     return Some(res);
                 }
             }
-            return None;
+            None
         }
     }
+    #[allow(dead_code)]
     pub fn recursive_populate_guids(
         selection: &mut OrderedHashMap<String, CategorySelection>,
         entities_parents: &mut HashMap<Uuid, Uuid>,
         parent_uuid: Option<Uuid>,
     ) {
-        for (cat_name, cat) in selection.iter_mut() {
+        for cat in selection.values_mut() {
             if cat.uuid.is_nil() {
                 cat.uuid = Uuid::new_v4();
             }
-            cat.parent = parent_uuid.clone();
+            cat.parent = parent_uuid;
             Self::recursive_populate_guids(&mut cat.children, entities_parents, Some(cat.uuid));
-            if parent_uuid.is_some() {
-                entities_parents.insert(cat.uuid, parent_uuid.unwrap().clone());
+            if let Some(parent_uuid) = parent_uuid {
+                entities_parents.insert(cat.uuid, parent_uuid);
             }
             //assert!(cat.guid.len() > 0);
         }
@@ -156,7 +159,7 @@ impl CategorySelection {
         status: bool,
     ) -> bool {
         if selection.is_empty() {
-            return false;
+            false
         } else {
             for cat in selection.values_mut() {
                 if cat.separator {
@@ -170,7 +173,7 @@ impl CategorySelection {
                     return true;
                 }
             }
-            return false;
+            false
         }
     }
     pub fn recursive_set_all(
@@ -205,7 +208,7 @@ impl CategorySelection {
                 is_active = true;
             }
         }
-        return is_active;
+        is_active
     }
 
     fn context_menu(
@@ -233,7 +236,7 @@ impl CategorySelection {
 
     pub fn recursive_selection_ui(
         u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
+        _u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         is_dirty: &mut bool,
@@ -244,7 +247,7 @@ impl CategorySelection {
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (name, cat) in selection.iter_mut() {
+            for cat in selection.values_mut() {
                 if !cat.is_active && show_only_active && !cat.separator {
                     continue;
                 }
@@ -278,7 +281,7 @@ impl CategorySelection {
                         ui.menu_button(label, |ui: &mut egui::Ui| {
                             Self::recursive_selection_ui(
                                 u2b_sender,
-                                u2u_sender,
+                                _u2u_sender,
                                 &mut cat.children,
                                 ui,
                                 is_dirty,

@@ -5,7 +5,7 @@ use uuid::Uuid;
 pub struct SelectedFileManager {
     data: BTreeMap<Uuid, bool>,
 }
-impl<'a> SelectedFileManager {
+impl SelectedFileManager {
     pub fn new(
         selected_files: &BTreeMap<Uuid, bool>,
         pack_source_files: &BTreeMap<Uuid, bool>,
@@ -13,9 +13,9 @@ impl<'a> SelectedFileManager {
     ) -> Self {
         let mut list_of_enabled_files: BTreeMap<Uuid, bool> = Default::default();
         SelectedFileManager::recursive_get_full_names(
-            &selected_files,
-            &pack_source_files,
-            &currently_used_files,
+            selected_files,
+            pack_source_files,
+            currently_used_files,
             &mut list_of_enabled_files,
         );
         Self {
@@ -29,9 +29,10 @@ impl<'a> SelectedFileManager {
         list_of_enabled_files: &mut BTreeMap<Uuid, bool>,
     ) {
         for (key, v) in currently_used_files.iter() {
-            list_of_enabled_files.insert(key.clone(), *v);
+            list_of_enabled_files.insert(*key, *v);
         }
     }
+    #[allow(dead_code)]
     pub fn cloned_data(&self) -> BTreeMap<Uuid, bool> {
         self.data.clone()
     }
@@ -39,6 +40,7 @@ impl<'a> SelectedFileManager {
         let default = false;
         self.data.is_empty() || *self.data.get(source_file_uuid).unwrap_or(&default)
     }
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.data.len()
     }

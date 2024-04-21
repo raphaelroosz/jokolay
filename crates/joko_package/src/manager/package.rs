@@ -152,13 +152,16 @@ impl PackageDataManager {
                         //avoid duplicate, redundancy or loop
                         continue;
                     }
-                    next_gen.push(p.clone());
+                    next_gen.push(*p);
                 }
             }
             let to_insert = std::mem::replace(&mut current_generation, next_gen);
             result.extend(to_insert);
         }
-        unreachable!("The loop should always return");
+        #[allow(unreachable_code)] // sillyness of some tools
+        {
+            unreachable!("The loop should always return")
+        }
     }
 
     pub fn get_active_elements_parents(
@@ -190,80 +193,75 @@ impl PackageDataManager {
         let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
         let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
 
-        match link {
-            Some(link) => {
-                //TODO: how to save/load the active files ?
-                let mut have_used_files_list_changed = false;
-                let map_changed = self.current_map_id != link.map_id;
-                self.current_map_id = link.map_id;
-                for pack in self.packs.values_mut() {
-                    if let Some(current_map) = pack.maps.get(&link.map_id) {
-                        for marker in current_map.markers.values() {
-                            if let Some(is_active) = pack.source_files.get(&marker.source_file_uuid)
-                            {
-                                currently_used_files.insert(
-                                    marker.source_file_uuid.clone(),
-                                    *self
-                                        .currently_used_files
-                                        .get(&marker.source_file_uuid)
-                                        .unwrap_or_else(|| {
-                                            have_used_files_list_changed = true;
-                                            is_active
-                                        }),
-                                );
-                            }
+        if let Some(link) = link {
+            //TODO: how to save/load the active files ?
+            let mut have_used_files_list_changed = false;
+            let map_changed = self.current_map_id != link.map_id;
+            self.current_map_id = link.map_id;
+            for pack in self.packs.values_mut() {
+                if let Some(current_map) = pack.maps.get(&link.map_id) {
+                    for marker in current_map.markers.values() {
+                        if let Some(is_active) = pack.source_files.get(&marker.source_file_uuid) {
+                            currently_used_files.insert(
+                                marker.source_file_uuid,
+                                *self
+                                    .currently_used_files
+                                    .get(&marker.source_file_uuid)
+                                    .unwrap_or_else(|| {
+                                        have_used_files_list_changed = true;
+                                        is_active
+                                    }),
+                            );
                         }
-                        for trail in current_map.trails.values() {
-                            if let Some(is_active) = pack.source_files.get(&trail.source_file_uuid)
-                            {
-                                currently_used_files.insert(
-                                    trail.source_file_uuid.clone(),
-                                    *self
-                                        .currently_used_files
-                                        .get(&trail.source_file_uuid)
-                                        .unwrap_or_else(|| {
-                                            have_used_files_list_changed = true;
-                                            is_active
-                                        }),
-                                );
-                            }
+                    }
+                    for trail in current_map.trails.values() {
+                        if let Some(is_active) = pack.source_files.get(&trail.source_file_uuid) {
+                            currently_used_files.insert(
+                                trail.source_file_uuid,
+                                *self
+                                    .currently_used_files
+                                    .get(&trail.source_file_uuid)
+                                    .unwrap_or_else(|| {
+                                        have_used_files_list_changed = true;
+                                        is_active
+                                    }),
+                            );
                         }
                     }
                 }
-                let tasks = &self.tasks;
-                for pack in self.packs.values_mut() {
-                    let span_guard = info_span!("Updating package status").entered();
-                    let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(tasks.count()));
-                    tasks.save_data(pack, pack.is_dirty());
-                    pack.tick(
-                        &b2u_sender,
-                        loop_index,
-                        link,
-                        &currently_used_files,
-                        have_used_files_list_changed || choice_of_category_changed,
-                        map_changed,
-                        &tasks,
-                        &mut categories_and_elements_to_be_loaded,
-                    );
-                    std::mem::drop(span_guard);
-                }
-                if map_changed {
-                    self.get_active_elements_parents(categories_and_elements_to_be_loaded);
-                    let _ = b2u_sender.send(BackToUIMessage::ActiveElements(
-                        self.loaded_elements.clone(),
-                    ));
-                }
-                if map_changed || have_used_files_list_changed || choice_of_category_changed {
-                    //there is no point in sending a new list if nothing changed
-                    let _ = b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(
-                        currently_used_files.clone(),
-                    ));
-                    self.currently_used_files = currently_used_files;
-                    let _ = b2u_sender.send(BackToUIMessage::TextureSwapChain);
-                }
             }
-            None => {}
-        };
+            let tasks = &self.tasks;
+            for pack in self.packs.values_mut() {
+                let span_guard = info_span!("Updating package status").entered();
+                let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(tasks.count()));
+                tasks.save_data(pack, pack.is_dirty());
+                pack.tick(
+                    b2u_sender,
+                    loop_index,
+                    link,
+                    &currently_used_files,
+                    have_used_files_list_changed || choice_of_category_changed,
+                    map_changed,
+                    tasks,
+                    &mut categories_and_elements_to_be_loaded,
+                );
+                std::mem::drop(span_guard);
+            }
+            if map_changed {
+                self.get_active_elements_parents(categories_and_elements_to_be_loaded);
+                let _ = b2u_sender.send(BackToUIMessage::ActiveElements(
+                    self.loaded_elements.clone(),
+                ));
+            }
+            if map_changed || have_used_files_list_changed || choice_of_category_changed {
+                //there is no point in sending a new list if nothing changed
+                let _ = b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(
+                    currently_used_files.clone(),
+                ));
+                self.currently_used_files = currently_used_files;
+                let _ = b2u_sender.send(BackToUIMessage::TextureSwapChain);
+            }
+        }
     }
 
     fn delete_packs(&mut self, to_delete: Vec<Uuid>) {
@@ -282,7 +280,7 @@ impl PackageDataManager {
         self.tasks
             .save_report(Arc::clone(&data_pack.dir), report, true);
         self.tasks.save_data(&mut data_pack, true);
-        let mut uuid_to_insert = data_pack.uuid.clone();
+        let mut uuid_to_insert = data_pack.uuid;
         while self.packs.contains_key(&uuid_to_insert) {
             //collision avoidance
             trace!(
@@ -414,7 +412,7 @@ impl PackageUIManager {
         position: Vec3,
         common_attributes: CommonAttributes,
     ) {
-        self.packs.get_mut(&pack_uuid).map(|pack| {
+        if let Some(pack) = self.packs.get_mut(&pack_uuid) {
             pack.load_marker_texture(
                 egui_context,
                 self.default_marker_texture.as_ref().unwrap(),
@@ -423,7 +421,7 @@ impl PackageUIManager {
                 position,
                 common_attributes,
             );
-        });
+        };
     }
     pub fn load_trail_texture(
         &mut self,
@@ -433,15 +431,15 @@ impl PackageUIManager {
         trail_uuid: Uuid,
         common_attributes: CommonAttributes,
     ) {
-        self.packs.get_mut(&pack_uuid).map(|pack| {
+        if let Some(pack) = self.packs.get_mut(&pack_uuid) {
             pack.load_trail_texture(
                 egui_context,
-                &self.default_trail_texture.as_ref().unwrap(),
+                self.default_trail_texture.as_ref().unwrap(),
                 &tex_path,
                 trail_uuid,
                 common_attributes,
             );
-        });
+        };
     }
 
     fn pack_importer(import_status: Arc<Mutex<ImportStatus>>) {
@@ -478,7 +476,7 @@ impl PackageUIManager {
         for pack in self.packs.values_mut() {
             let span_guard = info_span!("Updating package status").entered();
             tasks.save_texture(pack, pack.is_dirty());
-            pack.tick(&u2u_sender, timestamp, link, z_near, &tasks);
+            pack.tick(u2u_sender, timestamp, link, z_near, tasks);
             std::mem::drop(span_guard);
         }
         let _ = u2u_sender.send(UIToUIMessage::RenderSwapChain);
@@ -498,10 +496,8 @@ impl PackageUIManager {
                 if ui.button("Show everything").clicked() {
                     self.show_only_active = false;
                 }
-            } else {
-                if ui.button("Show only active").clicked() {
-                    self.show_only_active = true;
-                }
+            } else if ui.button("Show only active").clicked() {
+                self.show_only_active = true;
             }
             if ui.button("Activate all elements").clicked() {
                 self.category_set_all(true);
@@ -522,7 +518,7 @@ impl PackageUIManager {
                     u2u_sender,
                     ui,
                     self.show_only_active,
-                    &import_quality_report,
+                    import_quality_report,
                 );
             }
         });

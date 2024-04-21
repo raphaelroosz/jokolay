@@ -51,7 +51,7 @@ pub enum UIToUIMessage {
     BulkMarkerObject(Vec<MarkerObject>),
     BulkTrailObject(Vec<TrailObject>),
     //Present,// a render loop is finished and we can present it
-    MarkerObject(MarkerObject),
+    MarkerObject(Box<MarkerObject>),
     RenderSwapChain, // The list of elements to display was changed
-    TrailObject(TrailObject),
+    TrailObject(Box<TrailObject>),
 }

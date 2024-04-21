@@ -24,6 +24,7 @@ impl MumbleLinuxImpl {
     pub fn new(link_name: &str) -> Result<Self> {
         let mumble_file_name = format!("/dev/shm/{link_name}");
         info!("creating mumble file at {mumble_file_name}");
+        #[allow(clippy::suspicious_open_options)]
         let mut mfile = File::options()
             .read(true)
             .write(true) // write/append is needed for the create flag

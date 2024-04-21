@@ -15,6 +15,7 @@ pub enum Race {
 }
 
 impl Race {
+    #[allow(dead_code)]
     fn from_link_id(race_id: u32) -> Race {
         match race_id {
             0 => Race::Asura,
@@ -22,7 +23,7 @@ impl Race {
             2 => Race::Human,
             3 => Race::Norn,
             4 => Race::Sylvari,
-            _ => return Race::Unknown,
+            _ => Race::Unknown,
         }
     }
 }

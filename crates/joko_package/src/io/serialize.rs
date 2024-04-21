@@ -4,6 +4,7 @@ use crate::{
 };
 use base64::Engine;
 use cap_std::fs_utf8::Dir;
+use glam::Vec3;
 use joko_package_models::{
     attributes::XotAttributeNameIDs, category::Category, marker::Marker, route::Route, trail::Trail,
 };
@@ -143,8 +144,8 @@ pub(crate) fn save_pack_texture_to_dir(
                     miette::miette!("failed to create parent dir of tbin: {tbin_path}")
                 })?;
         }
-        let mut bytes: Vec<u8> = vec![];
-        bytes.reserve(8 + tbin.nodes.len() * 12);
+        let mut bytes: Vec<u8> =
+            Vec::with_capacity(8 + tbin.nodes.len() * std::mem::size_of::<Vec3>());
         bytes.extend_from_slice(&tbin.version.to_ne_bytes());
         bytes.extend_from_slice(&tbin.map_id.to_ne_bytes());
         for node in &tbin.nodes {
@@ -175,7 +176,7 @@ fn recursive_cat_serializer(
         {
             let ele = tree.element_mut(cat_node).unwrap();
             ele.set_attribute(names.display_name, &cat.display_name);
-            ele.set_attribute(names.guid, BASE64_ENGINE.encode(&cat.guid));
+            ele.set_attribute(names.guid, BASE64_ENGINE.encode(cat.guid));
             // let cat_name = tree.add_name(cat_name);
             ele.set_attribute(names.name, &cat.relative_category_name);
             // no point in serializing default values
@@ -243,7 +244,7 @@ fn serialize_route_to_element(
     );
     for pos in &route.path {
         let child = tree.new_element(names.poi);
-        tree.append(route_node, child);
+        tree.append(route_node, child).into_diagnostic()?;
         let child_elt = tree.element_mut(child).unwrap();
         child_elt.set_attribute(names.xpos, format!("{}", pos.x));
         child_elt.set_attribute(names.ypos, format!("{}", pos.y));

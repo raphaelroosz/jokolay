@@ -36,10 +36,10 @@ pub(crate) fn route_to_trail(route: &Route, file_path: &RelativePath) -> Trail {
     Trail {
         map_id: route.map_id,
         category: route.category.clone(),
-        parent: route.parent.clone(),
+        parent: route.parent,
         guid: route.guid,
-        props: props,
+        props,
         dynamic: true,
-        source_file_uuid: route.source_file_uuid.clone(),
+        source_file_uuid: route.source_file_uuid,
     }
 }

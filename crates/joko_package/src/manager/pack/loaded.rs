@@ -98,7 +98,7 @@ pub struct LoadedPackTexture {
     selectable_categories: OrderedHashMap<String, CategorySelection>,
     current_map_data: CurrentMapData,
     activation_data: ActivationData,
-    active_elements: HashSet<Uuid>, //which are the active elements (loaded)
+    //active_elements: HashSet<Uuid>, //which are the active elements (loaded)
     _is_dirty: bool,
 }
 
@@ -116,7 +116,7 @@ impl PackTasks {
             || self.save_data_task.lock().unwrap().is_running()
     }
     pub fn count(&self) -> i32 {
-        0 + self.save_texture_task.lock().unwrap().count()
+        self.save_texture_task.lock().unwrap().count()
             + self.save_data_task.lock().unwrap().count()
             + self.load_all_packs_task.lock().unwrap().count()
     }
@@ -154,6 +154,7 @@ impl PackTasks {
         self.load_all_packs_task.lock().unwrap().recv().unwrap()
     }
 
+    #[allow(dead_code, unused)]
     fn change_map(
         &self,
         pack: &mut LoadedPackData,
@@ -162,7 +163,7 @@ impl PackTasks {
         currently_used_files: &BTreeMap<Uuid, bool>,
     ) {
         //TODO
-        //self.load_map_task.lock().unwrap().send(pack);
+        unimplemented!();
     }
 
     fn async_save_texture(pack_texture: LoadedPackTexture) -> Result<()> {
@@ -274,7 +275,7 @@ impl LoadedPackData {
         })
         .flatten()
         .unwrap_or_else(|| {
-            let cs = CategorySelection::default_from_pack_core(&pack);
+            let cs = CategorySelection::default_from_pack_core(pack);
             match serde_json::to_string_pretty(&cs) {
                 Ok(cs_json) => match pack_dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
                     Ok(_) => {
@@ -384,10 +385,11 @@ impl LoadedPackData {
         self._is_dirty
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn tick(
         &mut self,
         b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
-        loop_index: u128,
+        _loop_index: u128,
         link: &MumbleLink,
         currently_used_files: &BTreeMap<Uuid, bool>,
         list_of_active_or_selected_elements_changed: bool,
@@ -432,19 +434,18 @@ impl LoadedPackData {
         let selected_files_manager = SelectedFileManager::new(
             &self.selected_files,
             &self.source_files,
-            &currently_used_files,
+            currently_used_files,
         );
 
         debug!("Start loading markers");
         let mut nb_markers_attempt = 0;
         let mut nb_markers_loaded = 0;
-        for (_index, marker) in self
+        for marker in self
             .maps
             .get(&link.map_id)
             .unwrap_or(&Default::default())
             .markers
             .values()
-            .enumerate()
         {
             nb_markers_attempt += 1;
             if selected_files_manager.is_selected(&marker.source_file_uuid) {
@@ -528,13 +529,12 @@ impl LoadedPackData {
         debug!("Start loading trails");
         let mut nb_trails_attempt = 0;
         let mut nb_trails_loaded = 0;
-        for (_index, trail) in self
+        for trail in self
             .maps
             .get(&link.map_id)
             .unwrap_or(&Default::default())
             .trails
             .values()
-            .enumerate()
         {
             nb_trails_attempt += 1;
             if selected_files_manager.is_selected(&trail.source_file_uuid) {
@@ -610,7 +610,7 @@ impl LoadedPackTexture {
                 ui,
                 &mut self._is_dirty,
                 show_only_active,
-                &import_quality_report,
+                import_quality_report,
             );
         });
         if self._is_dirty {
@@ -628,7 +628,7 @@ impl LoadedPackTexture {
         link: &MumbleLink,
         //next_on_screen: &mut HashSet<Uuid>,
         z_near: f32,
-        tasks: &PackTasks,
+        _tasks: &PackTasks,
     ) {
         tracing::trace!(
             "LoadedPackTexture.tick: {} {}-{} {}-{}",
@@ -788,16 +788,16 @@ impl LoadedPackTexture {
     }
 }
 
-pub fn jokolay_to_editable_path(jokolay_path: &std::path::PathBuf) -> std::path::PathBuf {
+pub fn jokolay_to_editable_path(jokolay_path: &std::path::Path) -> std::path::PathBuf {
     let marker_manager_path = jokolay_to_marker_path(jokolay_path);
     marker_manager_path.join(EDITABLE_PACKAGE_NAME)
 }
 
-pub fn jokolay_to_extract_path(jokolay_path: &std::path::PathBuf) -> std::path::PathBuf {
+pub fn jokolay_to_extract_path(jokolay_path: &std::path::Path) -> std::path::PathBuf {
     jokolay_path.join(EXTRACT_DIRECTORY_NAME)
 }
 
-pub fn jokolay_to_marker_path(jokolay_path: &std::path::PathBuf) -> std::path::PathBuf {
+pub fn jokolay_to_marker_path(jokolay_path: &std::path::Path) -> std::path::PathBuf {
     jokolay_path
         .join(PACKAGE_MANAGER_DIRECTORY_NAME)
         .join(PACKAGES_DIRECTORY_NAME)
@@ -975,9 +975,9 @@ pub fn build_from_core(name: String, pack_dir: Arc<Dir>, core: PackCore) -> Impo
         _is_dirty: false,
         activation_data,
         dir: Arc::clone(&pack_dir),
-        name: name,
+        name,
         tbins: core.tbins,
-        active_elements: Default::default(),
+        //active_elements: Default::default(),
         source_files: core.active_source_files,
     };
     let report = core.report;

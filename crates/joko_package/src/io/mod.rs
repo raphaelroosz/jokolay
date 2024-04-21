@@ -3,7 +3,6 @@
 
 mod deserialize;
 mod error;
-mod export;
 mod serialize;
 
 pub(crate) use deserialize::{get_pack_from_taco_zip, load_pack_core_from_normalized_folder};

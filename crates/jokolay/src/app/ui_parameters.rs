@@ -53,7 +53,7 @@ impl JokolayUIConfiguration {
         etx: &egui::Context,
         wb: &mut GlfwBackend,
         open: &mut bool,
-        root_path: &std::path::PathBuf,
+        root_path: &std::path::Path,
     ) {
         let mut need_to_save = false;
         egui::Window::new("Configuration")

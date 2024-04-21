@@ -144,12 +144,12 @@ fn recursive_walk_dir_and_read_images_and_tbins(
                     pack.register_texture(name, &path, bytes);
                 } else if name.ends_with(".trl") {
                     if let Some(tbs) = parse_tbin_from_slice(&bytes) {
-                        let is_closed: bool = tbs.closed;
+                        /*let is_closed: bool = tbs.closed;
                         if is_closed {
                             if tbs.iso_x {}
                             if tbs.iso_y {}
                             if tbs.iso_z {}
-                        }
+                        }*/
                         pack.tbins.insert(path, tbs.tbin);
                     } else {
                         info!("invalid tbin: {path}");
@@ -226,7 +226,8 @@ fn parse_tbin_from_slice(bytes: &[u8]) -> Option<TBinStatus> {
     let mut iso_z = false;
     let mut closed = false;
     let mut resulting_nodes: Vec<Vec3> = Vec::new();
-    if nodes.len() > 0 {
+    if !nodes.is_empty() {
+        //at least the first exist and can be accessed
         let ref_node = nodes[0];
         let mut c_iso_x = true;
         let mut c_iso_y = true;
@@ -375,7 +376,7 @@ fn parse_categories_recursive(
                 }
             }
 
-            sources.insert(guid.clone(), source_file_uuid.clone());
+            sources.insert(guid, *source_file_uuid);
             first_pass_categories.insert(
                 full_category_name.clone(),
                 RawCategory {
@@ -424,10 +425,9 @@ fn parse_categories_from_normalized_file(
         let mut categories: OrderedHashMap<Uuid, Category> = Default::default();
         if od.name() == xot_names.overlay_data {
             parse_category_categories_xml_recursive(
-                &file_name,
+                file_name,
                 &tree,
                 tree.children(overlay_data_node),
-                pack,
                 &mut categories,
                 &xot_names,
                 None,
@@ -504,12 +504,12 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                     .get_attribute(names._source_file_name)
                     .unwrap_or_default(),
             );
-            let source_file_uuid = if opt_source_file_uuid.is_err() {
+            let source_file_uuid = if let Ok(uuid) = opt_source_file_uuid {
+                uuid
+            } else {
                 error!("Package corrupted, invalid source file uuid");
                 //return Err(miette::Report::msg("Package corrupted, invalid source file uuid"));
                 Uuid::new_v4()
-            } else {
-                opt_source_file_uuid.unwrap()
             };
 
             if let Some(source_file_name) =
@@ -522,9 +522,7 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
             }
 
             //There is no file name, only an uuid to register
-            target
-                .active_source_files
-                .insert(source_file_uuid.clone(), true);
+            target.active_source_files.insert(source_file_uuid, true);
 
             if child_element.name() == names.route {
                 debug!("Found a route in core pack {:?}", child_element);
@@ -534,7 +532,7 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                     &poi_node,
                     child_element,
                     &full_category_name,
-                    source_file_uuid.clone(),
+                    source_file_uuid,
                 );
                 if let Some(route) = route {
                     target.register_route(route)?;
@@ -569,7 +567,7 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                         map_xml_str, child_element
                     )));
                 }
-                let category_uuid = opt_cat_uuid.unwrap().clone(); //categories MUST exist, they have already been parsed
+                let category_uuid = opt_cat_uuid.unwrap(); //categories MUST exist, they have already been parsed
                 let guid = raw_uid
                     .and_then(|guid| {
                         let mut buffer = [0u8; 20];
@@ -609,12 +607,12 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                         position: [xpos, ypos, zpos].into(),
                         map_id,
                         category: full_category_name.clone(),
-                        parent: category_uuid.clone(),
+                        parent: *category_uuid,
                         attrs: ca,
                         guid,
                         source_file_uuid,
                     };
-                    target.register_marker(full_category_name, marker);
+                    target.register_marker(full_category_name, marker)?;
                 } else if child_element.name() == names.trail {
                     debug!("Found a trail in core pack {:?}", child_element);
                     let map_id = child_element
@@ -626,7 +624,7 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
 
                     let trail = Trail {
                         category: full_category_name.clone(),
-                        parent: category_uuid.clone(),
+                        parent: *category_uuid,
                         map_id,
                         props: ca,
                         guid,
@@ -644,10 +642,9 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
 
 // a temporary recursive function to parse the marker category tree.
 fn parse_category_categories_xml_recursive(
-    file_name: &String,
+    _file_name: &String, //meant for future implementation of source file definition for categories
     tree: &Xot,
     tags: impl Iterator<Item = Node>,
-    pack: &mut PackCore,
     cats: &mut OrderedHashMap<Uuid, Category>,
     names: &XotAttributeNameIDs,
     parent_uuid: Option<Uuid>,
@@ -712,10 +709,9 @@ fn parse_category_categories_xml_recursive(
                     ));
                 }
                 parse_category_categories_xml_recursive(
-                    file_name,
+                    _file_name,
                     tree,
                     tree.children(tag),
-                    pack,
                     cats,
                     names,
                     Some(guid),
@@ -727,7 +723,7 @@ fn parse_category_categories_xml_recursive(
                 } else {
                     let c = Category {
                         guid,
-                        parent: parent_uuid.clone(),
+                        parent: parent_uuid,
                         display_name: display_name.to_string(),
                         relative_category_name: relative_category_name.to_string(),
                         full_category_name: full_category_name.clone(),
@@ -740,10 +736,9 @@ fn parse_category_categories_xml_recursive(
                     cats.back_mut().unwrap()
                 };
                 parse_category_categories_xml_recursive(
-                    file_name,
+                    _file_name,
                     tree,
                     tree.children(tag),
-                    pack,
                     &mut current_category.children,
                     names,
                     Some(guid),
@@ -765,7 +760,7 @@ pub(crate) fn get_pack_from_taco_zip(
     extract_temporary_path: &std::path::PathBuf,
 ) -> Result<PackCore> {
     let mut taco_zip = vec![];
-    std::fs::File::open(&input_path)
+    std::fs::File::open(input_path)
         .into_diagnostic()?
         .read_to_end(&mut taco_zip)
         .into_diagnostic()?;
@@ -815,7 +810,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
             tbins.push(path_as_string);
         } else if path_as_string.ends_with(".xml") {
             xmls.push(path_as_string);
-        } else if path_as_string.replace("\\", "/").ends_with('/') {
+        } else if path_as_string.replace('\\', "/").ends_with('/') {
             // directory. so, we can silently ignore this.
         } else {
             //info!("ignoring file: {name}");
@@ -844,12 +839,12 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
         let relative_path: RelativePath = file_path.parse().unwrap();
         if let Ok(bytes) = std::fs::read(package_path.join(&file_path)) {
             if let Some(tbs) = parse_tbin_from_slice(&bytes) {
-                let is_closed: bool = tbs.closed;
+                /*let is_closed: bool = tbs.closed;
                 if is_closed {
                     if tbs.iso_x {}
                     if tbs.iso_y {}
                     if tbs.iso_z {}
-                }
+                }*/
                 assert!(
                     pack.tbins.insert(relative_path, tbs.tbin).is_none(),
                     "duplicate tbin file {file_path}"
@@ -1006,7 +1001,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
             {
                 let category_uuid = Uuid::new_v4();
                 let mut sources: OrderedHashMap<Uuid, Uuid> = OrderedHashMap::new();
-                sources.insert(guid.clone(), source_file_uuid.clone());
+                sources.insert(guid, source_file_uuid);
                 first_pass_categories.insert(
                     full_category_name.clone(),
                     RawCategory {
@@ -1027,9 +1022,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
                 );
             } else {
                 let cat = first_pass_categories.get_mut(&full_category_name);
-                cat.unwrap()
-                    .sources
-                    .insert(guid.clone(), source_file_uuid.clone());
+                cat.unwrap().sources.insert(guid, source_file_uuid);
             }
         }
         drop(span_guard);
@@ -1129,11 +1122,11 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
                     &child_node,
                     child_element,
                     &full_category_name,
-                    source_file_uuid.clone(),
+                    source_file_uuid,
                 );
                 if let Some(mut route) = route {
                     //one must not create category anymore
-                    route.parent = pack.get_category_uuid(&route.category).unwrap().clone();
+                    route.parent = *pack.get_category_uuid(&route.category).unwrap();
                     pack.register_route(route)?;
                 } else {
                     info!("Could not parse route {:?}", child_element);
@@ -1160,7 +1153,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
                         guid,
                         &full_category_name,
                         &category_uuid,
-                        source_file_uuid.clone(),
+                        source_file_uuid,
                     ) {
                         pack.register_marker(full_category_name, marker)?;
                     } else {
@@ -1174,7 +1167,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
                         guid,
                         &full_category_name,
                         &category_uuid,
-                        source_file_uuid.clone(),
+                        source_file_uuid,
                     ) {
                         pack.register_trail(full_category_name, trail)?;
                     } else {
@@ -1220,12 +1213,12 @@ fn parse_marker(
     names: &XotAttributeNameIDs,
     poi_element: &Element,
     guid: Uuid,
-    category_name: &String,
+    category_name: &str,
     category_uuid: &Uuid,
     source_file_uuid: Uuid,
 ) -> Option<Marker> {
     let mut common_attributes = CommonAttributes::default();
-    common_attributes.update_common_attributes_from_element(poi_element, &names);
+    common_attributes.update_common_attributes_from_element(poi_element, names);
     if let Some(icon_file) = common_attributes.get_icon_file() {
         if !pack.textures.contains_key(icon_file) {
             debug!(%icon_file, "failed to find this texture in this pack");
@@ -1262,8 +1255,8 @@ fn parse_marker(
         Some(Marker {
             position: [xpos, ypos, zpos].into(),
             map_id,
-            category: category_name.clone(),
-            parent: category_uuid.clone(),
+            category: category_name.to_owned(),
+            parent: *category_uuid,
             attrs: common_attributes,
             guid,
             source_file_uuid,
@@ -1319,7 +1312,7 @@ fn parse_route(
     tree: &Xot,
     route_node: &Node,
     route_element: &Element,
-    category_name: &String,
+    category_name: &str,
     source_file_uuid: Uuid,
 ) -> Option<Route> {
     let mut path: Vec<Vec3> = Vec::new();
@@ -1350,7 +1343,7 @@ fn parse_route(
         info!("route element is missing name: {route_element:?}");
         return None;
     }
-    let mut category: String = category_name.clone();
+    let mut category: String = category_name.to_owned();
     let mut category_uuid: Option<Uuid> = parse_optional_guid(names, route_element);
     let mut map_id: Option<u32> = route_element
         .get_attribute(names.map_id)
@@ -1361,7 +1354,7 @@ fn parse_route(
             None => continue,
         };
         if child.name() == names.poi {
-            let marker = parse_position(&names, child);
+            let marker = parse_position(names, child);
             path.push(marker);
             if category.is_empty() {
                 if let Some(cat) = child.get_attribute(names.category) {
@@ -1369,7 +1362,7 @@ fn parse_route(
                 }
             }
             if category_uuid.is_none() {
-                category_uuid = parse_optional_guid(names, &child)
+                category_uuid = parse_optional_guid(names, child)
             }
             if map_id.is_none() {
                 if let Some(node_map_id) = child
@@ -1406,7 +1399,7 @@ fn parse_route(
         reset_range: reset_range.unwrap_or(0.0),
         map_id: map_id.unwrap(),
         name: name.unwrap().into(),
-        guid: parse_guid(names, &route_element),
+        guid: parse_guid(names, route_element),
         source_file_uuid,
     })
 }
@@ -1416,14 +1409,14 @@ fn parse_trail(
     names: &XotAttributeNameIDs,
     trail_element: &Element,
     guid: Uuid,
-    category_name: &String,
+    category_name: &str,
     category_uuid: &Uuid,
     source_file_uuid: Uuid,
 ) -> Option<Trail> {
     //http://www.gw2taco.com/2022/04/a-proper-marker-editor-finally.html
 
     let mut common_attributes = CommonAttributes::default();
-    common_attributes.update_common_attributes_from_element(trail_element, &names);
+    common_attributes.update_common_attributes_from_element(trail_element, names);
 
     if let Some(tex) = common_attributes.get_texture() {
         if !pack.textures.contains_key(tex) {
@@ -1432,6 +1425,8 @@ fn parse_trail(
         }
     }
 
+    #[allow(clippy::manual_map)]
+    // This is not exactly a manual map, we register something more in pack on some condition: a missing trail.
     if let Some(map_id) = trail_element
         .get_attribute(names.trail_data)
         .and_then(|trail_data| {
@@ -1446,8 +1441,8 @@ fn parse_trail(
         })
     {
         Some(Trail {
-            category: category_name.clone(),
-            parent: category_uuid.clone(),
+            category: category_name.to_owned(),
+            parent: *category_uuid,
             map_id,
             props: common_attributes,
             guid,

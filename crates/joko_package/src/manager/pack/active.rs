@@ -283,7 +283,7 @@ impl ActiveTrail {
 #[derive(Default, Clone)]
 pub(crate) struct CurrentMapData {
     /// the map to which the current map data belongs to
-    pub map_id: u32,
+    //pub map_id: u32,
     //pub active_elements: HashSet<Uuid>,
     /// The textures that are being used by the markers, so must be kept alive by this hashmap
     pub active_textures: OrderedHashMap<RelativePath, TextureHandle>,

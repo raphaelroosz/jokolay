@@ -11,8 +11,8 @@ pub struct JokolayTracingLayer;
 static JKL_TRACING_DATA: OnceLock<Mutex<GlobalTracingData>> = OnceLock::new();
 
 impl JokolayTracingLayer {
-    pub fn install_tracing<'l>(
-        jokolay_dir: &'l Dir,
+    pub fn install_tracing(
+        jokolay_dir: &Dir,
     ) -> Result<tracing_appender::non_blocking::WorkerGuard> {
         use tracing_subscriber::prelude::*;
         use tracing_subscriber::{fmt, EnvFilter};
@@ -22,9 +22,9 @@ impl JokolayTracingLayer {
             use std::io::Write;
             let backtrace = std::backtrace::Backtrace::force_capture();
             let output = if let Some(string) = info.payload().downcast_ref::<String>() {
-                format!("{string}")
+                string.to_string()
             } else if let Some(str) = info.payload().downcast_ref::<&'static str>() {
-                format!("{str}")
+                str.to_string()
             } else {
                 format!("{info:?}")
             };
