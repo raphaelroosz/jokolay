@@ -394,7 +394,7 @@ impl LoadedPackData {
         currently_used_files: &BTreeMap<Uuid, bool>,
         list_of_active_or_selected_elements_changed: bool,
         map_changed: bool,
-        tasks: &PackTasks,
+        _tasks: &PackTasks,
         next_loaded: &mut HashSet<Uuid>,
     ) {
         //since the loading of texture is lazy, there is no problem when calling this regularly
