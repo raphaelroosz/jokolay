@@ -399,7 +399,7 @@ impl LoadedPackData {
     ) {
         //since the loading of texture is lazy, there is no problem when calling this regularly
         if map_changed || list_of_active_or_selected_elements_changed {
-            tasks.change_map(self, b2u_sender, link, currently_used_files);
+            //tasks.change_map(self, b2u_sender, link, currently_used_files);
             let mut active_elements: HashSet<Uuid> = Default::default();
             self.on_map_changed(b2u_sender, link, currently_used_files, &mut active_elements);
             let _ = b2u_sender.send(BackToUIMessage::PackageActiveElements(
