@@ -3,7 +3,7 @@
 pub mod dll;
 //putting all the winapi specific stuff here. so that i can lock it all behind a cfg attr at the mod declaration
 
-use crate::mumble::ctypes::*;
+use crate::mumble::ctypes::{CMumbleLink, C_MUMBLE_LINK_SIZE_FULL};
 use miette::{bail, Context, IntoDiagnostic, Result};
 use notify::Watcher;
 use std::{
@@ -70,7 +70,8 @@ pub struct MumbleWinImpl {
     last_pos_size_check: Instant,
 
     /// this is the position and size of gw2 window's client area. So, no borders or titlebar stuff. Just the viewport.
-    client_pos_size: [i32; 4],
+    client_pos: [i32; 2],
+    client_size: [u32; 2],
     /// Whether dpi scaling is enbaled or not in gw2. we parse this setting from gw2's configuration stored in AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml
     /// 0 for false
     /// 1 for true
@@ -98,6 +99,8 @@ pub struct MumbleWinImpl {
                               window_pos_size_without_borders: [i32; 4],
                               */
 }
+
+unsafe impl Send for MumbleWinImpl {}
 
 impl MumbleWinImpl {
     pub fn new(key: &str) -> Result<Self> {
@@ -173,7 +176,8 @@ impl MumbleWinImpl {
                 last_pos_size_check: Instant::now(),
                 // window_pos_size_without_borders: [0; 4],
                 dpi_scaling,
-                client_pos_size: [0; 4],
+                client_pos: [0; 2],
+                client_size: [0; 2],
                 dpi: 0,
                 _gw2_config_watcher: gw2_config_watcher,
                 gw2_config_changed,
@@ -185,7 +189,7 @@ impl MumbleWinImpl {
         !self.process_handle.is_invalid()
     }
     pub fn get_cmumble_link(&mut self) -> CMumbleLink {
-        let mut link = unsafe { std::ptr::read_volatile(self.link_ptr) };
+        let mut link: CMumbleLink = unsafe { std::ptr::read_volatile(self.link_ptr) };
         link.context.timestamp = OffsetDateTime::now_utc()
             .unix_timestamp_nanos()
             .to_le_bytes();
@@ -194,7 +198,8 @@ impl MumbleWinImpl {
         link.context.dpi_scaling = self.dpi_scaling;
         link.context.dpi = self.dpi;
         link.context.xid = self.xid;
-        link.context.client_pos_size = self.client_pos_size;
+        link.context.client_pos = self.client_pos;
+        link.context.client_size = self.client_size;
         link
     }
     /// This is the most important function which will be called every frame
@@ -335,24 +340,26 @@ impl MumbleWinImpl {
                     //             return Ok(());
                     //         }
                     //     };
-                    self.client_pos_size =
-                        match get_client_rect_in_screen_coords(HWND(self.window_handle)) {
-                            Ok(client_pos_size) => {
-                                if self.client_pos_size != client_pos_size {
-                                    info!(
-                                        ?self.client_pos_size,
-                                        ?client_pos_size,
-                                        "window position size changed"
-                                    );
-                                }
-                                client_pos_size
+                    match get_client_rect_in_screen_coords(HWND(self.window_handle)) {
+                        Ok((client_pos, client_size)) => {
+                            if self.client_pos != client_pos || self.client_size != client_size {
+                                info!(
+                                    ?self.client_pos,
+                                    ?client_pos,
+                                    ?self.client_size,
+                                    ?client_size,
+                                    "window position or size changed"
+                                );
                             }
-                            Err(e) => {
-                                error!(?e, "failed to get client position size");
-                                self.reset(); // go back to being dead because it shouldn't usually fail
-                                return Ok(());
-                            }
-                        };
+                            self.client_pos = client_pos;
+                            self.client_size = client_size;
+                        }
+                        Err(e) => {
+                            error!(?e, "failed to get client position size");
+                            self.reset(); // go back to being dead because it shouldn't usually fail
+                            return Ok(());
+                        }
+                    };
                 }
             }
         }
@@ -371,7 +378,8 @@ impl MumbleWinImpl {
         // self.window_pos_size = [0; 4];
         // self.window_pos_size_without_borders = [0; 4];
         self.dpi = 0;
-        self.client_pos_size = [0; 4];
+        self.client_pos = [0; 2];
+        self.client_size = [0; 2];
         self.previous_pid = 0;
         self.xid = 0;
     }
@@ -420,7 +428,7 @@ impl MumbleWinImpl {
                 // now we have both process_handle and window_handle. We just need the window size to initialize our struct
                 // this function only gets the suface/viewport pos/size without any borders/decoraitons.
                 match get_client_rect_in_screen_coords(HWND(window_handle)) {
-                    Ok(client_pos_size) => {
+                    Ok((client_pos, client_size)) => {
                         // this block is purely for logging purposes only to verify that all sizes are working properly.
                         {
                             // GetWindowRect includes drop shadow borders and titlebar
@@ -489,7 +497,8 @@ impl MumbleWinImpl {
                             info!(dpi, self.dpi, "dpi changed for gw2 window");
                         }
                         info!(
-                            ?client_pos_size,
+                            ?client_pos,
+                            ?client_size,
                             dpi_awareness,
                             dpi,
                             pid,
@@ -500,7 +509,8 @@ impl MumbleWinImpl {
                         self.process_handle = process_handle;
                         self.window_handle = window_handle;
                         self.dpi = dpi;
-                        self.client_pos_size = client_pos_size;
+                        self.client_pos = client_pos;
+                        self.client_size = client_size;
                         self.last_ui_tick_update = Instant::now();
                         self.previous_pid = pid;
                     }
@@ -634,7 +644,7 @@ unsafe extern "system" fn get_handle_by_pid(window_handle: HWND, gw2_pid_ptr: LP
 /// If you check the logs of jokolink and you use `xwininfo` command to check the actual gw2 window size, you can see the difference.
 /// On my 4k monitor, it adds 5 pixels on left, right and bottom. And 56 pixels on top. Need to check if dpi affects this (or wayland).
 /// If these border sizes are universal, then we can subtract those inside this function to get the actual pos/size without borders.
-fn get_window_pos_size(window_handle: isize) -> Result<[i32; 4]> {
+fn get_window_pos_size(window_handle: isize) -> Result<([i32; 2], [u32; 2])> {
     unsafe {
         let mut rect: RECT = RECT {
             left: 0,
@@ -645,15 +655,15 @@ fn get_window_pos_size(window_handle: isize) -> Result<[i32; 4]> {
         if let Err(e) = GetWindowRect(HWND(window_handle), &mut rect as *mut RECT) {
             bail!("GetWindowRect call failed {e:#?}");
         }
-        Ok([
-            rect.left,
-            rect.top,
-            (rect.right - rect.left),
-            (rect.bottom - rect.top),
-        ])
+        let pos = [rect.left, rect.top];
+        let size = [
+            (rect.right - rect.left) as u32,
+            (rect.bottom - rect.top) as u32,
+        ];
+        Ok((pos, size))
     }
 }
-fn get_window_pos_size_without_borders(window_handle: HWND) -> Result<[i32; 4]> {
+fn get_window_pos_size_without_borders(window_handle: HWND) -> Result<([i32; 2], [u32; 2])> {
     unsafe {
         let mut rect: RECT = RECT {
             left: 0,
@@ -669,15 +679,15 @@ fn get_window_pos_size_without_borders(window_handle: HWND) -> Result<[i32; 4]> 
         ) {
             bail!("DwmGetWindowAttribute call failed {e:#?}");
         }
-        Ok([
-            rect.left,
-            rect.top,
-            (rect.right - rect.left),
-            (rect.bottom - rect.top),
-        ])
+        let pos = [rect.left, rect.top];
+        let size = [
+            (rect.right - rect.left) as u32,
+            (rect.bottom - rect.top) as u32,
+        ];
+        Ok((pos, size))
     }
 }
-fn get_client_rect_in_screen_coords(window_handle: HWND) -> Result<[i32; 4]> {
+fn get_client_rect_in_screen_coords(window_handle: HWND) -> Result<([i32; 2], [u32; 2])> {
     unsafe {
         let mut rect: RECT = RECT {
             left: 0,
@@ -695,12 +705,12 @@ fn get_client_rect_in_screen_coords(window_handle: HWND) -> Result<[i32; 4]> {
         if !ClientToScreen(window_handle, &mut point as *mut POINT).as_bool() {
             bail!("ClientToScreen call failed");
         }
-        Ok([
-            point.x,
-            point.y,
-            (rect.right - rect.left),
-            (rect.bottom - rect.top),
-        ])
+        let pos = [point.x, point.y];
+        let size = [
+            (rect.right - rect.left) as u32,
+            (rect.bottom - rect.top) as u32,
+        ];
+        Ok((pos, size))
     }
 }
 impl Drop for MumbleWinImpl {

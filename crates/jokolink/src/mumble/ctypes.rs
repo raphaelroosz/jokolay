@@ -67,6 +67,7 @@ impl Default for CMumbleLink {
         }
     }
 }
+
 impl CMumbleLink {
     /// This takes a point and reads out the CMumbleLink struct from it. wrapper for unsafe ptr read
     pub fn get_cmumble_link(link_ptr: *const CMumbleLink) -> CMumbleLink {
@@ -186,7 +187,7 @@ pub struct CMumbleContext {
     pub dpi: i32,
     /// This is the client (gw2 window's viewport/surface) position and area. This tells jokolay where to position and size itself to match gw2 window.
     pub client_pos: [i32; 2],
-    pub client_size: [u32; 4],
+    pub client_size: [u32; 2],
     /// to make the struct the right size. everything upto now is 120 bytes, so this rounds upto 256 bytes.
     pub padding: [u8; 96],
 }

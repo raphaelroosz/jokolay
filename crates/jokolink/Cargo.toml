@@ -39,3 +39,6 @@ windows = { version = "0.51.1", features = [
     "Win32_System_Com",
 ] }
 arcdps = { version = "*", default-features = false }
+notify = {version = "*" }
+tracing-appender = {version = "*" }
+tracing-subscriber = {version = "*" }
