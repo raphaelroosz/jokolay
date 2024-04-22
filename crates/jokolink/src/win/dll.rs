@@ -412,7 +412,7 @@ pub mod d3d11 {
                 &dest_path
             );
 
-            #[allow(clippy::blocks_in_conditions)]
+            #[allow(clippy::blocks_in_conditions, clippy::suspicious_open_options)]
             let mut mfile = std::fs::File::options()
                 .write(true)
                 .create(true)
