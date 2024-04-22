@@ -22,12 +22,13 @@ unsafe fn spawn_jokolink_thread() {
         d3d11::JOKOLINK_QUIT_REQUESTER = Some(quit_request_sender);
         d3d11::JOKOLINK_QUIT_RESPONDER = Some(quit_response_receiver);
 
-        match std::thread::Builder::new()
+        let th = std::thread::Builder::new()
             .name("jokolink thread".to_string())
             .spawn(move || {
                 d3d11::wine::wine_main(quit_request_receiver, quit_response_sender);
                 "jokolink thread quit"
-            }) {
+            });
+        match th {
             Ok(handle) => {
                 println!("spawned jokolink thread. handle: {handle:?}");
                 d3d11::JOKOLINK_THREAD_HANDLE = Some(handle);
@@ -411,6 +412,7 @@ pub mod d3d11 {
                 &dest_path
             );
 
+            #[allow(clippy::blocks_in_conditions)]
             let mut mfile = std::fs::File::options()
                 .write(true)
                 .create(true)
