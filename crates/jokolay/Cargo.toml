@@ -14,12 +14,13 @@ wayland = ["egui_window_glfw_passthrough/wayland"]
 
 [dependencies]
 enumflags2 = { workspace = true }
-joko_core = { path = "../joko_core" }
-joko_components = { path = "../joko_components" }
-joko_plugins = { path = "../joko_plugins" }
-joko_render = { path = "../joko_render" }
-jmf = { path = "../joko_package", package = "joko_package" }
-joko_link = { path = "../joko_link" }
+joko_component_manager = { path = "../joko_component_manager" }
+joko_component_models = { path = "../joko_component_models" }
+joko_plugin_manager = { path = "../joko_plugin_manager" }
+joko_render_manager = { path = "../joko_render_manager" }
+joko_package_manager = { path = "../joko_package_manager" }
+joko_link_manager = { path = "../joko_link_manager" }
+joko_link_models = { path = "../joko_link_models" }
 egui_window_glfw_passthrough = { version = "0.8" }
 # we use this instead of cap-dirs because we want to debug/show the jokolay path to users
 # and `Dir` from cap-dirs doesn't allow us to get the path.

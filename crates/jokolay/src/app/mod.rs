@@ -8,22 +8,23 @@ use std::{
 
 use cap_std::fs_utf8::Dir;
 use egui_window_glfw_passthrough::{glfw::Context as _, GlfwBackend, GlfwConfig};
+use joko_plugin_manager::JokolayPlugin;
 mod init;
 mod messages;
 mod mumble;
 mod ui_parameters;
-use init::{get_jokolay_dir, get_jokolay_path};
-use jmf::{PackageDataManager, PackageUIManager};
-use joko_components::{
-    ComponentDataExchange, ComponentManager, JokolayComponent, JokolayUIComponent,
-};
 use crate::app::mumble::mumble_gui;
 use crate::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
+use init::{get_jokolay_dir, get_jokolay_path};
+use joko_component_manager::ComponentManager;
+use joko_component_models::{ComponentDataExchange, JokolayComponent, JokolayUIComponent};
+use joko_package_manager::{PackageDataManager, PackageUIManager};
 
-use jmf::jokolay_to_editable_path;
-use jmf::ImportStatus;
-use joko_render::renderer::JokoRenderer;
-use joko_link::{MessageToMumbleLinkBack, MumbleChanges, MumbleLink, MumbleManager};
+use joko_link_manager::MumbleManager;
+use joko_link_models::{MessageToMumbleLinkBack, MumbleChanges, MumbleLink, UISize};
+use joko_package_manager::jokolay_to_editable_path;
+use joko_package_manager::ImportStatus;
+use joko_render_manager::renderer::JokoRenderer;
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{error, info, info_span};
 
@@ -83,7 +84,7 @@ impl Jokolay {
         let mumble_ui_manager =
             MumbleManager::new("MumbleLink", true).wrap_err("failed to create mumble manager")?;
 
-        let dummy_plugin = Box::new(joko_plugins::JokolayPlugin {});
+        let dummy_plugin = Box::new(JokolayPlugin {});
         component_manager.register("dummy_plugin", dummy_plugin);
         component_manager.register(
             "mumble_link_ui",
@@ -330,16 +331,13 @@ impl Jokolay {
         */
 
         let (u2gb_sender, u2gb_receiver) = std::sync::mpsc::channel();
-        let (u2mb_sender, u2mb_receiver) = std::sync::mpsc::channel(); //FIXME: route the data to the consumers.
+        let (u2mb_sender, u2mb_receiver) = tokio::sync::mpsc::channel(1); //FIXME: route the data to the consumers.
         let (u2u_sender, u2u_receiver) = tokio::sync::mpsc::channel(1);
 
         Self::start_background_loop(Arc::clone(&self.app), u2gb_receiver);
 
         tracing::info!("entering glfw event loop");
         let span_guard = info_span!("glfw event loop").entered();
-        let mut nb_frames: u128 = 0;
-        let mut nb_messages: u128 = 0;
-        let max_nb_messages_per_loop: u128 = 100;
         let mut gui = *self.gui;
         let mut local_state = self.state_ui;
 
@@ -366,18 +364,6 @@ impl Jokolay {
             notifier,
         );
         loop {
-            {
-                let mut nb_message_on_curent_loop: u128 = 0;
-                tracing::trace!(
-                    "glfw event loop, {} frames, {} messages",
-                    nb_frames,
-                    nb_messages
-                );
-
-                if nb_message_on_curent_loop < max_nb_messages_per_loop {
-                    gui.package_manager.flush_all_messages();
-                }
-            }
             //TODO: one could wrap the egui_context into a plugin result so that it can be used from other plugins
             //TODO: same for the UI as a notified element.
 
@@ -498,7 +484,7 @@ impl Jokolay {
                         .window
                         .set_size((client_size_x - 1) as i32, (client_size_y - 1) as i32);
                 }
-                package_manager.tick(latest_time, &egui_context);
+                package_manager.tick(latest_time, egui_context);
                 local_state.window_changed = false;
             }
 
@@ -641,8 +627,6 @@ impl Jokolay {
             );
             joko_renderer.present();
             glfw_backend.window.swap_buffers();
-
-            nb_frames += 1;
         }
         drop(span_guard);
     }
@@ -746,7 +730,7 @@ pub struct MenuPanel {
 impl MenuPanel {
     pub const WIDTH: f32 = 288.0;
     pub const HEIGHT: f32 = 27.0;
-    pub fn tick(&mut self, etx: &egui::Context, link: Option<&joko_link::MumbleLink>) {
+    pub fn tick(&mut self, etx: &egui::Context, link: Option<&MumbleLink>) {
         let mut ui_scaling_factor = 1.0;
         if let Some(link) = link.as_ref() {
             let gw2_scale: f32 = if link.dpi_scaling == 1 || link.dpi_scaling == -1 {
@@ -778,7 +762,7 @@ impl MenuPanel {
     }
 }
 
-fn convert_uisz_to_scale(uisize: joko_link::UISize) -> f32 {
+fn convert_uisz_to_scale(uisize: UISize) -> f32 {
     const SMALL: f32 = 288.0;
     const NORMAL: f32 = 319.0;
     const LARGE: f32 = 355.0;
@@ -788,10 +772,10 @@ fn convert_uisz_to_scale(uisize: joko_link::UISize) -> f32 {
     const LARGE_SCALING_RATIO: f32 = LARGE / SMALL;
     const LARGER_SCALING_RATIO: f32 = LARGER / SMALL;
     match uisize {
-        joko_link::UISize::Small => SMALL_SCALING_RATIO,
-        joko_link::UISize::Normal => NORMAL_SCALING_RATIO,
-        joko_link::UISize::Large => LARGE_SCALING_RATIO,
-        joko_link::UISize::Larger => LARGER_SCALING_RATIO,
+        UISize::Small => SMALL_SCALING_RATIO,
+        UISize::Normal => NORMAL_SCALING_RATIO,
+        UISize::Large => LARGE_SCALING_RATIO,
+        UISize::Larger => LARGER_SCALING_RATIO,
     }
 }
 /*

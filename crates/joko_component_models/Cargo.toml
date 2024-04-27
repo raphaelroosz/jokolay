@@ -1,0 +1,13 @@
+[package]
+name = "joko_component_models"
+version = "0.2.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bincode = { workspace = true }
+egui = { workspace = true }
+scopeguard = "1.2.0"
+smol_str = { workspace = true }
+tokio = { workspace = true }

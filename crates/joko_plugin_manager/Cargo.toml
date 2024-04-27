@@ -1,0 +1,12 @@
+[package]
+name = "joko_plugin_manager"
+version = "0.2.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+joko_component_models = { path = "../joko_component_models" }
+scopeguard = "1.2.0"
+smol_str = { workspace = true }
+tokio = { workspace = true }

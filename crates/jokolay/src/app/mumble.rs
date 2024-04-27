@@ -1,8 +1,8 @@
 use egui::DragValue;
-use joko_link::{MessageToMumbleLinkBack, MumbleLink};
+use joko_link_models::{MessageToMumbleLinkBack, MumbleLink};
 
 pub fn mumble_gui(
-    u2mb_sender: &std::sync::mpsc::Sender<MessageToMumbleLinkBack>,
+    u2mb_sender: &tokio::sync::mpsc::Sender<MessageToMumbleLinkBack>,
     etx: &egui::Context,
     open: &mut bool,
     editable_mumble: &mut bool,
@@ -14,11 +14,11 @@ pub fn mumble_gui(
             ui.horizontal(|ui| {
                 if ui.selectable_label(!*editable_mumble, "live").clicked() {
                     *editable_mumble = false;
-                    let _ = u2mb_sender.send(MessageToMumbleLinkBack::Autonomous);
+                    let _ = u2mb_sender.blocking_send(MessageToMumbleLinkBack::Autonomous);
                 }
                 if ui.selectable_label(*editable_mumble, "editable").clicked() {
                     *editable_mumble = true;
-                    let _ = u2mb_sender.send(MessageToMumbleLinkBack::BindedOnUI);
+                    let _ = u2mb_sender.blocking_send(MessageToMumbleLinkBack::BindedOnUI);
                 }
             });
             if *editable_mumble {

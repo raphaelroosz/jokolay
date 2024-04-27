@@ -1,4 +1,4 @@
-use joko_components::ComponentDataExchange;
+use joko_component_models::ComponentDataExchange;
 use serde::{Deserialize, Serialize};
 
 use crate::{marker::MarkerObject, trail::TrailObject};
@@ -16,5 +16,12 @@ pub enum UIToUIMessage {
 impl From<UIToUIMessage> for ComponentDataExchange {
     fn from(src: UIToUIMessage) -> ComponentDataExchange {
         bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<UIToUIMessage> for ComponentDataExchange {
+    fn into(self) -> UIToUIMessage {
+        bincode::deserialize(&self).unwrap()
     }
 }

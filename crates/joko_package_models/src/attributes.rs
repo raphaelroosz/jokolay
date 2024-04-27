@@ -709,7 +709,7 @@ impl CommonAttributes {
                     Ok(f) => {
                         if let Some(x) = array.get_mut(index) {
                             *x = f;
-                            self.rotate = Vec3(glam::Vec3::from_array(array.into()));
+                            self.rotate = Vec3(glam::Vec3::from_array(array));
                             self.active_attributes.insert(ActiveAttributes::rotate);
                         }
                     }
