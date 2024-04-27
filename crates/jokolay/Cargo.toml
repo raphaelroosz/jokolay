@@ -14,10 +14,12 @@ wayland = ["egui_window_glfw_passthrough/wayland"]
 
 [dependencies]
 enumflags2 = { workspace = true }
-#joko_core = { path = "../joko_core" }
+joko_core = { path = "../joko_core" }
+joko_components = { path = "../joko_components" }
+joko_plugins = { path = "../joko_plugins" }
 joko_render = { path = "../joko_render" }
 jmf = { path = "../joko_package", package = "joko_package" }
-jokolink = { path = "../jokolink" }
+joko_link = { path = "../joko_link" }
 egui_window_glfw_passthrough = { version = "0.8" }
 # we use this instead of cap-dirs because we want to debug/show the jokolay path to users
 # and `Dir` from cap-dirs doesn't allow us to get the path.
@@ -28,6 +30,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 miette = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
 indexmap = { workspace = true }
 ringbuffer = { workspace = true }
 

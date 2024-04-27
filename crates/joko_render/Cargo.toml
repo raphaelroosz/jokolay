@@ -8,14 +8,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bincode = { workspace = true }
 bytemuck = { workspace = true }
 glam = { workspace = true, features = ["bytemuck"] }
 tracing = { workspace = true }
 egui = { workspace = true }
 egui_render_three_d = { version = "*" }
 egui_window_glfw_passthrough = { version = "0.8" }
+tokio = { workspace = true }
 
 
-jokolink = { path = "../jokolink" }
+joko_components = { path = "../joko_components" }
+joko_link = { path = "../joko_link" }
 joko_render_models = { path = "../joko_render_models" }
 

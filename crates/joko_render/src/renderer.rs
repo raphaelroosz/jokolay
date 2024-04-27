@@ -12,8 +12,11 @@ use egui_render_three_d::ThreeDBackend;
 use egui_render_three_d::ThreeDConfig;
 use egui_window_glfw_passthrough::GlfwBackend;
 use glam::Mat4;
-use jokolink::MumbleLink;
-use jokolink::UIState;
+use joko_components::JokolayComponent;
+use joko_components::JokolayComponentDeps;
+use joko_render_models::messages::UIToUIMessage;
+use joko_link::MumbleLink;
+use joko_link::UIState;
 use three_d::prelude::*;
 
 use joko_render_models::{marker::MarkerObject, trail::TrailObject};
@@ -27,6 +30,7 @@ pub struct JokoRenderer {
     pub is_map_open: bool,
     pub billboard_renderer: BillBoardRenderer,
     pub gl: egui_render_three_d::ThreeDBackend,
+    channel_receiver: Option<tokio::sync::mpsc::Receiver<joko_components::ComponentDataExchange>>,
 }
 
 impl JokoRenderer {
@@ -67,6 +71,7 @@ impl JokoRenderer {
             gl: backend,
             billboard_renderer,
             cam_pos: Default::default(),
+            channel_receiver: None,
         }
     }
 
@@ -130,85 +135,41 @@ impl JokoRenderer {
         ];
       }
       */
-    pub fn tick(&mut self, link: Option<&MumbleLink>) {
-        if let Some(link) = link {
-            //x positive => east
-            //y positive => ascention
-            //z positive => north
-            self.is_map_open = if let Some(ui_state) = link.ui_state {
-                ui_state.contains(UIState::IsMapOpen)
-            } else {
-                false
-            };
-
-            //TODO: change perspective is map is open
-            let center = link.cam_pos + link.f_camera_front;
-            let cam_pos = link.cam_pos;
-            /*
-            let map_pos_x = (link.player_x - link.map_center_x) / 1.64;
-            let map_pos_y = (link.map_center_y - link.player_y) / 1.64;
-            let center = if self.is_map_open {
-                glam::Vec3{
-                    x: link.player_pos.x - map_pos_x,
-                    y: link.player_pos.y + 100.0,
-                    z: link.player_pos.z - map_pos_y,
-                }
-            } else {
-                link.cam_pos + link.f_camera_front //default old one
-            };
-
-            let client_width = (link.client_size.x) as f32;
-            let client_height = (link.client_size.y) as f32;
-
-            let cam_pos = if self.is_map_open {
-                //TODO: validate values
-                glam::Vec3{
-                    x: link.player_pos.x - map_pos_x,
-                    y: link.player_pos.y + 101.0,
-                    z: link.player_pos.z - map_pos_y,
-                }
-            }else {
-                link.cam_pos //default old one
-            };*/
-            let camera = Camera::new_perspective(
-                self.viewport,
-                cam_pos.to_array().into(),
-                center.to_array().into(),
-                Vector3::unit_y(),
-                Rad(link.fov),
-                Self::get_z_near(),
-                Self::get_z_far(),
-            );
-            self.camera = camera;
-            /*
-            is_map_open:
-                target camera direction: 0 -20 1
-                have trails seen from further
-                have trails fatter drawing
-
-            println!("client: {} {} {} {}", client_width, client_height, client_width.div(client_height), client_height.div(client_width));
-            println!("map scale: {}", link.map_scale);
-            println!("map position: {} {}", map_pos_x, map_pos_y);
-            println!("cam:       {} {} {}", cam_pos.x, cam_pos.y, cam_pos.z);
-            println!("center:    {} {} {}", center.x, center.y, center.z);
-            println!("H:    {}", cam_pos.y - center.y);
-            println!("player:    {} {} {}", link.player_pos.x, link.player_pos.y, link.player_pos.z);
-            */
-
-            let view = Mat4::look_at_lh(cam_pos, center, glam::Vec3::Y);
-            let proj = Mat4::perspective_lh(
-                link.fov,
-                self.viewport.aspect(),
-                Self::get_z_near(),
-                Self::get_z_far(),
-            );
-            self.view_proj = proj * view;
-            self.cam_pos = cam_pos;
-            self.has_link = true;
-        } else {
-            self.has_link = false;
+    fn handle_u2u_message(&mut self, msg: UIToUIMessage) {
+        match msg {
+            UIToUIMessage::BulkMarkerObject(marker_objects) => {
+                tracing::debug!(
+                    "Handling of UIToUIMessage::BulkMarkerObject {}",
+                    marker_objects.len()
+                );
+                self.extend_markers(marker_objects);
+            }
+            UIToUIMessage::BulkTrailObject(trail_objects) => {
+                tracing::debug!(
+                    "Handling of UIToUIMessage::BulkTrailObject {}",
+                    trail_objects.len()
+                );
+                self.extend_trails(trail_objects);
+            }
+            UIToUIMessage::MarkerObject(mo) => {
+                tracing::trace!("Handling of UIToUIMessage::MarkerObject");
+                self.add_billboard(*mo);
+            }
+            UIToUIMessage::TrailObject(to) => {
+                tracing::trace!("Handling of UIToUIMessage::TrailObject");
+                self.add_trail(*to);
+            }
+            UIToUIMessage::RenderSwapChain => {
+                tracing::debug!("Handling of UIToUIMessage::RenderSwapChain");
+                self.swap();
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                unimplemented!("Handling UIToUIMessage has not been implemented yet");
+            }
         }
     }
+
     pub fn extend_markers(&mut self, marker_objects: Vec<MarkerObject>) {
         self.billboard_renderer.markers_wip.extend(marker_objects);
     }
@@ -275,5 +236,122 @@ impl JokoRenderer {
             height: latest_size[1],
         };
         self.gl.resize_framebuffer(latest_size);
+    }
+}
+
+impl JokolayComponentDeps for JokoRenderer {}
+impl JokolayComponent<(), ()> for JokoRenderer {
+    fn bind(
+        &mut self,
+        _deps: std::collections::HashMap<
+            u32,
+            tokio::sync::broadcast::Receiver<joko_components::ComponentDataExchange>,
+        >,
+        _bound: std::collections::HashMap<u32, joko_components::PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
+        mut input_notification: std::collections::HashMap<
+            u32,
+            tokio::sync::mpsc::Receiver<joko_components::ComponentDataExchange>,
+        >,
+        _notify: std::collections::HashMap<
+            u32,
+            tokio::sync::mpsc::Sender<joko_components::ComponentDataExchange>,
+        >, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
+    ) {
+        self.channel_receiver = input_notification.remove(&0);
+    }
+    fn flush_all_messages(&mut self) -> () {
+        let channel_receiver = self.channel_receiver.as_mut().unwrap();
+
+        //two steps reading due to self mutability required by channel
+        let mut messages = Vec::new();
+        while let Ok(msg) = channel_receiver.try_recv() {
+            let msg: UIToUIMessage = bincode::deserialize(&msg).unwrap();
+            messages.push(msg);
+        }
+        for msg in messages {
+            self.handle_u2u_message(msg);
+        }
+        ()
+    }
+    fn tick(&mut self, _latest_time: f64) -> Option<&()> {
+        let link: Option<&MumbleLink> = None;
+        if let Some(link) = link {
+            //x positive => east
+            //y positive => ascention
+            //z positive => north
+            self.is_map_open = if let Some(ui_state) = link.ui_state {
+                ui_state.contains(UIState::IsMapOpen)
+            } else {
+                false
+            };
+
+            //TODO: change perspective is map is open
+            let center = link.cam_pos.0 + link.f_camera_front.0;
+            let cam_pos = link.cam_pos;
+            /*
+            let map_pos_x = (link.player_x - link.map_center_x) / 1.64;
+            let map_pos_y = (link.map_center_y - link.player_y) / 1.64;
+            let center = if self.is_map_open {
+                glam::Vec3{
+                    x: link.player_pos.x - map_pos_x,
+                    y: link.player_pos.y + 100.0,
+                    z: link.player_pos.z - map_pos_y,
+                }
+            } else {
+                link.cam_pos + link.f_camera_front //default old one
+            };
+
+            let client_width = (link.client_size.x) as f32;
+            let client_height = (link.client_size.y) as f32;
+
+            let cam_pos = if self.is_map_open {
+                //TODO: validate values
+                glam::Vec3{
+                    x: link.player_pos.x - map_pos_x,
+                    y: link.player_pos.y + 101.0,
+                    z: link.player_pos.z - map_pos_y,
+                }
+            }else {
+                link.cam_pos //default old one
+            };*/
+            let camera = Camera::new_perspective(
+                self.viewport,
+                cam_pos.0.to_array().into(),
+                center.to_array().into(),
+                Vector3::unit_y(),
+                Rad(link.fov),
+                Self::get_z_near(),
+                Self::get_z_far(),
+            );
+            self.camera = camera;
+            /*
+            is_map_open:
+                target camera direction: 0 -20 1
+                have trails seen from further
+                have trails fatter drawing
+
+            println!("client: {} {} {} {}", client_width, client_height, client_width.div(client_height), client_height.div(client_width));
+            println!("map scale: {}", link.map_scale);
+            println!("map position: {} {}", map_pos_x, map_pos_y);
+            println!("cam:       {} {} {}", cam_pos.x, cam_pos.y, cam_pos.z);
+            println!("center:    {} {} {}", center.x, center.y, center.z);
+            println!("H:    {}", cam_pos.y - center.y);
+            println!("player:    {} {} {}", link.player_pos.x, link.player_pos.y, link.player_pos.z);
+            */
+
+            let view = Mat4::look_at_lh(cam_pos.0, center, glam::Vec3::Y);
+            let proj = Mat4::perspective_lh(
+                link.fov,
+                self.viewport.aspect(),
+                Self::get_z_near(),
+                Self::get_z_far(),
+            );
+            self.view_proj = proj * view;
+            self.cam_pos = cam_pos.0;
+            self.has_link = true;
+        } else {
+            self.has_link = false;
+        }
+        None
     }
 }

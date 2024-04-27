@@ -1,8 +1,6 @@
 use joko_package_models::package::PackCore;
 use tracing::info;
 
-use miette::Result;
-
 #[derive(Debug, Default)]
 pub enum ImportStatus {
     #[default]
@@ -17,7 +15,7 @@ pub enum ImportStatus {
 pub fn import_pack_from_zip_file_path(
     file_path: std::path::PathBuf,
     extract_temporary_path: &std::path::PathBuf,
-) -> Result<(String, PackCore)> {
+) -> Result<(String, PackCore), String> {
     info!("starting to get pack from taco");
     crate::io::get_pack_from_taco_zip(file_path.clone(), extract_temporary_path).map(|pack| {
         (

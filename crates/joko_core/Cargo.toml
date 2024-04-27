@@ -6,5 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bytemuck = { workspace = true }
+glam = { workspace = true }
 scopeguard = "1.2.0"
 smol_str = { workspace = true }
+serde = { workspace = true }

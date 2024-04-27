@@ -1,8 +1,9 @@
 use crate::attributes::CommonAttributes;
-use glam::Vec3;
+use joko_core::serde_glam::Vec3;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Marker {
     pub guid: Uuid,
     pub parent: Uuid,

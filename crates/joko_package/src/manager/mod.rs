@@ -17,11 +17,13 @@ We will make not having a valid category/texture/tbin path as allowed. So, users
 */
 
 mod pack;
-mod package;
+mod package_data;
+mod package_ui;
 
 pub use pack::import::{import_pack_from_zip_file_path, ImportStatus};
 pub use pack::loaded::{
     build_from_core, jokolay_to_editable_path, jokolay_to_extract_path, load_all_from_dir,
     LoadedPackData, LoadedPackTexture,
 };
-pub use package::{PackageDataManager, PackageUIManager};
+pub use package_data::PackageDataManager;
+pub use package_ui::PackageUIManager;

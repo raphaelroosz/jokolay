@@ -1,9 +1,8 @@
 use egui::DragValue;
-use jmf::message::UIToBackMessage;
-use jokolink::MumbleLink;
+use joko_link::{MessageToMumbleLinkBack, MumbleLink};
 
 pub fn mumble_gui(
-    u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+    u2mb_sender: &std::sync::mpsc::Sender<MessageToMumbleLinkBack>,
     etx: &egui::Context,
     open: &mut bool,
     editable_mumble: &mut bool,
@@ -15,11 +14,11 @@ pub fn mumble_gui(
             ui.horizontal(|ui| {
                 if ui.selectable_label(!*editable_mumble, "live").clicked() {
                     *editable_mumble = false;
-                    let _ = u2b_sender.send(UIToBackMessage::MumbleLinkAutonomous);
+                    let _ = u2mb_sender.send(MessageToMumbleLinkBack::Autonomous);
                 }
                 if ui.selectable_label(*editable_mumble, "editable").clicked() {
                     *editable_mumble = true;
-                    let _ = u2b_sender.send(UIToBackMessage::MumbleLinkBindedOnUI);
+                    let _ = u2mb_sender.send(MessageToMumbleLinkBack::BindedOnUI);
                 }
             });
             if *editable_mumble {
@@ -45,30 +44,34 @@ fn live_mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {
             ui.end_row();
             ui.label("player position");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut link.player_pos.x));
-                ui.add(DragValue::new(&mut link.player_pos.y));
-                ui.add(DragValue::new(&mut link.player_pos.z));
+                let player_pos = &mut link.player_pos.0;
+                ui.add(DragValue::new(&mut player_pos.x));
+                ui.add(DragValue::new(&mut player_pos.y));
+                ui.add(DragValue::new(&mut player_pos.z));
             });
             ui.end_row();
             ui.label("player direction");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut link.f_avatar_front.x));
-                ui.add(DragValue::new(&mut link.f_avatar_front.y));
-                ui.add(DragValue::new(&mut link.f_avatar_front.z));
+                let f_avatar_front = &mut link.f_avatar_front.0;
+                ui.add(DragValue::new(&mut f_avatar_front.x));
+                ui.add(DragValue::new(&mut f_avatar_front.y));
+                ui.add(DragValue::new(&mut f_avatar_front.z));
             });
             ui.end_row();
             ui.label("camera position");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut link.cam_pos.x));
-                ui.add(DragValue::new(&mut link.cam_pos.y));
-                ui.add(DragValue::new(&mut link.cam_pos.z));
+                let cam_pos = &mut link.cam_pos.0;
+                ui.add(DragValue::new(&mut cam_pos.x));
+                ui.add(DragValue::new(&mut cam_pos.y));
+                ui.add(DragValue::new(&mut cam_pos.z));
             });
             ui.end_row();
             ui.label("camera direction");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut link.f_camera_front.x));
-                ui.add(DragValue::new(&mut link.f_camera_front.y));
-                ui.add(DragValue::new(&mut link.f_camera_front.z));
+                let f_camera_front = &mut link.f_camera_front.0;
+                ui.add(DragValue::new(&mut f_camera_front.x));
+                ui.add(DragValue::new(&mut f_camera_front.y));
+                ui.add(DragValue::new(&mut f_camera_front.z));
             });
             ui.end_row();
             ui.label("ui state");
@@ -91,7 +94,7 @@ fn live_mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {
             ui.add(DragValue::new(&mut link.fov));
             ui.end_row();
             ui.label("w/h ratio");
-            let ratio = link.client_size.as_vec2();
+            let ratio = link.client_size.0.as_vec2();
             let mut ratio = ratio.x / ratio.y;
             ui.add(DragValue::new(&mut ratio));
             ui.end_row();
@@ -130,14 +133,16 @@ fn live_mumble_ui(ui: &mut egui::Ui, mut link: MumbleLink) {
             ui.end_row();
             ui.label("client pos");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut link.client_pos.x));
-                ui.add(DragValue::new(&mut link.client_pos.y));
+                let client_pos = &mut link.client_pos.0;
+                ui.add(DragValue::new(&mut client_pos.x));
+                ui.add(DragValue::new(&mut client_pos.y));
             });
             ui.end_row();
             ui.label("client size");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut link.client_size.x));
-                ui.add(DragValue::new(&mut link.client_size.y));
+                let client_size = &mut link.client_size.0;
+                ui.add(DragValue::new(&mut client_size.x));
+                ui.add(DragValue::new(&mut client_size.y));
             });
             ui.end_row();
             ui.label("dpi scaling");
@@ -159,30 +164,34 @@ fn editable_mumble_ui(ui: &mut egui::Ui, dummy_link: &mut MumbleLink) {
             ui.end_row();
             ui.label("player position");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut dummy_link.player_pos.x));
-                ui.add(DragValue::new(&mut dummy_link.player_pos.y));
-                ui.add(DragValue::new(&mut dummy_link.player_pos.z));
+                let player_pos = &mut dummy_link.player_pos.0;
+                ui.add(DragValue::new(&mut player_pos.x));
+                ui.add(DragValue::new(&mut player_pos.y));
+                ui.add(DragValue::new(&mut player_pos.z));
             });
             ui.end_row();
             ui.label("player direction");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut dummy_link.f_avatar_front.x));
-                ui.add(DragValue::new(&mut dummy_link.f_avatar_front.y));
-                ui.add(DragValue::new(&mut dummy_link.f_avatar_front.z));
+                let f_avatar_front = &mut dummy_link.f_avatar_front.0;
+                ui.add(DragValue::new(&mut f_avatar_front.x));
+                ui.add(DragValue::new(&mut f_avatar_front.y));
+                ui.add(DragValue::new(&mut f_avatar_front.z));
             });
             ui.end_row();
             ui.label("camera position");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut dummy_link.cam_pos.x));
-                ui.add(DragValue::new(&mut dummy_link.cam_pos.y));
-                ui.add(DragValue::new(&mut dummy_link.cam_pos.z));
+                let cam_pos = &mut dummy_link.cam_pos.0;
+                ui.add(DragValue::new(&mut cam_pos.x));
+                ui.add(DragValue::new(&mut cam_pos.y));
+                ui.add(DragValue::new(&mut cam_pos.z));
             });
             ui.end_row();
             ui.label("camera direction");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut dummy_link.f_camera_front.x));
-                ui.add(DragValue::new(&mut dummy_link.f_camera_front.y));
-                ui.add(DragValue::new(&mut dummy_link.f_camera_front.z));
+                let f_camera_front = &mut dummy_link.f_camera_front.0;
+                ui.add(DragValue::new(&mut f_camera_front.x));
+                ui.add(DragValue::new(&mut f_camera_front.y));
+                ui.add(DragValue::new(&mut f_camera_front.z));
             });
             ui.end_row();
 
@@ -206,7 +215,7 @@ fn editable_mumble_ui(ui: &mut egui::Ui, dummy_link: &mut MumbleLink) {
             ui.add(DragValue::new(&mut dummy_link.fov));
             ui.end_row();
             ui.label("w/h ratio");
-            let ratio = dummy_link.client_size.as_vec2();
+            let ratio = dummy_link.client_size.0.as_vec2();
             let mut ratio = ratio.x / ratio.y;
             ui.add(DragValue::new(&mut ratio));
             ui.end_row();
@@ -233,14 +242,16 @@ fn editable_mumble_ui(ui: &mut egui::Ui, dummy_link: &mut MumbleLink) {
             ui.end_row();
             ui.label("client pos");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut dummy_link.client_pos.x));
-                ui.add(DragValue::new(&mut dummy_link.client_pos.y));
+                let client_pos = &mut dummy_link.client_pos.0;
+                ui.add(DragValue::new(&mut client_pos.x));
+                ui.add(DragValue::new(&mut client_pos.y));
             });
             ui.end_row();
             ui.label("client size");
             ui.horizontal(|ui| {
-                ui.add(DragValue::new(&mut dummy_link.client_size.x));
-                ui.add(DragValue::new(&mut dummy_link.client_size.y));
+                let client_size = &mut dummy_link.client_size.0;
+                ui.add(DragValue::new(&mut client_size.x));
+                ui.add(DragValue::new(&mut client_size.y));
             });
             ui.end_row();
             ui.label("dpi scaling");

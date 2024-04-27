@@ -1,5 +1,5 @@
-use glam::Vec3;
-use joko_core::RelativePath;
+use joko_core::{serde_glam::Vec3, RelativePath};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     trail::{TBin, Trail},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Route {
     pub category: String,
     pub parent: Uuid,

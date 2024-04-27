@@ -1,7 +1,8 @@
 use egui_window_glfw_passthrough::GlfwBackend;
 
-use jmf::message::UIToBackMessage;
 use serde::{Deserialize, Serialize};
+
+use super::messages::MessageToApplicationBack;
 
 pub const UI_PARAMETERS_FILE_NAME: &str = "ui.toml";
 
@@ -49,7 +50,7 @@ impl JokolayUIConfiguration {
 
     pub fn gui(
         &mut self,
-        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        u2b_sender: &std::sync::mpsc::Sender<MessageToApplicationBack>,
         etx: &egui::Context,
         wb: &mut GlfwBackend,
         open: &mut bool,
@@ -124,8 +125,9 @@ impl JokolayUIConfiguration {
         if need_to_save {
             match toml::to_string(&self.display_parameters) {
                 Ok(serialized_string) => {
-                    let _ =
-                        u2b_sender.send(UIToBackMessage::SaveUIConfiguration(serialized_string));
+                    let _ = u2b_sender.send(MessageToApplicationBack::SaveUIConfiguration(
+                        serialized_string,
+                    ));
                 }
                 Err(e) => {
                     tracing::error!(?e, "failed to serialize UI configuration");

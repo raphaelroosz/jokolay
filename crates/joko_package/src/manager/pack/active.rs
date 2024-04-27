@@ -3,17 +3,20 @@ use jokoapi::end_point::mounts::Mount;
 use ordered_hash_map::OrderedHashMap;
 
 use egui::TextureHandle;
-use glam::{vec2, Vec2, Vec3};
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::INCHES_PER_METER;
-use joko_core::RelativePath;
+use joko_core::{
+    serde_glam::{Vec2, Vec3},
+    RelativePath,
+};
 use joko_render_models::{
     marker::{MarkerObject, MarkerVertex},
     trail::TrailObject,
 };
-use jokolink::MumbleLink;
+use joko_link::MumbleLink;
 
 /*
 - activation data with uuids and track the latest timestamp that will be activated
@@ -77,9 +80,9 @@ impl ActiveMarker {
             .unwrap_or(BILLBOARD_MAX_VISIBILITY_DISTANCE_IN_GAME)
             / INCHES_PER_METER;
         let icon_size = attrs.get_icon_size().copied().unwrap_or(1.0);
-        let player_distance = pos.distance(link.player_pos);
-        let camera_distance = pos.distance(link.cam_pos);
-        let fade_near_far = Vec2::new(fade_near, fade_far);
+        let player_distance = pos.0.distance(link.player_pos.0);
+        let camera_distance = pos.0.distance(link.cam_pos.0);
+        let fade_near_far = Vec2(glam::Vec2::new(fade_near, fade_far));
 
         let alpha = attrs.get_alpha().copied().unwrap_or(1.0);
         let color = attrs.get_color().copied().unwrap_or_default();
@@ -106,10 +109,10 @@ impl ActiveMarker {
             return None;
         }
         // markers are 1 meter in width/height by default
-        let mut pos = pos;
+        let mut pos = pos.0;
         pos.y += height_offset;
-        let direction_to_marker = link.cam_pos - pos;
-        let direction_to_side = direction_to_marker.normalize().cross(Vec3::Y);
+        let direction_to_marker = link.cam_pos.0 - pos;
+        let direction_to_side = direction_to_marker.normalize().cross(glam::Vec3::Y);
 
         let far_offset = {
             let dpi = if link.dpi_scaling <= 0 {
@@ -117,7 +120,7 @@ impl ActiveMarker {
             } else {
                 link.dpi as f32
             } / 96.0;
-            let gw2_width = link.client_size.as_vec2().x / dpi;
+            let gw2_width = link.client_size.0.as_vec2().x / dpi;
 
             // offset (half width i.e. distance from center of the marker to the side of the marker)
             const SIDE_OFFSET_FAR: f32 = 1.0;
@@ -141,30 +144,30 @@ impl ActiveMarker {
         let x_offset = far_offset;
         let y_offset = x_offset; // seems all markers are squares
         let bottom_left = MarkerVertex {
-            position: (pos - (direction_to_side * x_offset) - (Vec3::Y * y_offset)),
-            texture_coordinates: vec2(0.0, 1.0),
+            position: Vec3(pos - (direction_to_side * x_offset) - (glam::Vec3::Y * y_offset)),
+            texture_coordinates: Vec2(glam::vec2(0.0, 1.0)),
             alpha,
             color,
             fade_near_far,
         };
 
         let top_left = MarkerVertex {
-            position: (pos - (direction_to_side * x_offset) + (Vec3::Y * y_offset)),
-            texture_coordinates: vec2(0.0, 0.0),
+            position: Vec3(pos - (direction_to_side * x_offset) + (glam::Vec3::Y * y_offset)),
+            texture_coordinates: Vec2(glam::vec2(0.0, 0.0)),
             alpha,
             color,
             fade_near_far,
         };
         let top_right = MarkerVertex {
-            position: (pos + (direction_to_side * x_offset) + (Vec3::Y * y_offset)),
-            texture_coordinates: vec2(1.0, 0.0),
+            position: Vec3(pos + (direction_to_side * x_offset) + (glam::Vec3::Y * y_offset)),
+            texture_coordinates: Vec2(glam::vec2(1.0, 0.0)),
             alpha,
             color,
             fade_near_far,
         };
         let bottom_right = MarkerVertex {
-            position: (pos + (direction_to_side * x_offset) - (Vec3::Y * y_offset)),
-            texture_coordinates: vec2(1.0, 1.0),
+            position: Vec3(pos + (direction_to_side * x_offset) - (glam::Vec3::Y * y_offset)),
+            texture_coordinates: Vec2(glam::vec2(1.0, 1.0)),
             alpha,
             color,
             fade_near_far,
@@ -202,7 +205,7 @@ impl ActiveTrail {
             .copied()
             .unwrap_or(BILLBOARD_MAX_VISIBILITY_DISTANCE_IN_GAME)
             / INCHES_PER_METER;
-        let fade_near_far = Vec2::new(fade_near, fade_far);
+        let fade_near_far = Vec2(glam::Vec2::new(fade_near, fade_far));
         let color = attrs.get_color().copied().unwrap_or([0u8; 4]);
         // default taco width
         let horizontal_offset = 20.0 / INCHES_PER_METER;
@@ -214,39 +217,42 @@ impl ActiveTrail {
         // trail mesh is split by separating different parts with a [0, 0, 0]
         // we will call each separate trail mesh as a "strip" of trail.
         // each strip should *almost* act as an independent trail, but they all are drawn at the same time with the same parameters.
-        for strip in positions.split(|&v| v == Vec3::ZERO) {
+        for strip in positions.split(|&v| v.0 == glam::Vec3::ZERO) {
             let mut y_offset = 1.0;
             for two_positions in strip.windows(2) {
-                let first = two_positions[0];
-                let second = two_positions[1];
+                let first = two_positions[0].0;
+                let second = two_positions[1].0;
                 // right side of the vector from first to second
-                let right_side = (second - first).normalize().cross(Vec3::Y).normalize();
+                let right_side = (second - first)
+                    .normalize()
+                    .cross(glam::Vec3::Y)
+                    .normalize();
 
                 let new_offset = (-1.0 * (first.distance(second) / height)) + y_offset;
                 let first_left = MarkerVertex {
-                    position: first - (right_side * horizontal_offset),
-                    texture_coordinates: vec2(0.0, y_offset),
+                    position: Vec3(first - (right_side * horizontal_offset)),
+                    texture_coordinates: Vec2(glam::vec2(0.0, y_offset)),
                     alpha,
                     color,
                     fade_near_far,
                 };
                 let first_right = MarkerVertex {
-                    position: first + (right_side * horizontal_offset),
-                    texture_coordinates: vec2(1.0, y_offset),
+                    position: Vec3(first + (right_side * horizontal_offset)),
+                    texture_coordinates: Vec2(glam::vec2(1.0, y_offset)),
                     alpha,
                     color,
                     fade_near_far,
                 };
                 let second_left = MarkerVertex {
-                    position: second - (right_side * horizontal_offset),
-                    texture_coordinates: vec2(0.0, new_offset),
+                    position: Vec3(second - (right_side * horizontal_offset)),
+                    texture_coordinates: Vec2(glam::vec2(0.0, new_offset)),
                     alpha,
                     color,
                     fade_near_far,
                 };
                 let second_right = MarkerVertex {
-                    position: second + (right_side * horizontal_offset),
-                    texture_coordinates: vec2(1.0, new_offset),
+                    position: Vec3(second + (right_side * horizontal_offset)),
+                    texture_coordinates: Vec2(glam::vec2(1.0, new_offset)),
                     alpha,
                     color,
                     fade_near_far,

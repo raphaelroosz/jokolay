@@ -1,8 +1,9 @@
 use std::str::FromStr;
 
 use enumflags2::{bitflags, BitFlags};
-use glam::Vec3;
 use itertools::Itertools;
+use joko_core::serde_glam::Vec3;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 use xot::{Element, NameId, Xot};
 
@@ -549,7 +550,7 @@ macro_rules! setters_for_bool_attributes {
 }
 common_attributes_struct_macro!(
     /// the struct we use for inheritance from category/other markers.
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
     pub struct CommonAttributes {
         /// An ID for an achievement from the GW2 API. Markers with the corresponding achievement ID will be hidden if the ID is marked as "done" for the API key that's entered in TacO.
         achievement_id: u32,
@@ -708,7 +709,7 @@ impl CommonAttributes {
                     Ok(f) => {
                         if let Some(x) = array.get_mut(index) {
                             *x = f;
-                            self.rotate = array.into();
+                            self.rotate = Vec3(glam::Vec3::from_array(array.into()));
                             self.active_attributes.insert(ActiveAttributes::rotate);
                         }
                     }
@@ -825,7 +826,10 @@ impl CommonAttributes {
         if self.active_attributes.contains(ActiveAttributes::rotate) {
             ele.set_attribute(
                 names.rotate,
-                format!("{},{},{}", self.rotate.x, self.rotate.y, self.rotate.z),
+                format!(
+                    "{},{},{}",
+                    self.rotate.0.x, self.rotate.0.y, self.rotate.0.z
+                ),
             );
         }
         // spec vector
@@ -1016,7 +1020,7 @@ pub enum ActiveAttributes {
     trail_scale = 1 << 56,
     trigger_range = 1 << 57,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum Behavior {
     #[default]
     AlwaysVisible,
@@ -1113,7 +1117,7 @@ impl ToString for Profession {
         self.as_ref().to_string()
     }
 }
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum Cull {
     #[default]
     None,
@@ -1194,7 +1198,7 @@ impl ToString for Festival {
     }
 }
 /// Filter for which specializations (the third traitline) will the marker be active for
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Specialization {
     Dueling = 0,

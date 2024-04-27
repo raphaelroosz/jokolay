@@ -1,15 +1,18 @@
+use joko_components::ComponentDataExchange;
 use joko_package_models::{
     attributes::CommonAttributes,
     category::Category,
     package::{PackCore, PackageImportReport},
 };
+use joko_render_models::messages::UIToUIMessage;
+use miette::{IntoDiagnostic, Result};
 use ordered_hash_map::OrderedHashMap;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::message::{UIToBackMessage, UIToUIMessage};
+use crate::message::MessageToPackageBack;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct CategorySelection {
@@ -212,31 +215,35 @@ impl CategorySelection {
     }
 
     fn context_menu(
-        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
+        u2b_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
         cs: &mut CategorySelection,
         ui: &mut egui::Ui,
     ) {
         if ui.button("Activate branch").clicked() {
             cs.is_selected = true;
             CategorySelection::recursive_set_all(&mut cs.children, true);
-            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(
-                cs.uuid, true,
-            ));
+            let msg = bincode::serialize(
+                &MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, true),
+            )
+            .unwrap(); //shall crash if wrong serialization of messages
+            let _ = u2b_sender.send(msg);
             ui.close_menu();
         }
         if ui.button("Deactivate branch").clicked() {
             CategorySelection::recursive_set_all(&mut cs.children, false);
             cs.is_selected = false;
-            let _ = u2b_sender.send(UIToBackMessage::CategoryActivationBranchStatusChange(
-                cs.uuid, false,
-            ));
+            let msg = bincode::serialize(
+                &MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, false),
+            )
+            .unwrap(); //shall crash if wrong serialization of messages
+            let _ = u2b_sender.send(msg);
             ui.close_menu();
         }
     }
 
     pub fn recursive_selection_ui(
-        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        _u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
+        u2b_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        _u2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
         selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         is_dirty: &mut bool,
@@ -257,12 +264,14 @@ impl CategorySelection {
                     } else {
                         let cb = ui.checkbox(&mut cat.is_selected, "");
                         if cb.changed() {
-                            let _ = u2b_sender.send(
-                                UIToBackMessage::CategoryActivationElementStatusChange(
+                            let msg = bincode::serialize(
+                                &MessageToPackageBack::CategoryActivationElementStatusChange(
                                     cat.uuid,
                                     cat.is_selected,
                                 ),
-                            );
+                            )
+                            .unwrap(); //shall crash if wrong serialization of messages
+                            let _ = u2b_sender.send(msg);
                             *is_dirty = true;
                         }
                     }

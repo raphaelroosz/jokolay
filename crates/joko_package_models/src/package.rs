@@ -149,7 +149,7 @@ pub struct PackageImportReport {
     source_files: bimap::BiMap<String, Uuid>, //map of all files to uuid. When exporting this shall have to be reversed.
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackCore {
     /*
         PackCore is a temporary holder of data
@@ -348,7 +348,7 @@ impl PackCore {
         &mut self,
         full_category_name: &String,
         uuid: &Uuid,
-    ) -> Result<Uuid, miette::Error> {
+    ) -> Result<Uuid, String> {
         if let Some(parent_uuid) = self.all_categories.get(full_category_name) {
             let mut uuid_to_insert = *uuid;
             while self.entities_parents.contains_key(&uuid_to_insert) {
@@ -364,10 +364,10 @@ impl PackCore {
             Ok(uuid_to_insert)
         } else {
             //FIXME: this means a broken package, we could fix it by making usage of the relative category the node is in.
-            Err(miette::Error::msg(format!(
+            Err(format!(
                 "Can't register world entity {} {}, no associated category found.",
                 full_category_name, uuid
-            )))
+            ))
         }
     }
 
@@ -375,7 +375,7 @@ impl PackCore {
         &mut self,
         full_category_name: String,
         mut marker: Marker,
-    ) -> Result<(), miette::Error> {
+    ) -> Result<(), String> {
         let uuid_to_insert = self.register_uuid(&full_category_name, &marker.guid)?;
         marker.guid = uuid_to_insert;
         if let std::collections::hash_map::Entry::Vacant(e) = self.maps.entry(marker.map_id) {
@@ -395,7 +395,7 @@ impl PackCore {
         &mut self,
         full_category_name: String,
         mut trail: Trail,
-    ) -> Result<(), miette::Error> {
+    ) -> Result<(), String> {
         let uuid_to_insert = self.register_uuid(&full_category_name, &trail.guid)?;
         trail.guid = uuid_to_insert;
         if let std::collections::hash_map::Entry::Vacant(e) = self.maps.entry(trail.map_id) {
@@ -411,7 +411,7 @@ impl PackCore {
         Ok(())
     }
 
-    pub fn register_route(&mut self, mut route: Route) -> Result<(), miette::Error> {
+    pub fn register_route(&mut self, mut route: Route) -> Result<(), String> {
         let file_name = format!("data/dynamic_trails/{}.trl", &route.guid);
         let tbin_path: RelativePath = file_name.parse().unwrap();
         let uuid_to_insert = self.register_uuid(&route.category, &route.guid)?;

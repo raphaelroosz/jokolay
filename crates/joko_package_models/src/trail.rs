@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::attributes::CommonAttributes;
+use joko_core::serde_glam::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trail {
     pub guid: Uuid,
     pub parent: Uuid,
@@ -13,13 +15,13 @@ pub struct Trail {
     pub source_file_uuid: Uuid,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TBin {
     pub map_id: u32,
     pub version: u32,
-    pub nodes: Vec<glam::Vec3>,
+    pub nodes: Vec<Vec3>,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TBinStatus {
     pub tbin: TBin,
     pub iso_x: bool,

@@ -1,7 +1,9 @@
-use glam::{Vec2, Vec3};
+use serde::{Deserialize, Serialize};
+
+use joko_core::serde_glam::*;
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Serialize, Deserialize)]
 pub struct MarkerVertex {
     pub position: Vec3,
     pub alpha: f32,
@@ -10,7 +12,7 @@ pub struct MarkerVertex {
     pub color: [u8; 4],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MarkerObject {
     /// The six vertices that make up the marker quad
     pub vertices: [MarkerVertex; 6],

@@ -1,5 +1,6 @@
 use crate::{attributes::CommonAttributes, package::PackageImportReport};
 use ordered_hash_map::OrderedHashMap;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -16,7 +17,7 @@ pub struct RawCategory {
     pub sources: OrderedHashMap<Uuid, Uuid>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Category {
     pub guid: Uuid,
     pub parent: Option<Uuid>,

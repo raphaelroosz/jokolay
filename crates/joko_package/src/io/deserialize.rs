@@ -1,4 +1,7 @@
-use joko_core::RelativePath;
+use crate::BASE64_ENGINE;
+use base64::Engine;
+use cap_std::fs_utf8::{Dir, DirEntry};
+use joko_core::{serde_glam::Vec3, RelativePath};
 use joko_package_models::{
     attributes::{CommonAttributes, XotAttributeNameIDs},
     category::{prefix_parent, Category, RawCategory},
@@ -7,12 +10,6 @@ use joko_package_models::{
     route::Route,
     trail::{TBin, TBinStatus, Trail},
 };
-use miette::{bail, Context, IntoDiagnostic, Result};
-
-use crate::BASE64_ENGINE;
-use base64::Engine;
-use cap_std::fs_utf8::{Dir, DirEntry};
-use glam::Vec3;
 use ordered_hash_map::OrderedHashMap;
 use std::{collections::VecDeque, io::Read, str::FromStr};
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
@@ -24,7 +21,7 @@ const MAX_TRAIL_CHUNK_LENGTH: f32 = 400.0;
 pub(crate) fn load_pack_core_from_normalized_folder(
     core_dir: &Dir,
     import_report: Option<PackageImportReport>,
-) -> Result<PackCore> {
+) -> Result<PackCore, String> {
     //called from already parsed data
     let mut core_pack = PackCore::new();
     if let Some(mut import_report) = import_report {
@@ -39,7 +36,7 @@ pub(crate) fn load_pack_core_from_normalized_folder(
         &mut core_pack,
         &RelativePath::default(),
     )
-    .wrap_err("failed to walk dir when loading a markerpack")?;
+    .or(Err("failed to walk dir when loading a markerpack"))?;
     let elaspsed = start.elapsed().unwrap_or_default();
     tracing::info!(
         "Loading of core package textures from disk took {} ms",
@@ -49,29 +46,24 @@ pub(crate) fn load_pack_core_from_normalized_folder(
     //categories are required to register other objects
     let cats_xml = core_dir
         .read_to_string("categories.xml")
-        .into_diagnostic()
-        .wrap_err("failed to read categories.xml")?;
+        .or(Err("failed to read categories.xml"))?;
     let categories_file = String::from("categories.xml");
     let parse_categories_file_start = std::time::SystemTime::now();
     parse_categories_from_normalized_file(&categories_file, &cats_xml, &mut core_pack)
-        .wrap_err("failed to parse category file")?;
+        .or(Err("failed to parse category file"))?;
     let elapsed = parse_categories_file_start.elapsed().unwrap_or_default();
     info!("parse_categories_file took {} ms", elapsed.as_millis());
 
     // parse map data of the pack
     for entry in core_dir
         .entries()
-        .into_diagnostic()
-        .wrap_err("failed to read entries of pack dir")?
+        .or(Err("failed to read entries of pack dir"))?
     {
-        let dir_entry = entry
-            .into_diagnostic()
-            .wrap_err("entry error whiel reading xml files")?;
+        let dir_entry = entry.or(Err("entry error whiel reading xml files"))?;
 
         let name = dir_entry
             .file_name()
-            .into_diagnostic()
-            .wrap_err("map data entry name not utf-8")?
+            .or(Err("map data entry name not utf-8"))?
             .to_string();
 
         if name.ends_with(".xml") {
@@ -113,33 +105,24 @@ fn recursive_walk_dir_and_read_images_and_tbins(
     dir: &Dir,
     pack: &mut PackCore,
     parent_path: &RelativePath,
-) -> Result<()> {
-    for entry in dir
-        .entries()
-        .into_diagnostic()
-        .wrap_err("failed to get directory entries")?
-    {
-        let entry = entry
-            .into_diagnostic()
-            .wrap_err("dir entry error when iterating dir entries")?;
-        let name = entry.file_name().into_diagnostic()?;
+) -> Result<(), String> {
+    for entry in dir.entries().or(Err("failed to get directory entries"))? {
+        let entry = entry.or(Err("dir entry error when iterating dir entries"))?;
+        let name = entry.file_name().or(Err("No file name found"))?;
         let path = parent_path.join_str(&name);
 
         if entry
             .file_type()
-            .into_diagnostic()
-            .wrap_err("failed to get file type")?
+            .or(Err("failed to get file type"))?
             .is_file()
         {
             if path.ends_with(".png") || path.ends_with(".trl") {
                 let mut bytes = vec![];
                 entry
                     .open()
-                    .into_diagnostic()
-                    .wrap_err("failed to open file")?
+                    .or(Err("failed to open file"))?
                     .read_to_end(&mut bytes)
-                    .into_diagnostic()
-                    .wrap_err("failed to read file contents")?;
+                    .or(Err("failed to read file contents"))?;
                 if name.ends_with(".png") {
                     pack.register_texture(name, &path, bytes);
                 } else if name.ends_with(".trl") {
@@ -158,7 +141,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
             }
         } else {
             recursive_walk_dir_and_read_images_and_tbins(
-                &entry.open_dir().into_diagnostic()?,
+                &entry.open_dir().or(Err("Could not open directory"))?,
                 pack,
                 &path,
             )?;
@@ -181,14 +164,14 @@ fn parse_tbin_from_slice(bytes: &[u8]) -> Option<TBinStatus> {
     map_id_bytes.copy_from_slice(&bytes[4..8]);
     let map_id = u32::from_ne_bytes(map_id_bytes);
 
-    let zero = Vec3 {
+    let zero = glam::Vec3 {
         x: 0.0,
         y: 0.0,
         z: 0.0,
     };
 
     // this will either be empty vec or series of vec3s.
-    let nodes: VecDeque<Vec3> = bytes[8..]
+    let nodes: VecDeque<glam::Vec3> = bytes[8..]
         .chunks_exact(12)
         .map(|float_bytes| {
             // make [f32 ;3] out of those 12 bytes
@@ -216,7 +199,7 @@ fn parse_tbin_from_slice(bytes: &[u8]) -> Option<TBinStatus> {
                 ]),
             ];
 
-            Vec3::from_array(arr)
+            glam::Vec3::from_array(arr)
         })
         .collect();
 
@@ -233,7 +216,7 @@ fn parse_tbin_from_slice(bytes: &[u8]) -> Option<TBinStatus> {
         let mut c_iso_y = true;
         let mut c_iso_z = true;
         // ensure there is not too much distance between two points, if it is the case, we do split the path in several parts
-        resulting_nodes.push(ref_node);
+        resulting_nodes.push(Vec3(ref_node));
         for (a, b) in nodes.iter().zip(nodes.iter().skip(1)) {
             //ignore zeroes since they would be separators
             if a.distance_squared(zero) > 0.01 && b.distance_squared(zero) > 0.01 {
@@ -241,11 +224,11 @@ fn parse_tbin_from_slice(bytes: &[u8]) -> Option<TBinStatus> {
                 let mut current_cursor = distance_to_next_point;
                 while current_cursor > MAX_TRAIL_CHUNK_LENGTH {
                     let c = a.lerp(*b, 1.0 - current_cursor / distance_to_next_point);
-                    resulting_nodes.push(c);
+                    resulting_nodes.push(Vec3(c));
                     current_cursor -= MAX_TRAIL_CHUNK_LENGTH;
                 }
             }
-            resulting_nodes.push(*b);
+            resulting_nodes.push(Vec3(*b));
         }
         for node in &nodes {
             if resulting_nodes.len() > 1 {
@@ -408,18 +391,12 @@ fn parse_categories_from_normalized_file(
     file_name: &String,
     cats_xml_str: &str,
     pack: &mut PackCore,
-) -> Result<()> {
+) -> Result<(), String> {
     let mut tree = xot::Xot::new();
     let xot_names = XotAttributeNameIDs::register_with_xot(&mut tree);
-    let root_node = tree
-        .parse(cats_xml_str)
-        .into_diagnostic()
-        .wrap_err("invalid xml")?;
+    let root_node = tree.parse(cats_xml_str).or(Err("invalid xml"))?;
 
-    let overlay_data_node = tree
-        .document_element(root_node)
-        .into_diagnostic()
-        .wrap_err("no doc element")?;
+    let overlay_data_node = tree.document_element(root_node).or(Err("no doc element"))?;
 
     if let Some(od) = tree.element(overlay_data_node) {
         let mut categories: OrderedHashMap<Uuid, Category> = Default::default();
@@ -437,10 +414,10 @@ fn parse_categories_from_normalized_file(
             pack.categories = categories;
             pack.register_categories();
         } else {
-            bail!("root tag is not OverlayData")
+            return Err("root tag is not OverlayData".to_string());
         }
     } else {
-        bail!("doc element is not element???");
+        return Err("doc element is not element???".to_string());
     }
     Ok(())
 }
@@ -449,38 +426,34 @@ fn load_xml_from_normalized_file(
     file_name: &str,
     dir_entry: &DirEntry,
     target: &mut PackCore,
-) -> Result<()> {
+) -> Result<(), String> {
     let mut xml_str = String::new();
     dir_entry
         .open()
-        .into_diagnostic()
-        .wrap_err("failed to open xml file")?
+        .or(Err("failed to open xml file"))?
         .read_to_string(&mut xml_str)
-        .into_diagnostic()
-        .wrap_err("faield to read xml string")?;
+        .or(Err("failed to read xml string"))?;
     //TODO: launch an async load of the file + make a priority queue to have current map first
     parse_map_xml_string(file_name, &xml_str, target)
-        .wrap_err_with(|| miette::miette!("error parsing file: {file_name}"))
+        .or(Err(format!("error parsing file: {file_name}")))
 }
 
-fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCore) -> Result<()> {
+fn parse_map_xml_string(
+    file_name: &str,
+    map_xml_str: &str,
+    target: &mut PackCore,
+) -> Result<(), String> {
     let mut tree = Xot::new();
-    let root_node = tree
-        .parse(map_xml_str)
-        .into_diagnostic()
-        .wrap_err("invalid xml")?;
+    let root_node = tree.parse(map_xml_str).or(Err("invalid xml"))?;
     let names = XotAttributeNameIDs::register_with_xot(&mut tree);
     let overlay_data_node = tree
         .document_element(root_node)
-        .into_diagnostic()
-        .wrap_err("missing doc element")?;
+        .or(Err("missing doc element"))?;
 
-    let overlay_data_element = tree
-        .element(overlay_data_node)
-        .ok_or_else(|| miette::miette!("no doc ele"))?;
+    let overlay_data_element = tree.element(overlay_data_node).ok_or("no doc ele")?;
 
     if overlay_data_element.name() != names.overlay_data {
-        bail!("root tag is not OverlayData");
+        return Err("root tag is not OverlayData".to_string());
     }
     let pois = tree
         .children(overlay_data_node)
@@ -488,7 +461,7 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
             Some(ele) => ele.name() == names.pois,
             None => false,
         })
-        .ok_or_else(|| miette::miette!("missing pois node"))?;
+        .ok_or("missing pois node")?;
 
     for poi_node in tree.children(pois) {
         if let Some(child_element) = tree.element(poi_node) {
@@ -562,10 +535,10 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                         "Mandatory category missing, packge is corrupted {:?} {:?}",
                         file_name, child_element
                     );
-                    return Err(miette::Report::msg(format!(
+                    return Err(format!(
                         "Mandatory category missing, packge is corrupted {:?} {:?}",
                         map_xml_str, child_element
-                    )));
+                    ));
                 }
                 let category_uuid = opt_cat_uuid.unwrap(); //categories MUST exist, they have already been parsed
                 let guid = raw_uid
@@ -576,35 +549,35 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                             .ok()
                             .and_then(|_| Uuid::from_slice(&buffer[..16]).ok())
                     })
-                    .ok_or_else(|| miette::miette!("invalid guid {:?}", raw_uid))?;
+                    .ok_or(format!("invalid guid {:?}", raw_uid))?;
 
                 if child_element.name() == names.poi {
                     debug!("Found a POI in core pack {:?}", child_element);
                     let map_id = child_element
                         .get_attribute(names.map_id)
                         .and_then(|map_id| map_id.parse::<u32>().ok())
-                        .ok_or_else(|| miette::miette!("invalid mapid"))?;
+                        .ok_or("invalid mapid")?;
 
                     let xpos = child_element
                         .get_attribute(names.xpos)
                         .unwrap_or_default()
                         .parse::<f32>()
-                        .into_diagnostic()?;
+                        .or(Err("invalid x position"))?;
                     let ypos = child_element
                         .get_attribute(names.ypos)
                         .unwrap_or_default()
                         .parse::<f32>()
-                        .into_diagnostic()?;
+                        .or(Err("invalid y position"))?;
                     let zpos = child_element
                         .get_attribute(names.zpos)
                         .unwrap_or_default()
                         .parse::<f32>()
-                        .into_diagnostic()?;
+                        .or(Err("invalid z position"))?;
                     let mut ca = CommonAttributes::default();
                     ca.update_common_attributes_from_element(child_element, &names);
 
                     let marker = Marker {
-                        position: [xpos, ypos, zpos].into(),
+                        position: Vec3(glam::Vec3::from_array([xpos, ypos, zpos])),
                         map_id,
                         category: full_category_name.clone(),
                         parent: *category_uuid,
@@ -618,7 +591,7 @@ fn parse_map_xml_string(file_name: &str, map_xml_str: &str, target: &mut PackCor
                     let map_id = child_element
                         .get_attribute(names.map_id)
                         .and_then(|map_id| map_id.parse::<u32>().ok())
-                        .ok_or_else(|| miette::miette!("invalid mapid"))?;
+                        .ok_or("invalid mapid")?;
                     let mut ca = CommonAttributes::default();
                     ca.update_common_attributes_from_element(child_element, &names);
 
@@ -649,7 +622,7 @@ fn parse_category_categories_xml_recursive(
     names: &XotAttributeNameIDs,
     parent_uuid: Option<Uuid>,
     parent_name: Option<String>,
-) -> Result<()> {
+) -> Result<(), String> {
     for tag in tags {
         if let Some(ele) = tree.element(tag) {
             if ele.name() != names.marker_category {
@@ -704,9 +677,10 @@ fn parse_category_categories_xml_recursive(
             );
             if display_name.is_empty() {
                 if parent_name.is_some() {
-                    return Err(miette::Error::msg(
-                        "Package is corrupted, please import it again with current version",
-                    ));
+                    return Err(
+                        "Package is corrupted, please import it again with current version"
+                            .to_string(),
+                    );
                 }
                 parse_category_categories_xml_recursive(
                     _file_name,
@@ -758,22 +732,21 @@ fn parse_category_categories_xml_recursive(
 pub(crate) fn get_pack_from_taco_zip(
     input_path: std::path::PathBuf,
     extract_temporary_path: &std::path::PathBuf,
-) -> Result<PackCore> {
+) -> Result<PackCore, String> {
     let mut taco_zip = vec![];
     std::fs::File::open(input_path)
-        .into_diagnostic()?
+        .or(Err("Could not open target folder"))?
         .read_to_end(&mut taco_zip)
-        .into_diagnostic()?;
+        .or(Err("Could not read target folder"))?;
 
     let mut zip_archive = zip::ZipArchive::new(std::io::Cursor::new(taco_zip))
-        .into_diagnostic()
-        .wrap_err("failed to read zip archive")?;
+        .or(Err("failed to read zip archive"))?;
     if extract_temporary_path.exists() {
-        std::fs::remove_dir_all(extract_temporary_path).into_diagnostic()?;
+        std::fs::remove_dir_all(extract_temporary_path).or(Err("Could not purge target folder"))?;
     }
     zip_archive
         .extract(extract_temporary_path)
-        .into_diagnostic()?;
+        .or(Err("Could not extract archive into target folder"))?;
 
     _get_pack_from_taco_folder(extract_temporary_path)
 }
@@ -786,7 +759,7 @@ pub(crate) fn get_pack_from_taco_zip(
 /// we will ignore any issues like unknown attributes or xml tags. "unknown" attributes means Any attributes that jokolay doesn't parse into Zpack.
 
 #[instrument(skip_all)]
-fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackCore> {
+fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackCore, String> {
     let mut pack = PackCore::new();
 
     // file paths of different file types
@@ -796,7 +769,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
     // we collect the names first, because reading a file from zip is a mutating operation.
     // So, we can't iterate AND read the file at the same time
     for entry in walkdir::WalkDir::new(package_path).into_iter() {
-        let entry = entry.into_diagnostic()?;
+        let entry = entry.or(Err("Could not walk directory"))?;
         let path_as_string = entry
             .path()
             .strip_prefix(package_path)
@@ -1253,7 +1226,7 @@ fn parse_marker(
             .parse::<f32>()
             .unwrap_or_default();
         Some(Marker {
-            position: [xpos, ypos, zpos].into(),
+            position: Vec3(glam::Vec3::from_array([xpos, ypos, zpos])),
             map_id,
             category: category_name.to_owned(),
             parent: *category_uuid,
@@ -1283,7 +1256,7 @@ fn parse_position(names: &XotAttributeNameIDs, poi_element: &Element) -> Vec3 {
         .unwrap_or_default()
         .parse::<f32>()
         .unwrap_or_default();
-    Vec3 { x, y, z }
+    Vec3(glam::Vec3 { x, y, z })
 }
 
 fn parse_route_category(
@@ -1331,7 +1304,7 @@ fn parse_route(
         .unwrap_or_default()
         .parse::<f32>()
         .unwrap_or_default();
-    let reset_position = Vec3::new(resetposx, resetposy, resetposz);
+    let reset_position = glam::Vec3::new(resetposx, resetposy, resetposz);
     let reset_range = route_element
         .get_attribute(names.reset_range)
         .and_then(|map_id| map_id.parse::<f64>().ok());
@@ -1395,7 +1368,7 @@ fn parse_route(
         category,
         parent: category_uuid.unwrap(),
         path,
-        reset_position,
+        reset_position: Vec3(reset_position),
         reset_range: reset_range.unwrap_or(0.0),
         map_id: map_id.unwrap(),
         name: name.unwrap().into(),

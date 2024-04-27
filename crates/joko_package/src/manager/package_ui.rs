@@ -1,65 +1,35 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     sync::{Arc, Mutex},
 };
 
-use cap_std::fs_utf8::Dir;
 use egui::{CollapsingHeader, ColorImage, TextureHandle, Ui, Window};
-use glam::Vec3;
 use image::EncodableLayout;
 use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 
+use joko_render_models::messages::UIToUIMessage;
 use tracing::{info_span, trace};
 
-use crate::message::{UIToBackMessage, UIToUIMessage};
-use joko_core::RelativePath;
-use jokolink::MumbleLink;
+use crate::message::MessageToPackageBack;
+use joko_components::{ComponentDataExchange, JokolayUIComponent, PeerComponentChannel};
+use joko_core::{serde_glam::Vec3, RelativePath};
+use joko_link::{MumbleChanges, MumbleLink};
 use miette::Result;
 use uuid::Uuid;
 
 use crate::manager::pack::import::ImportStatus;
-use crate::manager::pack::loaded::{LoadedPackData, LoadedPackTexture, PackTasks};
-use crate::message::BackToUIMessage;
+use crate::manager::pack::loaded::{LoadedPackTexture, PackTasks};
+use crate::message::MessageToPackageUI;
 
-use super::pack::loaded::jokolay_to_marker_dir;
-
-pub const PACKAGE_MANAGER_DIRECTORY_NAME: &str = "marker_manager"; //name kept for compatibility purpose
-pub const PACKAGES_DIRECTORY_NAME: &str = "packs"; //name kept for compatibility purpose
-pub const EXTRACT_DIRECTORY_NAME: &str = "_work"; //working dir where a package is extracted before reading
-pub const EDITABLE_PACKAGE_NAME: &str = "editable"; //package automatically created and always imported as an overwrite
-pub const LOCAL_EXPANDED_PACKAGE_NAME: &str = "_local_expanded"; //result of import of the editable package
-                                                                 // pub const MARKER_MANAGER_CONFIG_NAME: &str = "marker_manager_config.json";
-
-/// It manage everything that has to do with marker packs.
-/// 1. imports, loads, saves and exports marker packs.
-/// 2. maintains the categories selection data for every pack
-/// 3. contains activation data globally and per character
-/// 4. When we load into a map, it filters the markers and runs the logic every frame
-///     1. If a marker needs to be activated (based on player position or whatever)
-///     2. marker needs to be drawn
-///     3. marker's texture is uploaded or being uploaded? if not ready, we will upload or use a temporary "loading" texture
-///     4. render that marker use joko_render  
-#[must_use]
-pub struct PackageDataManager {
-    /// marker manager directory. not useful yet, but in future we could be using this to store config files etc..
-    //_marker_manager_dir: Arc<Dir>,
-    /// packs directory which contains marker packs. each directory inside pack directory is an individual marker pack.
-    /// The name of the child directory is the name of the pack
-    pub marker_packs_dir: Arc<Dir>,
-    /// These are the marker packs
-    /// The key is the name of the pack
-    /// The value is a loaded pack that contains additional data for live marker packs like what needs to be saved or category selections etc..
-    pub packs: BTreeMap<Uuid, LoadedPackData>,
-    tasks: PackTasks,
-    current_map_id: u32,
-    /// This is the interval in number of seconds when we check if any of the packs need to be saved due to changes.
-    /// This allows us to avoid saving the pack too often.
-    pub save_interval: f64,
-
-    pub currently_used_files: BTreeMap<Uuid, bool>,
-    parents: HashMap<Uuid, Uuid>,
-    loaded_elements: HashSet<Uuid>,
+//FIXME: there is an interest to merge the PackageUIManager and the render
+#[derive(Clone)]
+pub struct PackageUISharedState {
+    list_of_textures_changed: bool, //Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
+    first_load_done: bool,
+    nb_running_tasks_on_back: i32, // store the number of running tasks in background thread
+    import_status: Arc<Mutex<ImportStatus>>,
 }
+
 #[must_use]
 pub struct PackageUIManager {
     default_marker_texture: Option<TextureHandle>,
@@ -72,259 +42,32 @@ pub struct PackageUIManager {
     all_files_activation_status: bool, // this consume a change of display event
     show_only_active: bool,
     pack_details: Option<Uuid>, // if filled, display the details of the package
-}
 
-impl PackageDataManager {
-    /// Creates a new instance of [MarkerManager].
-    /// 1. It opens the marker manager directory
-    /// 2. loads its configuration
-    /// 3. opens the packs directory
-    /// 4. loads all the packs
-    /// 5. loads all the activation data
-    /// 6. returns self
-    pub fn new(packs: BTreeMap<Uuid, LoadedPackData>, jokolay_dir: Arc<Dir>) -> Result<Self> {
-        let marker_packs_dir = jokolay_to_marker_dir(&jokolay_dir)?;
-        Ok(Self {
-            packs,
-            tasks: PackTasks::new(),
-            marker_packs_dir: Arc::new(marker_packs_dir),
-            //_marker_manager_dir: marker_manager_dir.into(),
-            current_map_id: 0,
-            save_interval: 0.0,
-            currently_used_files: Default::default(),
-            parents: Default::default(),
-            loaded_elements: Default::default(),
-        })
-    }
+    delayed_marker_texture: Vec<(Uuid, RelativePath, Uuid, Vec3, CommonAttributes)>,
+    delayed_trail_texture: Vec<(Uuid, RelativePath, Uuid, CommonAttributes)>,
 
-    pub fn set_currently_used_files(&mut self, currently_used_files: BTreeMap<Uuid, bool>) {
-        self.currently_used_files = currently_used_files;
-    }
-
-    pub fn category_set(&mut self, uuid: Uuid, status: bool) {
-        for pack in self.packs.values_mut() {
-            if pack.category_set(uuid, status) {
-                break;
-            }
-        }
-    }
-
-    pub fn category_branch_set(&mut self, uuid: Uuid, status: bool) {
-        for pack in self.packs.values_mut() {
-            if pack.category_branch_set(uuid, status) {
-                break;
-            }
-        }
-    }
-
-    pub fn category_set_all(&mut self, status: bool) {
-        for pack in self.packs.values_mut() {
-            pack.category_set_all(status);
-        }
-    }
-
-    pub fn register(&mut self, element: Uuid, parent: Uuid) {
-        self.parents.insert(element, parent);
-    }
-    pub fn get_parent(&self, element: &Uuid) -> Option<&Uuid> {
-        self.parents.get(element)
-    }
-    pub fn get_parents<'a, I>(&self, input: I) -> HashSet<Uuid>
-    where
-        I: Iterator<Item = &'a Uuid>,
-    {
-        let iter = input.into_iter();
-        let mut result: HashSet<Uuid> = HashSet::new();
-        let mut current_generation: Vec<Uuid> = Vec::new();
-        for elt in iter {
-            current_generation.push(*elt)
-        }
-        //info!("starts with {}", current_generation.len());
-        loop {
-            if current_generation.is_empty() {
-                //info!("ends with {}", result.len());
-                return result;
-            }
-            let mut next_gen: Vec<Uuid> = Vec::new();
-            for elt in current_generation.iter() {
-                if let Some(p) = self.get_parent(elt) {
-                    if result.contains(p) {
-                        //avoid duplicate, redundancy or loop
-                        continue;
-                    }
-                    next_gen.push(*p);
-                }
-            }
-            let to_insert = std::mem::replace(&mut current_generation, next_gen);
-            result.extend(to_insert);
-        }
-        #[allow(unreachable_code)] // sillyness of some tools
-        {
-            unreachable!("The loop should always return")
-        }
-    }
-
-    pub fn get_active_elements_parents(
-        &mut self,
-        categories_and_elements_to_be_loaded: HashSet<Uuid>,
-    ) {
-        trace!(
-            "There are {} active elements",
-            categories_and_elements_to_be_loaded.len()
-        );
-
-        //first merge the parents to iterate overit
-        let mut parents: HashMap<Uuid, Uuid> = Default::default();
-        for pack in self.packs.values_mut() {
-            parents.extend(pack.entities_parents.clone());
-        }
-        self.parents = parents;
-        //then climb up the tree of parent's categories
-        self.loaded_elements = self.get_parents(categories_and_elements_to_be_loaded.iter());
-    }
-
-    pub fn tick(
-        &mut self,
-        b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
-        loop_index: u128,
-        link: Option<&MumbleLink>,
-        choice_of_category_changed: bool,
-    ) {
-        let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
-        let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
-
-        if let Some(link) = link {
-            //TODO: how to save/load the active files ?
-            let mut have_used_files_list_changed = false;
-            let map_changed = self.current_map_id != link.map_id;
-            self.current_map_id = link.map_id;
-            for pack in self.packs.values_mut() {
-                if let Some(current_map) = pack.maps.get(&link.map_id) {
-                    for marker in current_map.markers.values() {
-                        if let Some(is_active) = pack.source_files.get(&marker.source_file_uuid) {
-                            currently_used_files.insert(
-                                marker.source_file_uuid,
-                                *self
-                                    .currently_used_files
-                                    .get(&marker.source_file_uuid)
-                                    .unwrap_or_else(|| {
-                                        have_used_files_list_changed = true;
-                                        is_active
-                                    }),
-                            );
-                        }
-                    }
-                    for trail in current_map.trails.values() {
-                        if let Some(is_active) = pack.source_files.get(&trail.source_file_uuid) {
-                            currently_used_files.insert(
-                                trail.source_file_uuid,
-                                *self
-                                    .currently_used_files
-                                    .get(&trail.source_file_uuid)
-                                    .unwrap_or_else(|| {
-                                        have_used_files_list_changed = true;
-                                        is_active
-                                    }),
-                            );
-                        }
-                    }
-                }
-            }
-            let tasks = &self.tasks;
-            for pack in self.packs.values_mut() {
-                let span_guard = info_span!("Updating package status").entered();
-                let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(tasks.count()));
-                tasks.save_data(pack, pack.is_dirty());
-                pack.tick(
-                    b2u_sender,
-                    loop_index,
-                    link,
-                    &currently_used_files,
-                    have_used_files_list_changed || choice_of_category_changed,
-                    map_changed,
-                    tasks,
-                    &mut categories_and_elements_to_be_loaded,
-                );
-                std::mem::drop(span_guard);
-            }
-            if map_changed {
-                self.get_active_elements_parents(categories_and_elements_to_be_loaded);
-                let _ = b2u_sender.send(BackToUIMessage::ActiveElements(
-                    self.loaded_elements.clone(),
-                ));
-            }
-            if map_changed || have_used_files_list_changed || choice_of_category_changed {
-                //there is no point in sending a new list if nothing changed
-                let _ = b2u_sender.send(BackToUIMessage::CurrentlyUsedFiles(
-                    currently_used_files.clone(),
-                ));
-                self.currently_used_files = currently_used_files;
-                let _ = b2u_sender.send(BackToUIMessage::TextureSwapChain);
-            }
-        }
-    }
-
-    fn delete_packs(&mut self, to_delete: Vec<Uuid>) {
-        for uuid in to_delete {
-            self.packs.remove(&uuid);
-        }
-    }
-    pub fn save(&mut self, mut data_pack: LoadedPackData, report: PackageImportReport) -> Uuid {
-        let mut to_delete: Vec<Uuid> = Vec::new();
-        for (uuid, pack) in self.packs.iter() {
-            if pack.name == data_pack.name {
-                to_delete.push(*uuid);
-            }
-        }
-        self.delete_packs(to_delete);
-        self.tasks
-            .save_report(Arc::clone(&data_pack.dir), report, true);
-        self.tasks.save_data(&mut data_pack, true);
-        let mut uuid_to_insert = data_pack.uuid;
-        while self.packs.contains_key(&uuid_to_insert) {
-            //collision avoidance
-            trace!(
-                "Uuid collision detected for {} for package {}",
-                uuid_to_insert,
-                data_pack.name
-            );
-            uuid_to_insert = Uuid::new_v4();
-        }
-        data_pack.uuid = uuid_to_insert;
-        self.packs.insert(uuid_to_insert, data_pack);
-        uuid_to_insert
-    }
-
-    pub fn load_all(
-        &mut self,
-        jokolay_dir: Arc<Dir>,
-        b2u_sender: &std::sync::mpsc::Sender<BackToUIMessage>,
-    ) {
-        once::assert_has_not_been_called!("Early load must happen only once");
-        // Called only once at application start.
-        let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(1));
-        self.tasks.load_all_packs(jokolay_dir);
-        if let Ok((data_packages, texture_packages, report_packages)) =
-            self.tasks.wait_for_load_all_packs()
-        {
-            for (uuid, data_pack) in data_packages {
-                self.packs.insert(uuid, data_pack);
-            }
-            for ((_, texture_pack), (_, report)) in
-                std::iter::zip(texture_packages, report_packages)
-            {
-                let _ = b2u_sender.send(BackToUIMessage::LoadedPack(texture_pack, report));
-            }
-            let _ = b2u_sender.send(BackToUIMessage::NbTasksRunning(0));
-        }
-        let _ = b2u_sender.send(BackToUIMessage::FirstLoadDone);
-    }
+    //egui_context: &'l egui::Context, //TODO: remove, this is not the proper place to be, or if it is, badly used
+    channel_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+    channel_sender: tokio::sync::mpsc::Sender<ComponentDataExchange>,
+    sender_u2u: Option<tokio::sync::mpsc::Sender<ComponentDataExchange>>,
+    receiver_mumblelink: Option<tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
+    receiver_near_scene: Option<tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
+    state: PackageUISharedState,
 }
 
 impl PackageUIManager {
-    pub fn new(packs: BTreeMap<Uuid, LoadedPackTexture>) -> Self {
+    pub fn new(
+        channel_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+        channel_sender: tokio::sync::mpsc::Sender<ComponentDataExchange>,
+    ) -> Self {
+        let state = PackageUISharedState {
+            list_of_textures_changed: false,
+            first_load_done: false,
+            nb_running_tasks_on_back: 0,
+            import_status: Default::default(),
+        };
         Self {
-            packs,
+            packs: Default::default(),
             tasks: PackTasks::new(),
             reports: Default::default(),
             default_marker_texture: None,
@@ -334,14 +77,130 @@ impl PackageUIManager {
             show_only_active: true,
             currently_used_files: Default::default(), // UI copy to (de-)activate files
             pack_details: None,
+
+            delayed_marker_texture: Default::default(),
+            delayed_trail_texture: Default::default(),
+            channel_sender,
+            channel_receiver,
+            sender_u2u: None,
+            receiver_mumblelink: None,
+            receiver_near_scene: None,
+            state,
         }
     }
 
-    pub fn late_init(&mut self, etx: &egui::Context) {
+    fn handle_message(&mut self, msg: MessageToPackageUI) {
+        match msg {
+            MessageToPackageUI::ActiveElements(active_elements) => {
+                tracing::trace!("Handling of MessageToPackageUI::ActiveElements");
+                self.update_active_categories(&active_elements);
+            }
+            MessageToPackageUI::CurrentlyUsedFiles(currently_used_files) => {
+                tracing::trace!("Handling of MessageToPackageUI::CurrentlyUsedFiles");
+                self.set_currently_used_files(currently_used_files);
+            }
+            MessageToPackageUI::DeletedPacks(to_delete) => {
+                tracing::trace!("Handling of MessageToPackageUI::DeletedPacks");
+                self.delete_packs(to_delete);
+            }
+            MessageToPackageUI::FirstLoadDone => {
+                self.state.first_load_done = true;
+            }
+            MessageToPackageUI::ImportedPack(file_name, pack) => {
+                tracing::trace!("Handling of MessageToPackageUI::ImportedPack");
+                *self.state.import_status.lock().unwrap() =
+                    ImportStatus::PackDone(file_name, pack, false);
+            }
+            MessageToPackageUI::ImportFailure(message) => {
+                tracing::trace!("Handling of MessageToPackageUI::ImportFailure");
+                *self.state.import_status.lock().unwrap() =
+                    ImportStatus::PackError(miette::Report::msg(message));
+            }
+            MessageToPackageUI::LoadedPack(pack_texture, report) => {
+                tracing::trace!("Handling of MessageToPackageUI::LoadedPack");
+                self.save(pack_texture, report);
+                self.state.import_status = Default::default();
+                let _ = self
+                    .channel_sender
+                    .send(MessageToPackageBack::CategoryActivationStatusChanged.into());
+            }
+            MessageToPackageUI::MarkerTexture(
+                pack_uuid,
+                tex_path,
+                marker_uuid,
+                position,
+                common_attributes,
+            ) => {
+                tracing::trace!("Handling of MessageToPackageUI::MarkerTexture");
+                //FIXME: make it a TODO on tick()
+                self.delayed_marker_texture.push((
+                    pack_uuid,
+                    tex_path,
+                    marker_uuid,
+                    position,
+                    common_attributes,
+                ));
+            }
+            MessageToPackageUI::NbTasksRunning(nb_tasks) => {
+                tracing::trace!("Handling of MessageToPackageUI::NbTasksRunning");
+                self.state.nb_running_tasks_on_back = nb_tasks;
+            }
+            MessageToPackageUI::PackageActiveElements(pack_uuid, active_elements) => {
+                tracing::trace!("Handling of MessageToPackageUI::PackageActiveElements");
+                self.update_pack_active_categories(pack_uuid, &active_elements);
+            }
+            MessageToPackageUI::TextureSwapChain => {
+                tracing::debug!("Handling of MessageToPackageUI::TextureSwapChain");
+                self.swap();
+                self.state.list_of_textures_changed = true;
+            }
+            MessageToPackageUI::TrailTexture(
+                pack_uuid,
+                tex_path,
+                trail_uuid,
+                common_attributes,
+            ) => {
+                tracing::trace!("Handling of MessageToPackageUI::TrailTexture");
+                self.delayed_trail_texture.push((
+                    pack_uuid,
+                    tex_path,
+                    trail_uuid,
+                    common_attributes,
+                ));
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                unimplemented!("Handling MessageToPackageUI has not been implemented yet");
+            }
+        }
+    }
+
+    pub fn flush_all_messages(&mut self) -> PackageUISharedState {
+        if let Ok(mut import_status) = self.state.import_status.lock() {
+            if let ImportStatus::LoadingPack(file_path) = &mut *import_status {
+                let _ = self
+                    .channel_sender
+                    .send(MessageToPackageBack::ImportPack(file_path.clone()).into());
+                *import_status = ImportStatus::WaitingLoading(file_path.clone());
+            }
+        }
+        let mut messages = Vec::new();
+        while let Ok(msg) = self.channel_receiver.try_recv() {
+            let msg = bincode::deserialize(&msg).unwrap();
+            messages.push(msg);
+        }
+        for msg in messages {
+            self.handle_message(msg);
+        }
+        self.state.clone()
+    }
+
+    pub fn late_init(&mut self, egui_context: &egui::Context) {
+        //TODO: make it even later, at another place
         if self.default_marker_texture.is_none() {
             let img = image::load_from_memory(include_bytes!("../../images/marker.png")).unwrap();
             let size = [img.width() as _, img.height() as _];
-            self.default_marker_texture = Some(etx.load_texture(
+            self.default_marker_texture = Some(egui_context.load_texture(
                 "default marker",
                 ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
                 egui::TextureOptions {
@@ -355,7 +214,7 @@ impl PackageUIManager {
             let img =
                 image::load_from_memory(include_bytes!("../../images/trail_rainbow.png")).unwrap();
             let size = [img.width() as _, img.height() as _];
-            self.default_trail_texture = Some(etx.load_texture(
+            self.default_trail_texture = Some(egui_context.load_texture(
                 "default trail",
                 ColorImage::from_rgba_unmultiplied(size, img.into_rgba8().as_bytes()),
                 egui::TextureOptions {
@@ -405,8 +264,8 @@ impl PackageUIManager {
 
     pub fn load_marker_texture(
         &mut self,
-        egui_context: &egui::Context,
         pack_uuid: Uuid,
+        egui_context: &egui::Context,
         tex_path: RelativePath,
         marker_uuid: Uuid,
         position: Vec3,
@@ -425,8 +284,8 @@ impl PackageUIManager {
     }
     pub fn load_trail_texture(
         &mut self,
-        egui_context: &egui::Context,
         pack_uuid: Uuid,
+        egui_context: &egui::Context,
         tex_path: RelativePath,
         trail_uuid: Uuid,
         common_attributes: CommonAttributes,
@@ -465,28 +324,27 @@ impl PackageUIManager {
         }
     }
 
-    pub fn tick(
-        &mut self,
-        u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
-        timestamp: f64,
-        link: &MumbleLink,
-        z_near: f32,
-    ) {
+    pub fn _tick(&mut self, timestamp: f64, link: &MumbleLink, z_near: f32) -> Result<()> {
         let tasks = &self.tasks;
+        let sender_u2u = self.sender_u2u.as_ref().unwrap();
         for pack in self.packs.values_mut() {
-            let span_guard = info_span!("Updating package status").entered();
             tasks.save_texture(pack, pack.is_dirty());
-            pack.tick(u2u_sender, timestamp, link, z_near, tasks);
-            std::mem::drop(span_guard);
         }
-        let _ = u2u_sender.send(UIToUIMessage::RenderSwapChain);
-        //u2u_sender.send(UIToUIMessage::Present);
+        if link.changes.contains(MumbleChanges::Position)
+            || link.changes.contains(MumbleChanges::Map)
+        {
+            for pack in self.packs.values_mut() {
+                let span_guard = info_span!("Updating package status").entered();
+                pack.tick(&sender_u2u, timestamp, link, z_near, tasks);
+                std::mem::drop(span_guard);
+            }
+            let _ = sender_u2u.send(UIToUIMessage::RenderSwapChain.into());
+        }
+        Ok(())
     }
 
     pub fn menu_ui(
         &mut self,
-        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        u2u_sender: &std::sync::mpsc::Sender<UIToUIMessage>,
         ui: &mut egui::Ui,
         nb_running_tasks_on_back: i32,
         nb_running_tasks_on_network: i32,
@@ -501,11 +359,15 @@ impl PackageUIManager {
             }
             if ui.button("Activate all elements").clicked() {
                 self.category_set_all(true);
-                let _ = u2b_sender.send(UIToBackMessage::CategorySetAll(true));
+                let _ = self
+                    .channel_sender
+                    .send(MessageToPackageBack::CategorySetAll(true).into());
             }
             if ui.button("Deactivate all elements").clicked() {
                 self.category_set_all(false);
-                let _ = u2b_sender.send(UIToBackMessage::CategorySetAll(false));
+                let _ = self
+                    .channel_sender
+                    .send(MessageToPackageBack::CategorySetAll(false).into());
             }
 
             for (pack, import_quality_report) in
@@ -513,9 +375,10 @@ impl PackageUIManager {
             {
                 //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
                 //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
+                let u2u_sender = self.sender_u2u.as_ref().unwrap();
                 pack.category_sub_menu(
-                    u2b_sender,
-                    u2u_sender,
+                    &self.channel_sender,
+                    &u2u_sender,
                     ui,
                     self.show_only_active,
                     import_quality_report,
@@ -566,12 +429,7 @@ impl PackageUIManager {
         egui::Color32::from_rgb(color_ui, color_back, color_network)
     }
 
-    fn gui_file_manager(
-        &mut self,
-        event_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
-        etx: &egui::Context,
-        open: &mut bool,
-    ) {
+    fn gui_file_manager(&mut self, etx: &egui::Context, open: &mut bool) {
         let mut files_changed = false;
         Window::new("File Manager")
             .open(open)
@@ -660,9 +518,9 @@ impl PackageUIManager {
                 Ok(())
             });
         if files_changed {
-            let _ = event_sender.send(UIToBackMessage::ActiveFiles(
-                self.currently_used_files.clone(),
-            ));
+            let _ = self
+                .channel_sender
+                .send(MessageToPackageBack::ActiveFiles(self.currently_used_files.clone()).into());
         }
     }
 
@@ -724,7 +582,6 @@ impl PackageUIManager {
     }
     fn gui_package_list(
         &mut self,
-        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context,
         import_status: &Arc<Mutex<ImportStatus>>,
         open: &mut bool,
@@ -751,7 +608,7 @@ impl PackageUIManager {
                         ui.end_row();
                     }
                     if !to_delete.is_empty() {
-                        let _ = u2b_sender.send(UIToBackMessage::DeletePacks(to_delete));
+                        let _ = self.channel_sender.send(MessageToPackageBack::DeletePacks(to_delete).into());
                     }
                 });
             });
@@ -782,7 +639,7 @@ impl PackageUIManager {
                                 ui.text_edit_singleline(name);
                             });
                             if ui.button("save").clicked() {
-                                let _ = u2b_sender.send(UIToBackMessage::SavePack(name.clone(), pack.clone()));
+                                let _ = self.channel_sender.send(MessageToPackageBack::SavePack(name.clone(), pack.clone()).into());
                             }
                         }
                     }
@@ -805,21 +662,14 @@ impl PackageUIManager {
     }
     pub fn gui(
         &mut self,
-        u2b_sender: &std::sync::mpsc::Sender<UIToBackMessage>,
         etx: &egui::Context,
         is_marker_open: &mut bool,
         import_status: &Arc<Mutex<ImportStatus>>,
         is_file_open: &mut bool,
         first_load_done: bool,
     ) {
-        self.gui_package_list(
-            u2b_sender,
-            etx,
-            import_status,
-            is_marker_open,
-            first_load_done,
-        );
-        self.gui_file_manager(u2b_sender, etx, is_file_open);
+        self.gui_package_list(etx, import_status, is_marker_open, first_load_done);
+        self.gui_file_manager(etx, is_file_open);
     }
 
     pub fn save(&mut self, mut texture_pack: LoadedPackTexture, report: PackageImportReport) {
@@ -837,5 +687,85 @@ impl PackageUIManager {
         self.tasks.save_texture(&mut texture_pack, true);
         self.packs.insert(texture_pack.uuid, texture_pack);
         self.reports.insert(report.uuid, report);
+    }
+}
+
+//TODO: there is a need for a more complex input according to deps
+impl JokolayUIComponent<PackageUISharedState, ()> for PackageUIManager {
+    fn flush_all_messages(&mut self) -> PackageUISharedState {
+        let mut messages = Vec::new();
+        while let Ok(msg) = self.channel_receiver.try_recv() {
+            let msg = bincode::deserialize(&msg).unwrap();
+            messages.push(msg);
+        }
+        for msg in messages {
+            self.handle_message(msg);
+        }
+        self.state.clone()
+    }
+
+    fn tick(&mut self, timestamp: f64, egui_context: &egui::Context) -> Option<&()> {
+        let raw_link = self
+            .receiver_mumblelink
+            .as_mut()
+            .unwrap()
+            .blocking_recv()
+            .unwrap();
+        let link: &MumbleLink = &bincode::deserialize(&raw_link).unwrap();
+
+        for (pack_uuid, tex_path, marker_uuid, position, common_attributes) in
+            std::mem::take(&mut self.delayed_marker_texture)
+        {
+            self.load_marker_texture(
+                pack_uuid,
+                egui_context,
+                tex_path,
+                marker_uuid,
+                position,
+                common_attributes,
+            );
+        }
+        for (pack_uuid, tex_path, trail_uuid, common_attributes) in
+            std::mem::take(&mut self.delayed_trail_texture)
+        {
+            self.load_trail_texture(
+                pack_uuid,
+                egui_context,
+                tex_path,
+                trail_uuid,
+                common_attributes,
+            );
+        }
+
+        let raw_z_near = self
+            .receiver_near_scene
+            .as_mut()
+            .unwrap()
+            .blocking_recv()
+            .unwrap();
+        let z_near: f32 = bincode::deserialize(&raw_z_near).unwrap();
+        let _ = self._tick(timestamp, link, z_near);
+        None
+    }
+    fn bind(
+        &mut self,
+        mut deps: std::collections::HashMap<
+            u32,
+            tokio::sync::broadcast::Receiver<ComponentDataExchange>,
+        >,
+        mut _bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
+        mut _input_notification: std::collections::HashMap<
+            u32,
+            tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+        >,
+        mut notify: std::collections::HashMap<
+            u32,
+            tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        >, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
+    ) {
+        self.sender_u2u = notify.remove(&0);
+        self.receiver_mumblelink = deps.remove(&0);
+        self.receiver_near_scene = deps.remove(&1);
+        unimplemented!("PackageUIManager component binding is not implemented")
     }
 }

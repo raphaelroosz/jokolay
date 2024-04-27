@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 /*
@@ -11,6 +12,7 @@ each manager must have
 
 */
 
+pub mod serde_glam;
 pub mod task;
 
 /// This newtype is used to represents relative paths in marker packs
@@ -22,6 +24,26 @@ pub mod task;
 /// 6. It doesn't mean that the path is valid. It may contain many of the utf-8 characters which are not valid path names on linux/windows
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RelativePath(SmolStr);
+
+impl Serialize for RelativePath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.0.as_str())
+    }
+}
+impl<'de> Deserialize<'de> for RelativePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let r = s.parse().unwrap();
+        Ok(r)
+    }
+}
+
 #[allow(unused)]
 impl RelativePath {
     pub fn normalize(path: &str) -> String {
