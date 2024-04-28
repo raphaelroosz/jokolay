@@ -786,6 +786,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 
 [[package]]
+name = "downcast-rs"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
 name = "ecolor"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1460,8 +1466,10 @@ name = "joko_component_models"
 version = "0.2.1"
 dependencies = [
  "bincode",
+ "downcast-rs",
  "egui",
  "scopeguard",
+ "serde",
  "smol_str",
  "tokio",
 ]
@@ -1472,6 +1480,7 @@ version = "0.2.1"
 dependencies = [
  "bytemuck",
  "glam",
+ "mutually_exclusive_features",
  "scopeguard",
  "serde",
  "smol_str",
@@ -1512,10 +1521,13 @@ name = "joko_link_models"
 version = "0.2.1"
 dependencies = [
  "arcdps",
+ "bincode",
  "enumflags2",
  "glam",
+ "joko_component_models",
  "joko_core",
  "miette",
+ "mutually_exclusive_features",
  "notify",
  "num-derive",
  "num-traits",
@@ -1555,6 +1567,7 @@ dependencies = [
  "joko_render_models",
  "jokoapi",
  "miette",
+ "mutually_exclusive_features",
  "once",
  "ordered_hash_map",
  "paste",
@@ -1582,6 +1595,7 @@ version = "0.2.1"
 dependencies = [
  "base64",
  "bimap",
+ "bincode",
  "bytemuck",
  "cxx-build",
  "data-encoding",
@@ -1589,9 +1603,11 @@ dependencies = [
  "glam",
  "indexmap",
  "itertools",
+ "joko_component_models",
  "joko_core",
  "jokoapi",
  "miette",
+ "mutually_exclusive_features",
  "ordered_hash_map",
  "paste",
  "phf",
@@ -1642,6 +1658,7 @@ dependencies = [
  "glam",
  "joko_component_models",
  "joko_core",
+ "mutually_exclusive_features",
  "serde",
 ]
 
@@ -1677,6 +1694,7 @@ dependencies = [
  "joko_plugin_manager",
  "joko_render_manager",
  "miette",
+ "mutually_exclusive_features",
  "rayon",
  "rfd",
  "ringbuffer",
@@ -1897,6 +1915,12 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "mutually_exclusive_features"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e94e1e6445d314f972ff7395df2de295fe51b71821694f0b0e1e79c4f12c8577"
 
 [[package]]
 name = "next-gen"

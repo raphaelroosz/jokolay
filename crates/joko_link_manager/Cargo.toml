@@ -5,7 +5,12 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "lib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [features]
+default = ["messages_any"]
+messages_any = []
+messages_downcast = []
+messages_bincode = []
 
 
 [dependencies]

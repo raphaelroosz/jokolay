@@ -1,4 +1,4 @@
-use joko_component_models::ComponentDataExchange;
+use joko_component_models::{to_data, ComponentDataExchange};
 use joko_package_models::{
     attributes::CommonAttributes,
     category::Category,
@@ -220,24 +220,23 @@ impl CategorySelection {
         if ui.button("Activate branch").clicked() {
             cs.is_selected = true;
             CategorySelection::recursive_set_all(&mut cs.children, true);
-            let _ = u2b_sender.blocking_send(
-                MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, true).into(),
-            );
+            let _ = u2b_sender.blocking_send(to_data(
+                MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, true),
+            ));
             ui.close_menu();
         }
         if ui.button("Deactivate branch").clicked() {
             CategorySelection::recursive_set_all(&mut cs.children, false);
             cs.is_selected = false;
-            let _ = u2b_sender.blocking_send(
-                MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, false).into(),
-            );
+            let _ = u2b_sender.blocking_send(to_data(
+                MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, false),
+            ));
             ui.close_menu();
         }
     }
 
     pub fn recursive_selection_ui(
-        u2b_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
-        _u2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
         selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         is_dirty: &mut bool,
@@ -258,13 +257,12 @@ impl CategorySelection {
                     } else {
                         let cb = ui.checkbox(&mut cat.is_selected, "");
                         if cb.changed() {
-                            let _ = u2b_sender.blocking_send(
+                            let _ = back_end_notifier.blocking_send(to_data(
                                 MessageToPackageBack::CategoryActivationElementStatusChange(
                                     cat.uuid,
                                     cat.is_selected,
-                                )
-                                .into(),
-                            );
+                                ),
+                            ));
                             *is_dirty = true;
                         }
                     }
@@ -282,8 +280,7 @@ impl CategorySelection {
                     } else {
                         ui.menu_button(label, |ui: &mut egui::Ui| {
                             Self::recursive_selection_ui(
-                                u2b_sender,
-                                _u2u_sender,
+                                back_end_notifier,
                                 &mut cat.children,
                                 ui,
                                 is_dirty,
@@ -292,7 +289,7 @@ impl CategorySelection {
                             );
                         })
                         .response
-                        .context_menu(|ui| Self::context_menu(u2b_sender, cat, ui));
+                        .context_menu(|ui| Self::context_menu(back_end_notifier, cat, ui));
                     }
                 });
             }

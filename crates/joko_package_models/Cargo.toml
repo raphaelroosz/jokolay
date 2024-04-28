@@ -3,10 +3,19 @@ name = "joko_package_models"
 version = "0.2.1"
 edition = "2021"
 
+
+[features]
+default = ["messages_any"]
+messages_any = []
+messages_downcast = []
+messages_bincode = []
+
+
 [dependencies]
 # jmf deps
 # for marker packs 
 base64 = "0.21.2"
+bincode = { workspace = true }
 bimap = { version = "0.6.3", features = ["serde"] }
 bytemuck = { workspace = true }
 data-encoding = "2.4.0"
@@ -15,6 +24,7 @@ glam = { workspace = true }
 indexmap = { workspace = true, features = ["serde"]} # to keep the order of files inside zip. markers packs rely on some files like aaa.xml being read first for marker category order# for representing the paths of files inside xml pack zip
 itertools = { workspace = true }
 joko_core = { path = "../joko_core" }
+joko_component_models = { path = "../joko_component_models" }
 jokoapi = { path = "../jokoapi" }
 miette = { workspace = true }
 ordered_hash_map = { workspace = true }
@@ -27,7 +37,7 @@ tracing = { workspace = true }
 url = { workspace = true }
 uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 xot = { version = "0.16.0" }
-
+mutually_exclusive_features = { workspace = true }
 
 
 [dev-dependencies]

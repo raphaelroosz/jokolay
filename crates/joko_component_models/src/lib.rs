@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
-//could become a "dyn Message".
-//std::any::Any is a trait
-//TODO: It would have a wrap and unwrap ?
-pub type ComponentDataExchange = Vec<u8>;
-//pub type ComponentDataExchange = Box<[u8]>;
-//pub type ComponentDataExchange = [u8; 1024];
+#[cfg(feature = "messages_any")]
+mod messages_any;
+#[cfg(feature = "messages_any")]
+pub use messages_any::*;
+
+#[cfg(feature = "messages_bincode")]
+mod messages_bincode;
+#[cfg(feature = "messages_bincode")]
+pub use messages_bincode::*;
+
 pub type PeerComponentChannel = (
     tokio::sync::mpsc::Receiver<ComponentDataExchange>,
     tokio::sync::mpsc::Sender<ComponentDataExchange>,
@@ -32,75 +36,44 @@ pub trait JokolayComponentDeps {
     }
 }
 
-pub trait JokolayComponent<SharedStatus, ComponentResult>
-where
-    SharedStatus: Clone,
-{
-    fn flush_all_messages(&mut self) -> SharedStatus;
-    fn tick(&mut self, latest_time: f64) -> Option<&ComponentResult>;
+pub trait JokolayComponent {
+    /*
+    This make sense only when components are very similar. It make no sense to ask for a uniform way to build components.
+    type T;
+    type E;
+    fn new(
+        root_path: &std::path::Path,
+    ) -> Result<Self::T, Self::E>;*/
+
+    fn flush_all_messages(&mut self);
+    fn tick(&mut self, latest_time: f64) -> ComponentDataExchange;
     fn bind(
         &mut self,
         deps: HashMap<u32, tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
-        bound: HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
+        bound: HashMap<u32, PeerComponentChannel>, // Private channel only two bounded modules can use between each others.
         input_notification: HashMap<u32, tokio::sync::mpsc::Receiver<ComponentDataExchange>>,
         notify: HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
     ); //By default, there is no third party component, thus we can implement it as a noop
-
-    /*
-
-    pub fn new(
-        root_dir: Arc<Dir>,
-        root_path: &std::path::Path,
-    ) -> Result<Self>;
-    */
+       /*
+           TODO: there could be an optional trait: Chain.
+           If there is a strong connection between two elements, passing values by channels and copy could be inefficient, calling a function with arguments could be better =>
+               it's almost a macro with an unset number of arguments and unknown types.
+               It could be possible on plugins, not other kind of components
+       */
 }
 
-pub trait JokolayUIComponent<SharedStatus, ComponentResult>
+pub trait JokolayUIComponent<ComponentResult>
 where
-    SharedStatus: Clone,
+    ComponentResult: Clone,
 {
-    fn flush_all_messages(&mut self) -> SharedStatus;
-    fn tick(&mut self, latest_time: f64, egui_context: &egui::Context) -> Option<&ComponentResult>;
+    fn flush_all_messages(&mut self);
+    //the only reason there is another Component trait is because of the egui_context
+    fn tick(&mut self, latest_time: f64, egui_context: &egui::Context) -> ComponentResult;
     fn bind(
         &mut self,
         deps: HashMap<u32, tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
-        bound: HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
+        bound: HashMap<u32, PeerComponentChannel>, // Private channel only two bounded modules can use between each others.
         input_notification: HashMap<u32, tokio::sync::mpsc::Receiver<ComponentDataExchange>>,
         notify: HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
     ); //By default, there is no third party component, thus we can implement it as a noop
-
-    /*
-
-    // any extra information should come from configuration, which can be loaded from those two arguments.
-    Those roots are specific to the component, it cannot shared it with another component
-    pub fn new(
-        root_dir: Arc<Dir>,
-        root_path: &std::path::Path,
-    ) -> Result<Self>;
-
-    fn bind(
-        &mut self,
-        deps: HashMap<u32, tokio::sync::broadcast::receiver>,
-        bound: HashMap<u32, tokio::sync::scsc::receiver +  sender>,// ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-        input_notification: HashMap<u32, ???::receiver>
-        notify: HashMap<u32, ???::sender>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-    )
-    https://docs.rs/dep-graph/latest/dep_graph/
-    https://lib.rs/crates/petgraph
-    https://docs.rs/solvent/latest/solvent/
-    https://lib.rs/crates/cargo-depgraph
-        => check "peer" is always mutual
-        => graph with the "peer" elements replaced by some merged id
-        => check there is no loop (there could be surprises)
-        => if there is no problem, then:
-            - build again the graph with UI plugins only and save one traversal (memory + file)
-            - build again the graph with back plugins only and save one traversal (memory + file)
-        => if there is a problem, do not save anything
-
-
-
-    fn tick(
-        &mut self,
-    ) -> Option<&PluginResult>; where u32 is the position in bind() + requires()
-    */
 }

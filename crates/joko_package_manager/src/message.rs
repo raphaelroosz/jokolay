@@ -1,3 +1,5 @@
+mutually_exclusive_features::exactly_one_of!("messages_any", "messages_bincode");
+
 use std::collections::{BTreeMap, HashSet};
 
 use joko_component_models::ComponentDataExchange;
@@ -12,7 +14,7 @@ use joko_core::{serde_glam::Vec3, RelativePath};
 
 use crate::LoadedPackTexture;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum MessageToPackageUI {
     ActiveElements(HashSet<Uuid>), //list of all elements that are loaded for current map
     CurrentlyUsedFiles(BTreeMap<Uuid, bool>), //when there is a change in map or anything else, the list of files is sent to ui for display
@@ -27,7 +29,7 @@ pub enum MessageToPackageUI {
     TextureSwapChain, // The list of texture to load was changed, will be soon followed by a RenderSwapChain
     TrailTexture(Uuid, RelativePath, Uuid, CommonAttributes),
 }
-
+/*
 impl From<MessageToPackageUI> for ComponentDataExchange {
     fn from(src: MessageToPackageUI) -> ComponentDataExchange {
         bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
@@ -39,9 +41,9 @@ impl Into<MessageToPackageUI> for ComponentDataExchange {
     fn into(self) -> MessageToPackageUI {
         bincode::deserialize(&self).unwrap()
     }
-}
+}*/
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum MessageToPackageBack {
     ActiveFiles(BTreeMap<Uuid, bool>), //when there is a change of files activated, send whole list to data for save.
     CategoryActivationElementStatusChange(Uuid, bool), //sent each time there is a category whose activation status has been changed. With uuid being the reference of the category and bool the status.
@@ -53,9 +55,17 @@ pub enum MessageToPackageBack {
     ReloadPack,
     SavePack(String, PackCore),
 }
-
+/*
 impl From<MessageToPackageBack> for ComponentDataExchange {
     fn from(src: MessageToPackageBack) -> ComponentDataExchange {
         bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
     }
 }
+
+#[allow(clippy::from_over_into)]
+impl Into<MessageToPackageBack> for ComponentDataExchange {
+    fn into(self) -> MessageToPackageBack {
+        bincode::deserialize(&self).unwrap()
+    }
+}
+*/

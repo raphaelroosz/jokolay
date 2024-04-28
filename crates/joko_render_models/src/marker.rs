@@ -12,7 +12,7 @@ pub struct MarkerVertex {
     pub color: [u8; 4],
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MarkerObject {
     /// The six vertices that make up the marker quad
     pub vertices: [MarkerVertex; 6],

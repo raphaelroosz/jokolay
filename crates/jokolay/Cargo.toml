@@ -8,9 +8,15 @@ default-run = "jokolay"
 name = "jokolay"
 path = "src/main.rs"
 
+
 [features]
+default = ["messages_any"]
 # will not work because wayland won't allow us to get global cursor position
 wayland = ["egui_window_glfw_passthrough/wayland"]
+messages_any = []
+messages_downcast = []
+messages_bincode = []
+
 
 [dependencies]
 enumflags2 = { workspace = true }
@@ -34,6 +40,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 indexmap = { workspace = true }
 ringbuffer = { workspace = true }
+mutually_exclusive_features = { workspace = true }
 
 
 rayon = { workspace = true }

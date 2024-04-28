@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     io::Write,
     ops::DerefMut,
     sync::{Arc, Mutex},
@@ -17,11 +16,13 @@ use crate::app::mumble::mumble_gui;
 use crate::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
 use init::{get_jokolay_dir, get_jokolay_path};
 use joko_component_manager::ComponentManager;
-use joko_component_models::{ComponentDataExchange, JokolayComponent, JokolayUIComponent};
+use joko_component_models::{from_data, JokolayComponent, JokolayUIComponent};
 use joko_package_manager::{PackageDataManager, PackageUIManager};
 
 use joko_link_manager::MumbleManager;
-use joko_link_models::{MessageToMumbleLinkBack, MumbleChanges, MumbleLink, UISize};
+use joko_link_models::{
+    MessageToMumbleLinkBack, MumbleChanges, MumbleLink, MumbleLinkResult, UISize,
+};
 use joko_package_manager::jokolay_to_editable_path;
 use joko_package_manager::ImportStatus;
 use joko_render_manager::renderer::JokoRenderer;
@@ -86,14 +87,14 @@ impl Jokolay {
 
         let dummy_plugin = Box::new(JokolayPlugin {});
         component_manager.register(
-            "mumble_link_back",
+            "ui:mumble_link",
             Box::new(
                 MumbleManager::new("MumbleLink", true)
                     .wrap_err("failed to create mumble manager")?,
             ),
         );
         component_manager.register(
-            "mumble_link_back",
+            "back:mumble_link",
             Box::new(
                 MumbleManager::new("MumbleLink", false)
                     .wrap_err("failed to create mumble manager")?,
@@ -101,15 +102,6 @@ impl Jokolay {
         );
         component_manager.register("dummy_plugin", dummy_plugin);
 
-        match component_manager.build_routes() {
-            Ok(_) => {}
-            Err(e) => {
-                error!(?e, "Could not build component routes");
-            }
-        }
-
-        let (b2u_sender, b2u_receiver) = tokio::sync::mpsc::channel(10);
-        let (u2b_sender, u2b_receiver) = tokio::sync::mpsc::channel(10);
         /*
         components can be migrated to plugins
         root_path/
@@ -129,11 +121,17 @@ impl Jokolay {
                     ...
         */
 
+        component_manager.register(
+            "back:jokolay_package_manager",
+            Box::new(PackageDataManager::new(
+                Arc::clone(&root_dir), //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
+                &root_path, //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
+            )?),
+        );
+
         let package_data_manager = PackageDataManager::new(
             Arc::clone(&root_dir), //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
             &root_path, //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
-            u2b_receiver, // to be removed since dynamically inserted on tick (once Plugin is implemented)
-            b2u_sender,   //TODO: list of bounded & notify
         )?;
         let mut theme_manager =
             ThemeManager::new(Arc::clone(&root_dir)).wrap_err("failed to create theme manager")?;
@@ -168,11 +166,21 @@ impl Jokolay {
         });
         let maximal_window_width = video_mode.unwrap().width;
         let maximal_window_height = video_mode.unwrap().height;
-        let mut package_ui_manager = PackageUIManager::new(b2u_receiver, u2b_sender);
+
+        component_manager.register(
+            "ui:jokolay_package_manager",
+            Box::new(PackageUIManager::new()),
+        );
+        let mut package_ui_manager = PackageUIManager::new();
 
         glfw_backend.window.set_floating(true);
         glfw_backend.window.set_decorated(false);
-        let joko_renderer = JokoRenderer::new(&mut glfw_backend, Default::default());
+
+        component_manager.register(
+            "ui:jokolay_renderer",
+            Box::new(JokoRenderer::new(&mut glfw_backend)),
+        );
+        let joko_renderer = JokoRenderer::new(&mut glfw_backend);
 
         let editable_path = jokolay_to_editable_path(&root_path)
             .to_str()
@@ -182,6 +190,13 @@ impl Jokolay {
             glfw_backend.glfw.get_time() as _,
             editable_path.clone(),
         );
+
+        match component_manager.build_routes() {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("Could not build component routes. {}", e);
+            }
+        }
 
         let menu_panel = MenuPanel::default();
 
@@ -294,11 +309,12 @@ impl Jokolay {
                 Self::handle_app_message(Arc::clone(&package_manager.state.root_dir), msg);
             }
 
-            let ms = mumble_manager.flush_all_messages();
+            mumble_manager.flush_all_messages();
 
-            let link = mumble_manager.tick(start.elapsed().into_diagnostic()?.as_secs_f64());
+            let latest_time = start.elapsed().into_diagnostic()?.as_secs_f64();
+            let mumble_link_result = mumble_manager.tick(latest_time); //TODO: in Component manager, make use of this value
             package_manager.flush_all_messages();
-            package_manager.tick(loop_index, &ms, link);
+            package_manager.tick(latest_time);
 
             thread::sleep(std::time::Duration::from_millis(10));
             loop_index += 1;
@@ -332,7 +348,6 @@ impl Jokolay {
 
         let (u2gb_sender, u2gb_receiver) = std::sync::mpsc::channel();
         let (u2mb_sender, u2mb_receiver) = tokio::sync::mpsc::channel(1); //FIXME: route the data to the consumers.
-        let (u2u_sender, u2u_receiver) = tokio::sync::mpsc::channel(1);
 
         Self::start_background_loop(Arc::clone(&self.app), u2gb_receiver);
 
@@ -341,28 +356,6 @@ impl Jokolay {
         let mut gui = *self.gui;
         let mut local_state = self.state_ui;
 
-        //TODO: in "deps", broadcast link and z_near at each loop: link, JokoRenderer::get_z_near()
-        let mut input_notification: HashMap<
-            u32,
-            tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-        > = Default::default(); //for renderer
-        input_notification.insert(0, u2u_receiver);
-        gui.joko_renderer.bind(
-            Default::default(),
-            Default::default(),
-            input_notification,
-            Default::default(),
-        );
-
-        let mut notifier: HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>> =
-            Default::default(); //for package manager
-        notifier.insert(0, u2u_sender);
-        gui.package_manager.bind(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            notifier,
-        );
         loop {
             //TODO: one could wrap the egui_context into a plugin result so that it can be used from other plugins
             //TODO: same for the UI as a notified element.
@@ -445,7 +438,8 @@ impl Jokolay {
                 let _ = u2mb_sender.send(MessageToMumbleLinkBack::Value(local_state.link.clone()));
             } else {
                 let is_mumble_alive = mumble_manager.is_alive();
-                match mumble_manager.tick(latest_time) {
+                let res: MumbleLinkResult = from_data(mumble_manager.tick(latest_time));
+                match &res.link {
                     Some(link) => {
                         if link.changes.contains(MumbleChanges::WindowPosition)
                             || link.changes.contains(MumbleChanges::WindowSize)

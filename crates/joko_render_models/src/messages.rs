@@ -1,10 +1,16 @@
+mutually_exclusive_features::exactly_one_of!(
+    "messages_any",
+    "messages_bincode",
+    "messages_downcast"
+);
+
 use joko_component_models::ComponentDataExchange;
 use serde::{Deserialize, Serialize};
 
 use crate::{marker::MarkerObject, trail::TrailObject};
 
-#[derive(Serialize, Deserialize)]
-pub enum UIToUIMessage {
+#[derive(Clone, Serialize, Deserialize)]
+pub enum MessageToRenderer {
     BulkMarkerObject(Vec<MarkerObject>),
     BulkTrailObject(Vec<TrailObject>),
     //Present,// a render loop is finished and we can present it
@@ -13,15 +19,17 @@ pub enum UIToUIMessage {
     TrailObject(Box<TrailObject>),
 }
 
-impl From<UIToUIMessage> for ComponentDataExchange {
-    fn from(src: UIToUIMessage) -> ComponentDataExchange {
+/*
+impl From<MessageToRenderer> for ComponentDataExchange {
+    fn from(src: MessageToRenderer) -> ComponentDataExchange {
         bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
     }
 }
 
 #[allow(clippy::from_over_into)]
-impl Into<UIToUIMessage> for ComponentDataExchange {
-    fn into(self) -> UIToUIMessage {
+impl Into<MessageToRenderer> for ComponentDataExchange {
+    fn into(self) -> MessageToRenderer {
         bincode::deserialize(&self).unwrap()
     }
 }
+*/

@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use joko_component_models::ComponentDataExchange;
+use joko_component_models::{to_data, ComponentDataExchange};
 use joko_package_models::{
     attributes::{Behavior, CommonAttributes},
     category::Category,
@@ -36,7 +36,7 @@ use joko_core::{
     RelativePath,
 };
 use joko_link_models::MumbleLink;
-use joko_render_models::{messages::UIToUIMessage, trail::TrailObject};
+use joko_render_models::{messages::MessageToRenderer, trail::TrailObject};
 use miette::{Context, IntoDiagnostic, Result};
 
 use super::activation::{ActivationData, ActivationType};
@@ -394,7 +394,6 @@ impl LoadedPackData {
     pub(crate) fn tick(
         &mut self,
         b2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
-        _loop_index: u128,
         link: &MumbleLink,
         currently_used_files: &BTreeMap<Uuid, bool>,
         list_of_active_or_selected_elements_changed: bool,
@@ -407,10 +406,10 @@ impl LoadedPackData {
             //tasks.change_map(self, b2u_sender, link, currently_used_files);
             let mut active_elements: HashSet<Uuid> = Default::default();
             self.on_map_changed(b2u_sender, link, currently_used_files, &mut active_elements);
-            let _ = b2u_sender.blocking_send(
-                MessageToPackageUI::PackageActiveElements(self.uuid, active_elements.clone())
-                    .into(),
-            );
+            let _ = b2u_sender.blocking_send(to_data(MessageToPackageUI::PackageActiveElements(
+                self.uuid,
+                active_elements.clone(),
+            )));
             self.active_elements = active_elements.clone();
             next_loaded.extend(active_elements);
         }
@@ -510,16 +509,14 @@ impl LoadedPackData {
                         }
                     }
                     if let Some(tex_path) = common_attributes.get_icon_file() {
-                        let _ = b2u_sender.blocking_send(
-                            MessageToPackageUI::MarkerTexture(
+                        let _ =
+                            b2u_sender.blocking_send(to_data(MessageToPackageUI::MarkerTexture(
                                 self.uuid,
                                 tex_path.clone(),
                                 marker.guid,
                                 marker.position,
                                 common_attributes,
-                            )
-                            .into(),
-                        );
+                            )));
                     } else {
                         debug!("no texture attribute on this marker");
                     }
@@ -553,15 +550,13 @@ impl LoadedPackData {
                     let mut common_attributes = trail.props.clone();
                     common_attributes.inherit_if_attr_none(category_attributes);
                     if let Some(tex_path) = common_attributes.get_texture() {
-                        let _ = b2u_sender.blocking_send(
-                            MessageToPackageUI::TrailTexture(
+                        let _ =
+                            b2u_sender.blocking_send(to_data(MessageToPackageUI::TrailTexture(
                                 self.uuid,
                                 tex_path.clone(),
                                 trail.guid,
                                 common_attributes,
-                            )
-                            .into(),
-                        );
+                            )));
                     } else {
                         debug!("no texture attribute on this trail");
                     }
@@ -606,8 +601,7 @@ impl LoadedPackTexture {
     }
     pub fn category_sub_menu(
         &mut self,
-        u2b_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
-        u2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
         ui: &mut egui::Ui,
         show_only_active: bool,
         import_quality_report: &PackageImportReport,
@@ -615,8 +609,7 @@ impl LoadedPackTexture {
         //it is important to generate a new id each time to avoid collision
         ui.push_id(ui.next_auto_id(), |ui| {
             CategorySelection::recursive_selection_ui(
-                u2b_sender,
-                u2u_sender,
+                back_end_notifier,
                 &mut self.selectable_categories,
                 ui,
                 &mut self._is_dirty,
@@ -625,8 +618,9 @@ impl LoadedPackTexture {
             );
         });
         if self._is_dirty {
-            let _ = u2b_sender
-                .blocking_send(MessageToPackageBack::CategoryActivationStatusChanged.into());
+            let _ = back_end_notifier.blocking_send(to_data(
+                MessageToPackageBack::CategoryActivationStatusChanged,
+            ));
         }
     }
 
@@ -635,7 +629,7 @@ impl LoadedPackTexture {
     }
     pub(crate) fn tick(
         &mut self,
-        u2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        renderer_notifier: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
         _timestamp: f64,
         link: &MumbleLink,
         //next_on_screen: &mut HashSet<Uuid>,
@@ -661,7 +655,8 @@ impl LoadedPackTexture {
             self.name,
             marker_objects.len()
         );
-        let _ = u2u_sender.blocking_send(UIToUIMessage::BulkMarkerObject(marker_objects).into());
+        let _ = renderer_notifier
+            .blocking_send(to_data(MessageToRenderer::BulkMarkerObject(marker_objects)));
         let mut trail_objects = Vec::new();
         for trail in self.current_map_data.active_trails.values() {
             trail_objects.push(TrailObject {
@@ -675,7 +670,8 @@ impl LoadedPackTexture {
             self.name,
             trail_objects.len()
         );
-        let _ = u2u_sender.blocking_send(UIToUIMessage::BulkTrailObject(trail_objects).into());
+        let _ = renderer_notifier
+            .blocking_send(to_data(MessageToRenderer::BulkTrailObject(trail_objects)));
         Ok(())
     }
 

@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
-use joko_component_models::JokolayComponentDeps;
+use joko_component_models::{ComponentDataExchange, JokolayComponent, JokolayComponentDeps};
 use petgraph::{
     csr::IndexType, graph::NodeIndex, stable_graph::StableDiGraph, visit::IntoNodeIdentifiers,
     Direction,
@@ -8,7 +11,15 @@ use petgraph::{
 use tracing::trace;
 
 pub struct ComponentManager {
+    //TODO: make it a component too ?
     data: HashMap<String, Box<dyn JokolayComponentDeps>>,
+}
+
+struct ComponentHandle {
+    component: Box<dyn JokolayComponent>,
+}
+pub struct ComponentExecutor {
+    components: Vec<ComponentHandle>, //FIXME: how to type erase result ?
 }
 
 fn get_invocation_order<N, E, Ix>(my_graph: &mut StableDiGraph<N, E, Ix>) -> Vec<N>
@@ -35,8 +46,17 @@ where
     invocation_order
 }
 
+fn has_unique_elements<T>(iter: T) -> bool
+where
+    T: IntoIterator,
+    T::Item: Eq + Hash,
+{
+    let mut uniq = HashSet::new();
+    iter.into_iter().all(move |x| uniq.insert(x))
+}
 impl ComponentManager {
     pub fn new() -> Self {
+        //clone itself on a world basis ? which would follow a component thread
         Self {
             data: Default::default(),
         }
@@ -46,16 +66,21 @@ impl ComponentManager {
         self.data.insert(service_name.to_owned(), co);
     }
 
+    pub fn executor(&self, world: &str) -> ComponentExecutor {
+        /*
+        TODO:
+            extract the list of components of this world
+            bind them
+            insert them into the executor
+        */
+        ComponentExecutor {
+            components: Default::default(),
+        }
+    }
     pub fn build_routes(&mut self) -> Result<(), String> {
         /*
+        TODO: split in worlds
 
-        fn bind(
-            &mut self,
-            deps: HashMap<u32, tokio::sync::broadcast::receiver>,
-            bound: HashMap<u32, tokio::sync::scsc::receiver +  sender>,// ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-            input_notification: HashMap<u32, ???::receiver>
-            notify: HashMap<u32, ???::sender>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-        )
         https://docs.rs/dep-graph/latest/dep_graph/
         https://lib.rs/crates/petgraph
         https://docs.rs/solvent/latest/solvent/
@@ -74,15 +99,28 @@ impl ComponentManager {
 
         type G = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
 
+        let mut hosted_services: HashMap<String, NodeIndex<u16>> = Default::default();
         let mut known_services: HashMap<String, NodeIndex<u16>> = Default::default();
         let mut depgraph: G = G::default();
         let mut translation: HashMap<NodeIndex<u16>, NodeIndex<u16>> = Default::default();
         let mut service_id = 0;
         for (service_name, co) in self.data.iter() {
+            if !has_unique_elements(
+                co.peer()
+                    .iter()
+                    .chain(co.notify().iter())
+                    .chain(co.requires().iter()),
+            ) {
+                return Err(format!(
+                    "Service {} has duplicate elements. Each name can only appear at one place",
+                    service_name
+                ));
+            }
             let service_name = service_name.clone();
-            if !known_services.contains_key(&service_name) {
+            if !hosted_services.contains_key(&service_name) {
                 let node_id = depgraph.add_node(service_id);
                 service_id += 1;
+                hosted_services.insert(service_name.clone(), node_id);
                 known_services.insert(service_name.clone(), node_id);
             }
             trace!("node: {}, peers: {:?}", service_name, co.peer());
@@ -107,6 +145,22 @@ impl ComponentManager {
                     translation.insert(peer_id, merged_id);
                 }
             }
+            for required_service_name in co.requires() {
+                let required_service_name = required_service_name.to_string();
+                if !known_services.contains_key(&required_service_name) {
+                    let node_id = depgraph.add_node(service_id);
+                    service_id += 1;
+                    known_services.insert(required_service_name.clone(), node_id);
+                }
+            }
+            for notified_service_name in co.notify() {
+                let notified_service_name = notified_service_name.to_string();
+                if !known_services.contains_key(&notified_service_name) {
+                    let node_id = depgraph.add_node(service_id);
+                    service_id += 1;
+                    known_services.insert(notified_service_name.clone(), node_id);
+                }
+            }
         }
         //If we reached here, it means all peers agree
 
@@ -115,18 +169,17 @@ impl ComponentManager {
 
         for (service_name, co) in self.data.iter() {
             let node_id = *known_services.get(service_name).unwrap();
-            let service_id = *translation.get(&node_id).or(Some(&node_id)).unwrap();
+            let node_id = *translation.get(&node_id).unwrap_or(&node_id);
             trace!("node: {}, requires: {:?}", service_name, co.requires());
             for required_service_name in co.requires() {
                 let required_service_id = *known_services.get(required_service_name).unwrap();
                 let required_service_id = *translation
                     .get(&required_service_id)
-                    .or(Some(&required_service_id))
-                    .unwrap();
-                if service_id != required_service_id {
-                    depgraph.add_edge(service_id, required_service_id, 1);
+                    .unwrap_or(&required_service_id);
+                if node_id != required_service_id {
+                    depgraph.add_edge(node_id, required_service_id, 1);
                     //The ids are improper since coming from the other graph. But both graphs are clones so it should be fine.
-                    requirements_graph.add_edge(service_id, required_service_id, 1);
+                    requirements_graph.add_edge(node_id, required_service_id, 1);
                 }
             }
             trace!("node: {}, notify: {:?}", service_name, co.notify());
@@ -134,14 +187,25 @@ impl ComponentManager {
                 let notified_service_id = *known_services.get(notified_service_name).unwrap();
                 let notified_service_id = *translation
                     .get(&notified_service_id)
-                    .or(Some(&notified_service_id))
-                    .unwrap();
-                if service_id != notified_service_id {
-                    depgraph.add_edge(notified_service_id, service_id, 1);
+                    .unwrap_or(&notified_service_id);
+                if node_id != notified_service_id {
+                    //there is no dep on the graph, the only worth of the notified service is it needs to exist
                     //The ids are improper since coming from the other graph. But both graphs are clones so it should be fine.
-                    notification_graph.add_edge(notified_service_id, service_id, 1);
+                    notification_graph.add_edge(notified_service_id, node_id, 1);
                 }
             }
+        }
+        // Before anything find diff between keys of known_services vs hosted_services
+        let hosted_keys: HashSet<String> = hosted_services.keys().cloned().collect();
+        let known_keys: HashSet<String> = known_services.keys().cloned().collect();
+        trace!("hosted_keys: {:?}", hosted_keys);
+        trace!("known_keys: {:?}", known_keys);
+        if known_keys.difference(&hosted_keys).count() > 0 {
+            //TODO: have error!() with details of which component asked for it
+            return Err(format!(
+                "Some relationship could not be satisfied. Missing: {:?}",
+                known_keys.difference(&hosted_keys)
+            ));
         }
 
         let invocation_order = get_invocation_order(&mut depgraph);
@@ -155,7 +219,8 @@ impl ComponentManager {
         trace!("invocation_order: {:?}", invocation_order);
         /*
         TODO: make use of:
-            requirements graph
+            requirements graph => components subscribe to it. There should be at most one element in it, eaten at each step of the loop.
+                => how to make sure ui does subscribe to ui only and back to back ? => introduce "worlds" "myworld:component"
             notification graph
             invocation order
         */
@@ -169,6 +234,22 @@ impl ComponentManager {
 impl Default for ComponentManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ComponentHandle {
+    fn broadcast(&mut self, data: ComponentDataExchange) {
+        println!("{:?}", data);
+        unimplemented!("The broadcast of data is not done");
+    }
+}
+
+impl ComponentExecutor {
+    fn tick(&mut self, latest_time: f64) -> () {
+        for handle in self.components.iter_mut() {
+            let res = handle.component.tick(latest_time);
+            handle.broadcast(res);
+        }
     }
 }
 

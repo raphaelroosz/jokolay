@@ -7,13 +7,16 @@ use egui::{CollapsingHeader, ColorImage, TextureHandle, Ui, Window};
 use image::EncodableLayout;
 use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 
-use joko_render_models::messages::UIToUIMessage;
+use joko_render_models::messages::MessageToRenderer;
 use tracing::{info_span, trace};
 
 use crate::message::MessageToPackageBack;
-use joko_component_models::{ComponentDataExchange, JokolayUIComponent, PeerComponentChannel};
+use joko_component_models::{
+    from_data, to_data, ComponentDataExchange, JokolayComponentDeps, JokolayUIComponent,
+    PeerComponentChannel,
+};
 use joko_core::{serde_glam::Vec3, RelativePath};
-use joko_link_models::{MumbleChanges, MumbleLink};
+use joko_link_models::{MumbleChanges, MumbleLink, MumbleLinkResult};
 use miette::Result;
 use uuid::Uuid;
 
@@ -28,6 +31,16 @@ pub struct PackageUISharedState {
     first_load_done: bool,
     nb_running_tasks_on_back: i32, // store the number of running tasks in background thread
     import_status: Arc<Mutex<ImportStatus>>,
+}
+
+struct PackageUIChannels {
+    subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
+    subscription_near_scene: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
+
+    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+
+    back_end_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
+    renderer_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
 }
 
 #[must_use]
@@ -46,20 +59,12 @@ pub struct PackageUIManager {
     delayed_marker_texture: Vec<(Uuid, RelativePath, Uuid, Vec3, CommonAttributes)>,
     delayed_trail_texture: Vec<(Uuid, RelativePath, Uuid, CommonAttributes)>,
 
-    //egui_context: &'l egui::Context, //TODO: remove, this is not the proper place to be, or if it is, badly used
-    channel_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-    channel_sender: tokio::sync::mpsc::Sender<ComponentDataExchange>,
-    sender_u2u: Option<tokio::sync::mpsc::Sender<ComponentDataExchange>>,
-    receiver_mumblelink: Option<tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
-    receiver_near_scene: Option<tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
+    channels: Option<PackageUIChannels>,
     state: PackageUISharedState,
 }
 
 impl PackageUIManager {
-    pub fn new(
-        channel_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-        channel_sender: tokio::sync::mpsc::Sender<ComponentDataExchange>,
-    ) -> Self {
+    pub fn new() -> Self {
         let state = PackageUISharedState {
             list_of_textures_changed: false,
             first_load_done: false,
@@ -80,11 +85,7 @@ impl PackageUIManager {
 
             delayed_marker_texture: Default::default(),
             delayed_trail_texture: Default::default(),
-            channel_sender,
-            channel_receiver,
-            sender_u2u: None,
-            receiver_mumblelink: None,
-            receiver_near_scene: None,
+            channels: None,
             state,
         }
     }
@@ -120,9 +121,10 @@ impl PackageUIManager {
                 tracing::trace!("Handling of MessageToPackageUI::LoadedPack");
                 self.save(pack_texture, report);
                 self.state.import_status = Default::default();
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageBack::CategoryActivationStatusChanged.into());
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels.back_end_notifier.blocking_send(to_data(
+                    MessageToPackageBack::CategoryActivationStatusChanged,
+                ));
             }
             MessageToPackageUI::MarkerTexture(
                 pack_uuid,
@@ -176,18 +178,18 @@ impl PackageUIManager {
     }
 
     pub fn flush_all_messages(&mut self) -> PackageUISharedState {
+        let channels = self.channels.as_mut().unwrap();
         if let Ok(mut import_status) = self.state.import_status.lock() {
             if let ImportStatus::LoadingPack(file_path) = &mut *import_status {
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageBack::ImportPack(file_path.clone()).into());
+                let _ = channels
+                    .back_end_notifier
+                    .blocking_send(to_data(MessageToPackageBack::ImportPack(file_path.clone())));
                 *import_status = ImportStatus::WaitingLoading(file_path.clone());
             }
         }
         let mut messages = Vec::new();
-        while let Ok(msg) = self.channel_receiver.try_recv() {
-            let msg = bincode::deserialize(&msg).unwrap();
-            messages.push(msg);
+        while let Ok(msg) = channels.notification_receiver.try_recv() {
+            messages.push(from_data(msg));
         }
         for msg in messages {
             self.handle_message(msg);
@@ -326,7 +328,8 @@ impl PackageUIManager {
 
     pub fn _tick(&mut self, timestamp: f64, link: &MumbleLink, z_near: f32) -> Result<()> {
         let tasks = &self.tasks;
-        let sender_u2u = self.sender_u2u.as_ref().unwrap();
+        let channels = self.channels.as_ref().unwrap();
+        let renderer_notifier = &channels.renderer_notifier;
         for pack in self.packs.values_mut() {
             tasks.save_texture(pack, pack.is_dirty());
         }
@@ -335,10 +338,10 @@ impl PackageUIManager {
         {
             for pack in self.packs.values_mut() {
                 let span_guard = info_span!("Updating package status").entered();
-                pack.tick(sender_u2u, timestamp, link, z_near, tasks)?;
+                pack.tick(renderer_notifier, timestamp, link, z_near, tasks)?;
                 std::mem::drop(span_guard);
             }
-            let _ = sender_u2u.blocking_send(UIToUIMessage::RenderSwapChain.into());
+            let _ = renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
         }
         Ok(())
     }
@@ -359,26 +362,27 @@ impl PackageUIManager {
             }
             if ui.button("Activate all elements").clicked() {
                 self.category_set_all(true);
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageBack::CategorySetAll(true).into());
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .back_end_notifier
+                    .blocking_send(to_data(MessageToPackageBack::CategorySetAll(true)));
             }
             if ui.button("Deactivate all elements").clicked() {
                 self.category_set_all(false);
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageBack::CategorySetAll(false).into());
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .back_end_notifier
+                    .blocking_send(to_data(MessageToPackageBack::CategorySetAll(false)));
             }
 
+            let channels = self.channels.as_mut().unwrap();
             for (pack, import_quality_report) in
                 std::iter::zip(self.packs.values_mut(), self.reports.values())
             {
                 //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
                 //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
-                let u2u_sender = self.sender_u2u.as_ref().unwrap();
                 pack.category_sub_menu(
-                    &self.channel_sender,
-                    u2u_sender,
+                    &channels.back_end_notifier,
                     ui,
                     self.show_only_active,
                     import_quality_report,
@@ -430,6 +434,7 @@ impl PackageUIManager {
     }
 
     fn gui_file_manager(&mut self, etx: &egui::Context, open: &mut bool) {
+        let channels = self.channels.as_mut().unwrap();
         let mut files_changed = false;
         Window::new("File Manager")
             .open(open)
@@ -518,9 +523,9 @@ impl PackageUIManager {
                 Ok(())
             });
         if files_changed {
-            let _ = self.channel_sender.blocking_send(
-                MessageToPackageBack::ActiveFiles(self.currently_used_files.clone()).into(),
-            );
+            let _ = channels.back_end_notifier.blocking_send(to_data(
+                MessageToPackageBack::ActiveFiles(self.currently_used_files.clone()),
+            ));
         }
     }
 
@@ -588,6 +593,7 @@ impl PackageUIManager {
         first_load_done: bool,
     ) {
         Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
+            let channels = self.channels.as_mut().unwrap();
             CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
                 egui::Grid::new("packs").striped(true).show(ui, |ui| {
                     if !first_load_done {
@@ -608,7 +614,7 @@ impl PackageUIManager {
                         ui.end_row();
                     }
                     if !to_delete.is_empty() {
-                        let _ = self.channel_sender.blocking_send(MessageToPackageBack::DeletePacks(to_delete).into());
+                        let _ = channels.back_end_notifier.blocking_send(to_data(MessageToPackageBack::DeletePacks(to_delete)));
                     }
                 });
             });
@@ -639,7 +645,7 @@ impl PackageUIManager {
                                 ui.text_edit_singleline(name);
                             });
                             if ui.button("save").clicked() {
-                                let _ = self.channel_sender.blocking_send(MessageToPackageBack::SavePack(name.clone(), pack.clone()).into());
+                                let _ = channels.back_end_notifier.blocking_send(to_data(MessageToPackageBack::SavePack(name.clone(), pack.clone())));
                             }
                         }
                     }
@@ -690,27 +696,24 @@ impl PackageUIManager {
     }
 }
 
-//TODO: there is a need for a more complex input according to deps
-impl JokolayUIComponent<PackageUISharedState, ()> for PackageUIManager {
-    fn flush_all_messages(&mut self) -> PackageUISharedState {
+impl JokolayUIComponent<PackageUISharedState> for PackageUIManager {
+    fn flush_all_messages(&mut self) {
+        let channels = self.channels.as_mut().unwrap();
         let mut messages = Vec::new();
-        while let Ok(msg) = self.channel_receiver.try_recv() {
-            messages.push(msg.into());
+        while let Ok(msg) = channels.notification_receiver.try_recv() {
+            messages.push(from_data(msg));
         }
         for msg in messages {
             self.handle_message(msg);
         }
-        self.state.clone()
     }
 
-    fn tick(&mut self, timestamp: f64, egui_context: &egui::Context) -> Option<&()> {
-        let raw_link = self
-            .receiver_mumblelink
-            .as_mut()
-            .unwrap()
-            .blocking_recv()
-            .unwrap();
-        let link: &MumbleLink = &bincode::deserialize(&raw_link).unwrap();
+    fn tick(&mut self, timestamp: f64, egui_context: &egui::Context) -> PackageUISharedState {
+        let raw_link = {
+            let channels = self.channels.as_mut().unwrap();
+            channels.subscription_mumblelink.blocking_recv().unwrap()
+        };
+        let link_result: MumbleLinkResult = from_data(raw_link);
 
         for (pack_uuid, tex_path, marker_uuid, position, common_attributes) in
             std::mem::take(&mut self.delayed_marker_texture)
@@ -736,15 +739,11 @@ impl JokolayUIComponent<PackageUISharedState, ()> for PackageUIManager {
             );
         }
 
-        let raw_z_near = self
-            .receiver_near_scene
-            .as_mut()
-            .unwrap()
-            .blocking_recv()
-            .unwrap();
-        let z_near: f32 = bincode::deserialize(&raw_z_near).unwrap();
-        let _ = self._tick(timestamp, link, z_near);
-        None
+        let channels = self.channels.as_mut().unwrap();
+        let raw_z_near = channels.subscription_near_scene.blocking_recv().unwrap();
+        let z_near: f32 = from_data(raw_z_near);
+        let _ = self._tick(timestamp, link_result.link.as_ref().unwrap(), z_near);
+        self.state.clone()
     }
     fn bind(
         &mut self,
@@ -752,8 +751,8 @@ impl JokolayUIComponent<PackageUISharedState, ()> for PackageUIManager {
             u32,
             tokio::sync::broadcast::Receiver<ComponentDataExchange>,
         >,
-        mut _bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-        mut _input_notification: std::collections::HashMap<
+        mut bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
+        mut input_notification: std::collections::HashMap<
             u32,
             tokio::sync::mpsc::Receiver<ComponentDataExchange>,
         >,
@@ -762,9 +761,27 @@ impl JokolayUIComponent<PackageUISharedState, ()> for PackageUIManager {
             tokio::sync::mpsc::Sender<ComponentDataExchange>,
         >, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
     ) {
-        self.sender_u2u = notify.remove(&0);
-        self.receiver_mumblelink = deps.remove(&0);
-        self.receiver_near_scene = deps.remove(&1);
-        unimplemented!("PackageUIManager component binding is not implemented")
+        let (_, back_end_notifier) = bound.remove(&0).unwrap();
+        let channels = PackageUIChannels {
+            subscription_mumblelink: deps.remove(&0).unwrap(),
+            subscription_near_scene: deps.remove(&1).unwrap(),
+            notification_receiver: input_notification.remove(&0).unwrap(),
+            back_end_notifier,
+            renderer_notifier: notify.remove(&0).unwrap(),
+        };
+
+        self.channels = Some(channels);
+    }
+}
+
+impl JokolayComponentDeps for PackageUIManager {
+    fn notify(&self) -> Vec<&str> {
+        vec!["ui:jokolay_renderer"]
+    }
+    fn peer(&self) -> Vec<&str> {
+        vec!["back:jokolay_package_manager"]
+    }
+    fn requires(&self) -> Vec<&str> {
+        vec!["ui:mumble_link", "ui:jokolay_near_scene"]
     }
 }

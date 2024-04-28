@@ -4,21 +4,24 @@ use std::{
 };
 
 use cap_std::fs_utf8::Dir;
-use joko_component_models::ComponentDataExchange;
+use joko_component_models::{
+    default_data_exchange, from_data, to_data, ComponentDataExchange, JokolayComponent,
+    JokolayComponentDeps,
+};
 use joko_package_models::package::PackageImportReport;
 
 use tracing::{error, info, info_span, trace};
 
 use crate::{
     build_from_core, import_pack_from_zip_file_path, jokolay_to_editable_path,
-    jokolay_to_extract_path, message::MessageToPackageBack,
+    jokolay_to_extract_path,
+    message::{MessageToPackageBack, MessageToPackageUI},
 };
-use joko_link_models::{MumbleLink, MumbleLinkSharedState};
+use joko_link_models::MumbleLinkResult;
 use miette::{IntoDiagnostic, Result};
 use uuid::Uuid;
 
 use crate::manager::pack::loaded::{LoadedPackData, PackTasks};
-use crate::message::MessageToPackageUI;
 
 use super::pack::loaded::jokolay_to_marker_path;
 
@@ -37,6 +40,13 @@ pub struct PackageBackSharedState {
     #[allow(dead_code)]
     pub editable_path: std::path::PathBuf, //copy of the editable path in ui_configuration
     extract_path: std::path::PathBuf,
+}
+
+struct PackageDataChannels {
+    subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
+
+    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+    front_end_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
 }
 
 /// It manage everything that has to do with marker packs.
@@ -70,8 +80,8 @@ pub struct PackageDataManager {
     pub currently_used_files: BTreeMap<Uuid, bool>,
     parents: HashMap<Uuid, Uuid>,
     loaded_elements: HashSet<Uuid>,
-    channel_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-    channel_sender: tokio::sync::mpsc::Sender<ComponentDataExchange>,
+    channels: Option<PackageDataChannels>,
+
     pub state: PackageBackSharedState,
 }
 
@@ -83,12 +93,7 @@ impl PackageDataManager {
     /// 4. loads all the packs
     /// 5. loads all the activation data
     /// 6. returns self
-    pub fn new(
-        root_dir: Arc<Dir>,
-        root_path: &std::path::Path,
-        channel_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-        channel_sender: tokio::sync::mpsc::Sender<ComponentDataExchange>,
-    ) -> Result<Self> {
+    pub fn new(root_dir: Arc<Dir>, root_path: &std::path::Path) -> Result<Self> {
         let marker_packs_path = jokolay_to_marker_path(root_path);
         //TODO: load configuration from disk (ui.toml)
         let editable_path = jokolay_to_editable_path(root_path)
@@ -112,8 +117,7 @@ impl PackageDataManager {
             currently_used_files: Default::default(),
             parents: Default::default(),
             loaded_elements: Default::default(),
-            channel_sender,
-            channel_receiver,
+            channels: None,
             state,
         })
     }
@@ -254,15 +258,17 @@ impl PackageDataManager {
                         }
                     }
                 }
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageUI::DeletedPacks(deleted).into());
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .front_end_notifier
+                    .blocking_send(to_data(MessageToPackageUI::DeletedPacks(deleted)));
             }
             MessageToPackageBack::ImportPack(file_path) => {
                 tracing::trace!("Handling of MessageToPackageBack::ImportPack");
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageUI::NbTasksRunning(1).into());
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .front_end_notifier
+                    .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(1)));
                 let start = std::time::SystemTime::now();
                 let result = import_pack_from_zip_file_path(file_path, &self.state.extract_path);
                 let elaspsed = start.elapsed().unwrap_or_default();
@@ -272,19 +278,19 @@ impl PackageDataManager {
                 );
                 match result {
                     Ok((file_name, pack)) => {
-                        let _ = self.channel_sender.blocking_send(
-                            MessageToPackageUI::ImportedPack(file_name, pack).into(),
-                        );
+                        let _ = channels.front_end_notifier.blocking_send(to_data(
+                            MessageToPackageUI::ImportedPack(file_name, pack),
+                        ));
                     }
                     Err(e) => {
-                        let _ = self
-                            .channel_sender
-                            .blocking_send(MessageToPackageUI::ImportFailure(e).into());
+                        let _ = channels
+                            .front_end_notifier
+                            .blocking_send(to_data(MessageToPackageUI::ImportFailure(e)));
                     }
                 }
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageUI::NbTasksRunning(0).into());
+                let _ = channels
+                    .front_end_notifier
+                    .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(0)));
             }
             MessageToPackageBack::ReloadPack => {
                 unimplemented!(
@@ -319,9 +325,10 @@ impl PackageDataManager {
                         let uuid_of_insertion = self.save(data_pack, report.clone());
                         report.uuid = uuid_of_insertion;
                         texture_pack.uuid = uuid_of_insertion;
-                        let _ = self.channel_sender.blocking_send(
-                            MessageToPackageUI::LoadedPack(texture_pack, report).into(),
-                        );
+                        let channels = self.channels.as_mut().unwrap();
+                        let _ = channels.front_end_notifier.blocking_send(to_data(
+                            MessageToPackageUI::LoadedPack(texture_pack, report),
+                        ));
                     }
                     Err(e) => {
                         error!(
@@ -347,9 +354,9 @@ impl PackageDataManager {
         );
 
         let mut messages = Vec::new();
-        while let Ok(msg) = self.channel_receiver.try_recv() {
-            let msg = bincode::deserialize(&msg).unwrap();
-            messages.push(msg);
+        let channels = self.channels.as_mut().unwrap();
+        while let Ok(msg) = channels.notification_receiver.try_recv() {
+            messages.push(from_data(msg));
         }
         for msg in messages {
             self.handle_message(msg);
@@ -357,19 +364,14 @@ impl PackageDataManager {
         self.state.clone()
     }
 
-    pub fn tick(
-        &mut self,
-        loop_index: u128,
-        ms: &MumbleLinkSharedState,
-        link: Option<&MumbleLink>,
-    ) {
+    pub fn _tick(&mut self, mumble_link_result: &MumbleLinkResult) {
         let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
         let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
 
-        let link = if ms.read_ui_link {
-            ms.copy_of_ui_link.as_ref()
+        let link = if mumble_link_result.read_ui_link {
+            mumble_link_result.ui_link.as_ref()
         } else {
-            link
+            mumble_link_result.link.as_ref()
         };
 
         if let Some(link) = link {
@@ -412,13 +414,13 @@ impl PackageDataManager {
             let tasks = &self.tasks;
             for pack in self.packs.values_mut() {
                 let span_guard = info_span!("Updating package status").entered();
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageUI::NbTasksRunning(tasks.count()).into());
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .front_end_notifier
+                    .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(tasks.count())));
                 tasks.save_data(pack, pack.is_dirty());
                 pack.tick(
-                    &self.channel_sender,
-                    loop_index,
+                    &channels.front_end_notifier,
                     link,
                     &currently_used_files,
                     have_used_files_list_changed || self.state.choice_of_category_changed,
@@ -430,20 +432,22 @@ impl PackageDataManager {
             }
             if map_changed {
                 self.get_active_elements_parents(categories_and_elements_to_be_loaded);
-                let _ = self.channel_sender.blocking_send(
-                    MessageToPackageUI::ActiveElements(self.loaded_elements.clone()).into(),
-                );
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels.front_end_notifier.blocking_send(to_data(
+                    MessageToPackageUI::ActiveElements(self.loaded_elements.clone()),
+                ));
             }
             if map_changed || have_used_files_list_changed || self.state.choice_of_category_changed
             {
+                let channels = self.channels.as_mut().unwrap();
                 //there is no point in sending a new list if nothing changed
-                let _ = self.channel_sender.blocking_send(
-                    MessageToPackageUI::CurrentlyUsedFiles(currently_used_files.clone()).into(),
-                );
+                let _ = channels.front_end_notifier.blocking_send(to_data(
+                    MessageToPackageUI::CurrentlyUsedFiles(currently_used_files.clone()),
+                ));
                 self.currently_used_files = currently_used_files;
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageUI::TextureSwapChain.into());
+                let _ = channels
+                    .front_end_notifier
+                    .blocking_send(to_data(MessageToPackageUI::TextureSwapChain));
             }
         }
         self.state.choice_of_category_changed = false;
@@ -482,10 +486,11 @@ impl PackageDataManager {
 
     pub fn load_all(&mut self) {
         once::assert_has_not_been_called!("Early load must happen only once");
+        let channels = self.channels.as_mut().unwrap();
         // Called only once at application start.
-        let _ = self
-            .channel_sender
-            .blocking_send(MessageToPackageUI::NbTasksRunning(1).into());
+        let _ = channels
+            .front_end_notifier
+            .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(1)));
         self.tasks.load_all_packs(
             Arc::clone(&self.state.root_dir),
             self.state.root_path.clone(),
@@ -499,17 +504,64 @@ impl PackageDataManager {
             for ((_, texture_pack), (_, report)) in
                 std::iter::zip(texture_packages, report_packages)
             {
-                let _ = self
-                    .channel_sender
-                    .blocking_send(MessageToPackageUI::LoadedPack(texture_pack, report).into());
+                let _ = channels.front_end_notifier.blocking_send(to_data(
+                    MessageToPackageUI::LoadedPack(texture_pack, report),
+                ));
             }
 
-            let _ = self
-                .channel_sender
-                .blocking_send(MessageToPackageUI::NbTasksRunning(0).into());
+            let _ = channels
+                .front_end_notifier
+                .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(0)));
         }
-        let _ = self
-            .channel_sender
-            .blocking_send(MessageToPackageUI::FirstLoadDone.into());
+        let _ = channels
+            .front_end_notifier
+            .blocking_send(to_data(MessageToPackageUI::FirstLoadDone));
+    }
+}
+
+impl JokolayComponent for PackageDataManager {
+    fn flush_all_messages(&mut self) {
+        let channels = self.channels.as_mut().unwrap();
+        let mut messages = Vec::new();
+        while let Ok(msg) = channels.notification_receiver.try_recv() {
+            messages.push(from_data(msg));
+        }
+        for msg in messages {
+            self.handle_message(msg);
+        }
+    }
+    fn bind(
+        &mut self,
+        mut deps: HashMap<u32, tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
+        mut bound: HashMap<u32, joko_component_models::PeerComponentChannel>, // Private channel only two bounded modules can use between each others.
+        mut input_notification: HashMap<u32, tokio::sync::mpsc::Receiver<ComponentDataExchange>>,
+        _notify: HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
+    ) {
+        let (_, front_end_notifier) = bound.remove(&0).unwrap();
+        let channels = PackageDataChannels {
+            subscription_mumblelink: deps.remove(&0).unwrap(),
+            front_end_notifier,
+            notification_receiver: input_notification.remove(&0).unwrap(),
+        };
+        self.channels = Some(channels);
+    }
+    fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+        let channels = self.channels.as_mut().unwrap();
+        let raw_mlr = channels.subscription_mumblelink.blocking_recv().unwrap();
+        let mumble_link_result: MumbleLinkResult = from_data(raw_mlr);
+        self._tick(&mumble_link_result);
+        default_data_exchange()
+    }
+}
+
+impl JokolayComponentDeps for PackageDataManager {
+    fn notify(&self) -> Vec<&str> {
+        vec![]
+    }
+    fn peer(&self) -> Vec<&str> {
+        vec!["ui:jokolay_package_manager"]
+    }
+    fn requires(&self) -> Vec<&str> {
+        vec!["back:mumble_link"]
     }
 }

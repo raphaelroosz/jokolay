@@ -12,17 +12,22 @@ use egui_render_three_d::ThreeDBackend;
 use egui_render_three_d::ThreeDConfig;
 use egui_window_glfw_passthrough::GlfwBackend;
 use glam::Mat4;
+use joko_component_models::default_data_exchange;
+use joko_component_models::from_data;
 use joko_component_models::ComponentDataExchange;
 use joko_component_models::JokolayComponent;
 use joko_component_models::JokolayComponentDeps;
 use joko_component_models::PeerComponentChannel;
 use joko_link_models::MumbleLink;
 use joko_link_models::UIState;
-use joko_render_models::messages::UIToUIMessage;
+use joko_render_models::messages::MessageToRenderer;
 use three_d::prelude::*;
 
 use joko_render_models::{marker::MarkerObject, trail::TrailObject};
 
+struct JokoRendererChannels {
+    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+}
 pub struct JokoRenderer {
     pub view_proj: Mat4,
     pub cam_pos: glam::Vec3,
@@ -32,11 +37,11 @@ pub struct JokoRenderer {
     pub is_map_open: bool,
     pub billboard_renderer: BillBoardRenderer,
     pub gl: egui_render_three_d::ThreeDBackend,
-    channel_receiver: Option<tokio::sync::mpsc::Receiver<ComponentDataExchange>>,
+    channels: Option<JokoRendererChannels>,
 }
 
 impl JokoRenderer {
-    pub fn new(glfw_backend: &mut GlfwBackend, _debug: bool) -> Self {
+    pub fn new(glfw_backend: &mut GlfwBackend) -> Self {
         let glfw = glfw_backend.glfw.clone();
         let backend = ThreeDBackend::new(
             ThreeDConfig {
@@ -73,7 +78,7 @@ impl JokoRenderer {
             gl: backend,
             billboard_renderer,
             cam_pos: Default::default(),
-            channel_receiver: None,
+            channels: None,
         }
     }
 
@@ -137,31 +142,31 @@ impl JokoRenderer {
         ];
       }
       */
-    fn handle_u2u_message(&mut self, msg: UIToUIMessage) {
+    fn handle_u2u_message(&mut self, msg: MessageToRenderer) {
         match msg {
-            UIToUIMessage::BulkMarkerObject(marker_objects) => {
+            MessageToRenderer::BulkMarkerObject(marker_objects) => {
                 tracing::debug!(
                     "Handling of UIToUIMessage::BulkMarkerObject {}",
                     marker_objects.len()
                 );
                 self.extend_markers(marker_objects);
             }
-            UIToUIMessage::BulkTrailObject(trail_objects) => {
+            MessageToRenderer::BulkTrailObject(trail_objects) => {
                 tracing::debug!(
                     "Handling of UIToUIMessage::BulkTrailObject {}",
                     trail_objects.len()
                 );
                 self.extend_trails(trail_objects);
             }
-            UIToUIMessage::MarkerObject(mo) => {
+            MessageToRenderer::MarkerObject(mo) => {
                 tracing::trace!("Handling of UIToUIMessage::MarkerObject");
                 self.add_billboard(*mo);
             }
-            UIToUIMessage::TrailObject(to) => {
+            MessageToRenderer::TrailObject(to) => {
                 tracing::trace!("Handling of UIToUIMessage::TrailObject");
                 self.add_trail(*to);
             }
-            UIToUIMessage::RenderSwapChain => {
+            MessageToRenderer::RenderSwapChain => {
                 tracing::debug!("Handling of UIToUIMessage::RenderSwapChain");
                 self.swap();
             }
@@ -242,7 +247,7 @@ impl JokoRenderer {
 }
 
 impl JokolayComponentDeps for JokoRenderer {}
-impl JokolayComponent<(), ()> for JokoRenderer {
+impl JokolayComponent for JokoRenderer {
     fn bind(
         &mut self,
         _deps: std::collections::HashMap<
@@ -256,21 +261,24 @@ impl JokolayComponent<(), ()> for JokoRenderer {
         >,
         _notify: std::collections::HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
     ) {
-        self.channel_receiver = input_notification.remove(&0);
+        let channels = JokoRendererChannels {
+            notification_receiver: input_notification.remove(&0).unwrap(),
+        };
+        self.channels = Some(channels);
     }
     fn flush_all_messages(&mut self) {
-        let channel_receiver = self.channel_receiver.as_mut().unwrap();
+        let channels = self.channels.as_mut().unwrap();
 
         //two steps reading due to self mutability required by channel
         let mut messages = Vec::new();
-        while let Ok(msg) = channel_receiver.try_recv() {
-            messages.push(msg.into());
+        while let Ok(msg) = channels.notification_receiver.try_recv() {
+            messages.push(from_data(msg));
         }
         for msg in messages {
             self.handle_u2u_message(msg);
         }
     }
-    fn tick(&mut self, _latest_time: f64) -> Option<&()> {
+    fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
         let link: Option<&MumbleLink> = None;
         if let Some(link) = link {
             //x positive => east
@@ -349,6 +357,6 @@ impl JokolayComponent<(), ()> for JokoRenderer {
         } else {
             self.has_link = false;
         }
-        None
+        default_data_exchange()
     }
 }

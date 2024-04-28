@@ -12,11 +12,12 @@ use std::vec;
 
 use enumflags2::BitFlags;
 use joko_component_models::{
-    ComponentDataExchange, JokolayComponent, JokolayComponentDeps, PeerComponentChannel,
+    from_data, to_data, ComponentDataExchange, JokolayComponent, JokolayComponentDeps,
+    PeerComponentChannel,
 };
 use joko_core::serde_glam::{IVec2, UVec2, Vec3};
 use joko_link_models::{
-    ctypes, MessageToMumbleLinkBack, MumbleChanges, MumbleLink, MumbleLinkSharedState,
+    ctypes, MessageToMumbleLinkBack, MumbleChanges, MumbleLink, MumbleLinkResult,
 };
 //use jokoapi::end_point::{mounts::Mount, races::Race};
 use miette::{IntoDiagnostic, Result, WrapErr};
@@ -35,6 +36,9 @@ use linux::MumbleLinuxImpl as MumblePlatformImpl;
 #[cfg(target_os = "windows")]
 use win::MumbleWinImpl as MumblePlatformImpl;
 
+struct MumbleChannels {
+    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+}
 // Useful link size is only [ctypes::USEFUL_C_MUMBLE_LINK_SIZE] . And we add 100 more bytes so that jokolink can put some extra stuff in there
 // pub(crate) const JOKOLINK_MUMBLE_BUFFER_SIZE: usize = ctypes::USEFUL_C_MUMBLE_LINK_SIZE + 100;
 /// This primarily manages the mumble backend.
@@ -50,22 +54,23 @@ pub struct MumbleManager {
     is_ui: bool,
     /// latest mumble link
     link: MumbleLink,
-    channel_receiver: std::sync::mpsc::Receiver<MessageToMumbleLinkBack>,
-    state: MumbleLinkSharedState,
+
+    channels: Option<MumbleChannels>,
+    state: MumbleLinkResult,
 }
 
 impl MumbleManager {
     pub fn new(name: &str, is_ui: bool) -> Result<Self> {
         let backend = MumblePlatformImpl::new(name)?;
-        let (_, receiver) = std::sync::mpsc::channel();
         Ok(Self {
             backend,
             link: Default::default(),
-            channel_receiver: receiver,
+            channels: None,
             is_ui,
-            state: MumbleLinkSharedState {
+            state: MumbleLinkResult {
                 read_ui_link: true,
-                copy_of_ui_link: None,
+                link: None,
+                ui_link: None,
             },
         })
     }
@@ -85,7 +90,7 @@ impl MumbleManager {
             }
             MessageToMumbleLinkBack::Value(link) => {
                 tracing::trace!("Handling of UIToBackMessage::MumbleLink");
-                self.state.copy_of_ui_link = link;
+                self.state.ui_link = link;
             }
             #[allow(unreachable_patterns)]
             _ => {
@@ -219,16 +224,22 @@ impl MumbleManager {
     }
 }
 
-impl JokolayComponent<MumbleLinkSharedState, MumbleLink> for MumbleManager {
-    fn flush_all_messages(&mut self) -> MumbleLinkSharedState {
-        while let Ok(msg) = self.channel_receiver.try_recv() {
+impl JokolayComponent for MumbleManager {
+    fn flush_all_messages(&mut self) {
+        let channels = self.channels.as_mut().unwrap();
+        let mut messages = Vec::new();
+        while let Ok(msg) = channels.notification_receiver.try_recv() {
+            messages.push(from_data(msg));
+        }
+        for msg in messages {
             self.handle_message(msg);
         }
-        self.state.clone()
     }
 
-    fn tick(&mut self, _latest_time: f64) -> Option<&MumbleLink> {
-        self._tick().unwrap_or(None)
+    fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+        let link = self._tick().unwrap_or(None);
+        self.state.link = link.cloned();
+        to_data(self.state.clone())
     }
     fn bind(
         &mut self,
@@ -236,13 +247,18 @@ impl JokolayComponent<MumbleLinkSharedState, MumbleLink> for MumbleManager {
             u32,
             tokio::sync::broadcast::Receiver<ComponentDataExchange>,
         >,
-        _bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
+        mut bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
         _input_notification: std::collections::HashMap<
             u32,
             tokio::sync::mpsc::Receiver<ComponentDataExchange>,
         >,
         _notify: std::collections::HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
     ) {
+        let (notification_receiver, _) = bound.remove(&0).unwrap();
+        let channels = MumbleChannels {
+            notification_receiver,
+        };
+        self.channels = Some(channels);
     }
 }
 
@@ -250,9 +266,9 @@ impl JokolayComponentDeps for MumbleManager {
     //default is enough
     fn peer(&self) -> Vec<&str> {
         if self.is_ui {
-            vec!["mumble_link_back"]
+            vec!["back:mumble_link"]
         } else {
-            vec!["mumble_link_ui"]
+            vec!["ui:mumble_link"]
         }
     }
 }

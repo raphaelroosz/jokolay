@@ -8,18 +8,32 @@
 //! along with mumblelink data, it also copies the x11 window id of gw2. you can use this to get the size of gw2 window.
 //!
 
+mod messages;
 mod mumble;
 
+use joko_component_models::ComponentDataExchange;
+pub use messages::*;
 pub use mumble::*;
+use serde::{Deserialize, Serialize};
 
-pub enum MessageToMumbleLinkBack {
-    BindedOnUI,
-    Autonomous,
-    Value(Option<MumbleLink>), //pushed from a value imposed by UI. Either a form or a traveling for demo.
-}
-
-#[derive(Clone)]
-pub struct MumbleLinkSharedState {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct MumbleLinkResult {
     pub read_ui_link: bool,
-    pub copy_of_ui_link: Option<MumbleLink>,
+    pub link: Option<MumbleLink>,
+    pub ui_link: Option<MumbleLink>,
 }
+
+/*
+impl From<MumbleLinkResult> for ComponentDataExchange {
+    fn from(src: MumbleLinkResult) -> ComponentDataExchange {
+        bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<MumbleLinkResult> for ComponentDataExchange {
+    fn into(self) -> MumbleLinkResult {
+        bincode::deserialize(&self).unwrap()
+    }
+}
+*/

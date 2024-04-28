@@ -1,15 +1,16 @@
 use joko_component_models::{
-    ComponentDataExchange, JokolayComponent, JokolayComponentDeps, PeerComponentChannel,
+    default_data_exchange, ComponentDataExchange, JokolayComponent, JokolayComponentDeps,
+    PeerComponentChannel,
 };
 
 pub struct JokolayPlugin {}
 
 pub struct JokolayPluginManager {}
 
-impl JokolayComponent<(), ()> for JokolayPlugin {
+impl JokolayComponent for JokolayPlugin {
     fn flush_all_messages(&mut self) {}
-    fn tick(&mut self, _timestamp: f64) -> Option<&()> {
-        None
+    fn tick(&mut self, _timestamp: f64) -> ComponentDataExchange {
+        default_data_exchange()
     }
     fn bind(
         &mut self,
@@ -28,6 +29,6 @@ impl JokolayComponent<(), ()> for JokolayPlugin {
 }
 impl JokolayComponentDeps for JokolayPlugin {
     fn requires(&self) -> Vec<&str> {
-        vec!["mumble_link_back"]
+        vec!["back:mumble_link"]
     }
 }

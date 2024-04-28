@@ -47,6 +47,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "time",] } # f
 ureq = { version = "*" }
 url = { version = "*", features = ["serde"] }
 uuid = { version = "*" }
+mutually_exclusive_features = "0.1.0"
 
 
 #https://corrode.dev/blog/tips-for-faster-rust-compile-times/#use-cargo-check-instead-of-cargo-build
