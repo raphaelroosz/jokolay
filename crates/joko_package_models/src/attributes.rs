@@ -98,6 +98,7 @@ pub struct XotAttributeNameIDs {
     pub resetposz: NameId,
     pub _source_file_name: NameId,
 }
+
 impl XotAttributeNameIDs {
     pub fn register_with_xot(tree: &mut Xot) -> Self {
         Self {
@@ -242,6 +243,7 @@ macro_rules! common_attributes_struct_macro {
         }
     }
 }
+
 /// uses the [ToString] impl of attributes to serialize them (only if the relevant active attribute flag is set)
 ///
 /// #### Args:
@@ -249,12 +251,12 @@ macro_rules! common_attributes_struct_macro {
 /// - ele: &[xot::Element] (xot Element to which we are serializing our fields to)
 /// - names: &[XotAttributeNameIDs] (which contains the name ids of our fields)
 /// - [f1, f2, f3...]: an array of field identifiers which will be serialized.
-/// ```rust
+/// ```rust,ignore
 /// set_attribute_to_ele!(ca, ele, names, [field1, field2, field3]);
 /// ```
 ///
 /// The expansion for each field is like this
-/// ```rust
+/// ```rust,ignore
 /// if ca.active_attributes.contains(ActiveAttributes::field1) {
 ///     ele.set_attribute(names.field1, ca.field1.to_string());
 /// }
@@ -266,6 +268,7 @@ macro_rules! set_attribute_to_ele {
         })+
     };
 }
+
 /// true -> 1 and 0 -> false. (only if the relevant active attribute flag is set)
 ///
 /// #### Args:
@@ -273,12 +276,12 @@ macro_rules! set_attribute_to_ele {
 /// - ele: &[xot::Element] (xot Element to which we are serializing our fields to)
 /// - names: &[XotAttributeNameIDs] (which contains the name ids of our fields)
 /// - [f1, f2, f3...]: an array of field identifiers which will be serialized.
-/// ```rust
+/// ```rust,ignore
 /// set_attribute_bool_to_ele!(ca, ele, names, [field1, field2, field3]);
 /// ```
 ///
 /// The expansion for each field is like this
-/// ```rust
+/// ```rust,ignore
 /// if ca.active_attributes.contains(ActiveAttributes::field1) {
 ///     ele.set_attribute(names.field1,
 ///         ca
@@ -304,6 +307,7 @@ macro_rules! set_attribute_bool_to_ele {
         })+
     };
 }
+
 /// iterates over a bitflags field and joins the enabled flags (as str) with comma. (only if the relevant active attribute flag is set)
 ///
 /// #### Args:
@@ -311,12 +315,12 @@ macro_rules! set_attribute_bool_to_ele {
 /// - ele: &[xot::Element] (xot Element to which we are serializing our fields to)
 /// - names: &[XotAttributeNameIDs] (which contains the name ids of our fields)
 /// - [f1, f2, f3...]: an array of field identifiers which will be serialized.
-/// ```rust
+/// ```rust,ignore
 /// set_attribute_bitflags_as_array_to_ele!(ca, ele, names, [field1, field2, field3]);
 /// ```
 ///
 /// The expansion for each field is like this
-/// ```rust
+/// ```rust,ignore
 /// if ca.active_attributes.contains(ActiveAttributes::field1) {
 ///     ele.set_attribute(
 ///         names.field1,
@@ -334,6 +338,7 @@ macro_rules! set_attribute_bitflags_as_array_to_ele {
         })+
     };
 }
+
 /// uses the [FromStr] impl of attributes to deserialize them (and set the relevant active attribute flag if successful)
 ///
 /// #### Args:
@@ -341,12 +346,12 @@ macro_rules! set_attribute_bitflags_as_array_to_ele {
 /// - ele: &[xot::Element] (xot Element to which we are serializing our fields to)
 /// - names: &[XotAttributeNameIDs] (which contains the name ids of our fields)
 /// - [f1, f2, f3...]: an array of field identifiers which will be serialized.
-/// ```rust
+/// ```rust,ignore
 /// update_attribute_from_ele!(ca, ele, names, [field1, field2, field3]);
 /// ```
 ///
 /// The expansion for each field is like this
-/// ```rust
+/// ```rust,ignore
 /// if let Some(value) = ele.get_attribute(names.field1) {
 ///     match value.trim().parse() {
 ///         Ok(value) => {
@@ -379,6 +384,24 @@ macro_rules! update_attribute_from_ele {
     };
 }
 
+fn parse_boolean(raw_value: &str) -> Option<bool> {
+    let trimmed = raw_value.trim().to_lowercase();
+    match trimmed.as_ref() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => {
+            match trimmed.parse::<i8>() {
+                //might entirely get rid of parsing
+                Ok(parsed_value) => match parsed_value {
+                    0 | 1 => Some(parsed_value == 1),
+                    _ => None,
+                },
+                Err(_e) => None,
+            }
+        }
+    }
+}
+
 /// deserializes an [i8] and matches that as 1 -> true and 0 -> false.
 /// On success, set the relevant active attribute flag.
 ///
@@ -387,12 +410,12 @@ macro_rules! update_attribute_from_ele {
 /// - ele: &[xot::Element] (xot Element to which we are serializing our fields to)
 /// - names: &[XotAttributeNameIDs] (which contains the name ids of our fields)
 /// - [f1, f2, f3...]: an array of field identifiers which will be serialized.
-/// ```rust
+/// ```rust,ignore
 /// update_attribute_bool_from_ele!(ca, ele, names, [field1, field2, field3]);
 /// ```
 ///
 /// The expansion for each field is like this
-/// ```rust
+/// ```rust,ignore
 /// if let Some(value) = ele.get_attribute(names.field1) {
 ///     match value.trim().parse::<i8>() {
 ///         Ok(value) => {
@@ -417,24 +440,6 @@ macro_rules! update_attribute_from_ele {
 ///     }
 /// }
 /// ```
-
-fn parse_boolean(raw_value: &str) -> Option<bool> {
-    let trimmed = raw_value.trim().to_lowercase();
-    match trimmed.as_ref() {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => {
-            match trimmed.parse::<i8>() {
-                //might entirely get rid of parsing
-                Ok(parsed_value) => match parsed_value {
-                    0 | 1 => Some(parsed_value == 1),
-                    _ => None,
-                },
-                Err(_e) => None,
-            }
-        }
-    }
-}
 macro_rules! update_attribute_bool_from_ele {
     ($common_attributes: ident, $ele: ident,$names: ident, [$($field: ident),+]) => {
         $(if let Some(value) = $ele.get_attribute($names.$field) {
@@ -452,6 +457,7 @@ macro_rules! update_attribute_bool_from_ele {
         })+
     };
 }
+
 /// deserializes an [i8] and matches that as 1 -> true and 0 -> false.
 /// On success, set the relevant active attribute flag.
 ///
@@ -460,12 +466,12 @@ macro_rules! update_attribute_bool_from_ele {
 /// - ele: &[xot::Element] (xot Element to which we are serializing our fields to)
 /// - names: &[XotAttributeNameIDs] (which contains the name ids of our fields)
 /// - [f1,t1; f2,t2;...]: an array of field identifiers which will be serialized and their enum type.
-/// ```rust
+/// ```rust,ignore
 /// update_attribute_bitflags_array_from_ele!(ca, ele, names, [f1, t1; f2, t2]);
 /// ```
 ///
 /// The expansion for each field is like this
-/// ```rust
+/// ```rust,ignore
 /// if let Some(field1_str) = ele.get_attribute(names.field1) {
 ///     for value in field1_str.split(',') {
 ///         match value.trim().parse::<t1>() {
@@ -499,8 +505,9 @@ macro_rules! update_attribute_bitflags_array_from_ele {
         })+
     };
 }
+
 /// generates getters for bool attributes
-/// ```rust
+/// ```rust,ignore
 /// getters_for_bool_attributes!([field1, field2, field3]);
 /// ```
 ///
@@ -522,8 +529,9 @@ macro_rules! getters_for_bool_attributes {
         }
     };
 }
+
 /// generates setters for bool attributes
-/// ```rust
+/// ```rust,ignore
 /// setters_for_bool_attributes!([field1, field2, field3]);
 /// ```
 ///
@@ -548,6 +556,7 @@ macro_rules! setters_for_bool_attributes {
         }
     };
 }
+
 common_attributes_struct_macro!(
     /// the struct we use for inheritance from category/other markers.
     #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -956,6 +965,7 @@ pub enum BoolAttributes {
     /// scaling of marker on 2d map (or minimap)
     scale_on_map_with_zoom = 1 << 9,
 }
+
 #[allow(non_camel_case_types)]
 #[bitflags]
 #[repr(u64)]
@@ -1020,6 +1030,7 @@ pub enum ActiveAttributes {
     trail_scale = 1 << 56,
     trigger_range = 1 << 57,
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum Behavior {
     #[default]
@@ -1044,6 +1055,7 @@ pub enum Behavior {
     WvWObjective,
     WeeklyReset = 101,
 }
+
 impl FromStr for Behavior {
     type Err = &'static str;
 
@@ -1064,6 +1076,7 @@ impl FromStr for Behavior {
         })
     }
 }
+
 /// Filter which professions the marker should be active for. if its null, its available for all professions
 #[bitflags]
 #[repr(u16)]
@@ -1079,6 +1092,7 @@ pub enum Profession {
     Thief = 1 << 7,
     Warrior = 1 << 8,
 }
+
 impl FromStr for Profession {
     type Err = &'static str;
 
@@ -1097,6 +1111,7 @@ impl FromStr for Profession {
         })
     }
 }
+
 impl AsRef<str> for Profession {
     fn as_ref(&self) -> &str {
         match self {
@@ -1112,11 +1127,13 @@ impl AsRef<str> for Profession {
         }
     }
 }
+
 impl ToString for Profession {
     fn to_string(&self) -> String {
         self.as_ref().to_string()
     }
 }
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum Cull {
     #[default]
@@ -1124,6 +1141,7 @@ pub enum Cull {
     ClockWise,
     CounterClockWise,
 }
+
 impl FromStr for Cull {
     type Err = &'static str;
 
@@ -1138,6 +1156,7 @@ impl FromStr for Cull {
         })
     }
 }
+
 impl AsRef<str> for Cull {
     fn as_ref(&self) -> &'static str {
         match self {
@@ -1147,11 +1166,13 @@ impl AsRef<str> for Cull {
         }
     }
 }
+
 impl ToString for Cull {
     fn to_string(&self) -> String {
         self.as_ref().to_string()
     }
 }
+
 /// Filter for which festivals will the marker be active for
 #[bitflags]
 #[repr(u8)]
@@ -1165,6 +1186,7 @@ pub enum Festival {
     SuperAdventureBox = 1 << 4,
     Wintersday = 1 << 5,
 }
+
 impl FromStr for Festival {
     type Err = &'static str;
 
@@ -1180,6 +1202,7 @@ impl FromStr for Festival {
         })
     }
 }
+
 impl AsRef<str> for Festival {
     fn as_ref(&self) -> &'static str {
         match self {
@@ -1192,11 +1215,13 @@ impl AsRef<str> for Festival {
         }
     }
 }
+
 impl ToString for Festival {
     fn to_string(&self) -> String {
         self.as_ref().to_string()
     }
 }
+
 /// Filter for which specializations (the third traitline) will the marker be active for
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(u8)]
@@ -1356,6 +1381,7 @@ impl FromStr for Specialization {
         })
     }
 }
+
 impl AsRef<str> for Specialization {
     fn as_ref(&self) -> &str {
         match self {
@@ -1440,6 +1466,7 @@ impl ToString for Specialization {
         self.as_ref().to_string()
     }
 }
+
 /// Most of this data is stolen from BlishHUD.
 #[bitflags]
 #[repr(u32)]
@@ -1484,22 +1511,26 @@ pub enum MapType {
     /// WvW lounge map type, e.g. Armistice Bastion.    
     WvwLounge = 1 << 18,
 }
+
 impl FromStr for MapType {
     type Err = &'static str;
     fn from_str(_s: &str) -> Result<Self, Self::Err> {
         unimplemented!("needs research to verify the map type values")
     }
 }
+
 impl AsRef<str> for MapType {
     fn as_ref(&self) -> &str {
         unimplemented!("needs research to verify the maptype values")
     }
 }
+
 impl ToString for MapType {
     fn to_string(&self) -> String {
         self.as_ref().to_string()
     }
 }
+
 /// made it using multi cursor (ctrl + shift + L) by copy-pasting json from api
 #[allow(unused)]
 pub static MAP_ID_TO_NAME: phf::OrderedMap<u16, &'static str> = phf::phf_ordered_map! {

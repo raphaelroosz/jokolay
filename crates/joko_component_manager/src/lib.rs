@@ -1,38 +1,39 @@
 use std::collections::HashMap;
 
 use joko_component_models::JokolayComponentDeps;
-use petgraph::{csr::IndexType, graph::NodeIndex, stable_graph::StableDiGraph, visit::IntoNodeIdentifiers, Direction};
+use petgraph::{
+    csr::IndexType, graph::NodeIndex, stable_graph::StableDiGraph, visit::IntoNodeIdentifiers,
+    Direction,
+};
 use tracing::trace;
 
 pub struct ComponentManager {
     data: HashMap<String, Box<dyn JokolayComponentDeps>>,
 }
 
-
-fn get_invocation_order<N, E, Ix>(my_graph: &mut StableDiGraph<N, E, Ix>) -> Vec<N> 
+fn get_invocation_order<N, E, Ix>(my_graph: &mut StableDiGraph<N, E, Ix>) -> Vec<N>
 where
     N: std::cmp::Ord,
-    Ix: IndexType
+    Ix: IndexType,
 {
     let mut invocation_order = Vec::new();
 
     //peel nodes one by one
     while my_graph.externals(Direction::Outgoing).count() > 0 {
         let mut to_delete = Vec::new();
-        for external_node in  my_graph.externals(Direction::Outgoing) {
+        for external_node in my_graph.externals(Direction::Outgoing) {
             to_delete.push(external_node);
         }
         let mut current_level_invocation_order = Vec::new();
         for external_node in to_delete {
             current_level_invocation_order.push(my_graph.remove_node(external_node).unwrap());
         }
-        current_level_invocation_order.sort();//This grant a deterministic order regardless of circumstances
+        current_level_invocation_order.sort(); //This grant a deterministic order regardless of circumstances
         invocation_order.extend(current_level_invocation_order);
     }
     //if there is a cycle, there are remaining nodes
     invocation_order
 }
-
 
 impl ComponentManager {
     pub fn new() -> Self {
@@ -73,7 +74,7 @@ impl ComponentManager {
 
         type G = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
 
-        let mut known_services: HashMap<String, NodeIndex<u16> > = Default::default();
+        let mut known_services: HashMap<String, NodeIndex<u16>> = Default::default();
         let mut depgraph: G = G::default();
         let mut translation: HashMap<NodeIndex<u16>, NodeIndex<u16>> = Default::default();
         let mut service_id = 0;
@@ -145,7 +146,10 @@ impl ComponentManager {
 
         let invocation_order = get_invocation_order(&mut depgraph);
         if depgraph.node_count() > 0 {
-            return Err(format!("Found a cyclic dependancy between {:?}", depgraph.node_identifiers()));
+            return Err(format!(
+                "Found a cyclic dependancy between {:?}",
+                depgraph.node_identifiers()
+            ));
         }
         trace!("services: {:?}", known_services);
         trace!("invocation_order: {:?}", invocation_order);
@@ -168,107 +172,104 @@ impl Default for ComponentManager {
     }
 }
 
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_invocation_order_1() {
+        type G = petgraph::stable_graph::StableDiGraph<String, u32, u16>;
+        let mut my_graph = G::default();
+        let a = my_graph.add_node("a".to_string());
+        let b = my_graph.add_node("b".to_string());
+        let c = my_graph.add_node("c".to_string());
+        let d = my_graph.add_node("d".to_string());
+        let _e = my_graph.add_node("e".to_string());
 
+        my_graph.add_edge(b, c, 1);
+        my_graph.add_edge(a, c, 1);
+        my_graph.add_edge(c, d, 1);
+        my_graph.add_edge(a, d, 1);
 
-#[test]
-fn test_invocation_order_1() {
-    type G = petgraph::stable_graph::StableDiGraph<String, u32, u16>;
-    let mut my_graph = G::default();
-    let a = my_graph.add_node("a".to_string());
-    let b = my_graph.add_node("b".to_string());
-    let c = my_graph.add_node("c".to_string());
-    let d = my_graph.add_node("d".to_string());
-    let _e = my_graph.add_node("e".to_string());
+        println!("nb nodes: {}", my_graph.node_count());
+        let invocation_order = crate::get_invocation_order(&mut my_graph);
+        println!("nb nodes: {}", my_graph.node_count());
+        println!("invocation order: {:?}", invocation_order);
+        assert!(my_graph.node_count() == 0);
+    }
 
-    my_graph.add_edge(b, c, 1);
-    my_graph.add_edge(a, c, 1);
-    my_graph.add_edge(c, d, 1);
-    my_graph.add_edge(a, d, 1);
-    
+    #[test]
+    fn test_invocation_order_2() {
+        type G = petgraph::stable_graph::StableDiGraph<String, u32, u16>;
+        let mut my_graph = G::default();
+        let a = my_graph.add_node("a".to_string());
+        let b = my_graph.add_node("b".to_string());
+        let c = my_graph.add_node("c".to_string());
 
-    println!("nb nodes: {}", my_graph.node_count());
-    let invocation_order = get_invocation_order(&mut my_graph);
-    println!("nb nodes: {}", my_graph.node_count());
-    println!("invocation order: {:?}", invocation_order);
-    assert!(my_graph.node_count() == 0);
+        my_graph.add_edge(a, b, 1);
+        my_graph.add_edge(b, a, 1);
+        my_graph.add_edge(b, c, 1);
+
+        println!("nb nodes: {}", my_graph.node_count());
+        let invocation_order = crate::get_invocation_order(&mut my_graph);
+        println!("nb nodes: {}", my_graph.node_count());
+        println!("invocation order: {:?}", invocation_order);
+        assert!(my_graph.node_count() == 2);
+    }
+
+    #[test]
+    fn test_invocation_order_3() {
+        type GG = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
+        let mut my_graph = GG::default();
+        let a = my_graph.add_node(1);
+        let b = my_graph.add_node(2);
+        let c = my_graph.add_node(3);
+
+        my_graph.add_edge(a, b, 1);
+        my_graph.add_edge(b, a, 1);
+        my_graph.add_edge(b, c, 1);
+
+        println!("nb nodes: {}", my_graph.node_count());
+        let invocation_order = crate::get_invocation_order(&mut my_graph);
+        println!("nb nodes: {}", my_graph.node_count());
+        println!("invocation order: {:?}", invocation_order);
+        assert!(my_graph.node_count() == 2);
+    }
+
+    #[test]
+    fn test_invocation_order_4() {
+        type GG = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
+        let mut my_graph = GG::default();
+        let a = my_graph.add_node(1);
+        let b = my_graph.add_node(2);
+        let c = my_graph.add_node(3);
+
+        my_graph.add_edge(a, b, 1);
+        my_graph.add_edge(b, c, 1);
+        my_graph.add_edge(a, c, 1);
+
+        println!("nb nodes: {}", my_graph.node_count());
+        let invocation_order = crate::get_invocation_order(&mut my_graph);
+        println!("nb nodes: {}", my_graph.node_count());
+        println!("invocation order: {:?}", invocation_order);
+        assert!(my_graph.node_count() == 0);
+    }
+
+    #[test]
+    fn test_duplicate_node_value() {
+        type GG = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
+        let mut my_graph = GG::default();
+        let a = my_graph.add_node(1);
+        let b = my_graph.add_node(2);
+        let c = my_graph.add_node(3);
+        let _doublon = my_graph.add_node(3); // same value, considered as a separate node
+
+        my_graph.add_edge(a, b, 1);
+        my_graph.add_edge(b, a, 1);
+        my_graph.add_edge(a, c, 1);
+
+        println!("nb nodes: {}", my_graph.node_count());
+        let invocation_order = crate::get_invocation_order(&mut my_graph);
+        println!("nb nodes: {}", my_graph.node_count());
+        println!("invocation order: {:?}", invocation_order);
+        assert!(my_graph.node_count() == 2);
+    }
 }
-
-
-#[test]
-fn test_invocation_order_2() {
-    type G = petgraph::stable_graph::StableDiGraph<String, u32, u16>;
-    let mut my_graph = G::default();
-    let a = my_graph.add_node("a".to_string());
-    let b = my_graph.add_node("b".to_string());
-    let c = my_graph.add_node("c".to_string());
-
-    my_graph.add_edge(a, b, 1);
-    my_graph.add_edge(b, a, 1);
-    my_graph.add_edge(b, c, 1);
-    
-    println!("nb nodes: {}", my_graph.node_count());
-    let invocation_order = get_invocation_order(&mut my_graph);
-    println!("nb nodes: {}", my_graph.node_count());
-    println!("invocation order: {:?}", invocation_order);
-    assert!(my_graph.node_count() == 2);
-}
-
-
-#[test]
-fn test_invocation_order_3() {
-    type GG = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
-    let mut my_graph = GG::default();
-    let a = my_graph.add_node(1);
-    let b = my_graph.add_node(2);
-    let c = my_graph.add_node(3);
-
-    my_graph.add_edge(a, b, 1);
-    my_graph.add_edge(b, a, 1);
-    my_graph.add_edge(b, c, 1);
-    
-    println!("nb nodes: {}", my_graph.node_count());
-    let invocation_order = get_invocation_order(&mut my_graph);
-    println!("nb nodes: {}", my_graph.node_count());
-    println!("invocation order: {:?}", invocation_order);
-    assert!(my_graph.node_count() == 2);
-}
-
-#[test]
-fn test_invocation_order_4() {
-    type GG = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
-    let mut my_graph = GG::default();
-    let a = my_graph.add_node(1);
-    let b = my_graph.add_node(2);
-    let c = my_graph.add_node(3);
-
-    my_graph.add_edge(a, b, 1);
-    my_graph.add_edge(b, c, 1);
-    my_graph.add_edge(a, c, 1);
-    
-    println!("nb nodes: {}", my_graph.node_count());
-    let invocation_order = get_invocation_order(&mut my_graph);
-    println!("nb nodes: {}", my_graph.node_count());
-    println!("invocation order: {:?}", invocation_order);
-    assert!(my_graph.node_count() == 0);
-}
-
-#[test]
-fn test_duplicate_node_value() {
-    type GG = petgraph::stable_graph::StableDiGraph<u32, u32, u16>;
-    let mut my_graph = GG::default();
-    let a = my_graph.add_node(1);
-    let b = my_graph.add_node(2);
-    let c = my_graph.add_node(3);
-    let _doublon = my_graph.add_node(3);// same value, considered as a separate node
-
-    my_graph.add_edge(a, b, 1);
-    my_graph.add_edge(b, a, 1);
-    my_graph.add_edge(a, c, 1);
-    
-    println!("nb nodes: {}", my_graph.node_count());
-    let invocation_order = get_invocation_order(&mut my_graph);
-    println!("nb nodes: {}", my_graph.node_count());
-    println!("invocation order: {:?}", invocation_order);
-    assert!(my_graph.node_count() == 2);
-}
-
