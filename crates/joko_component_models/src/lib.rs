@@ -48,36 +48,10 @@ where
 
     /*
 
-    // any extra information should come from configuration, which can be loaded from those two arguments.
-    Those roots are specific to the component, it cannot shared it with another component
     pub fn new(
         root_dir: Arc<Dir>,
         root_path: &std::path::Path,
     ) -> Result<Self>;
-
-    fn bind(
-        &mut self,
-        deps: HashMap<u32, tokio::sync::broadcast::receiver>,
-        bound: HashMap<u32, tokio::sync::scsc::receiver +  sender>,// ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-        input_notification: HashMap<u32, ???::receiver>
-        notify: HashMap<u32, ???::sender>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-    )
-    https://docs.rs/dep-graph/latest/dep_graph/
-    https://lib.rs/crates/petgraph
-    https://docs.rs/solvent/latest/solvent/
-        => check "peer" is always mutual
-        => graph with the "peer" elements replaced by some merged id
-        => check there is no loop (there could be surprises)
-        => if there is no problem, then:
-            - build again the graph with UI plugins only and save one traversal (memory + file)
-            - build again the graph with back plugins only and save one traversal (memory + file)
-        => if there is a problem, do not save anything
-
-
-
-    fn tick(
-        &mut self,
-    ) -> Option<&PluginResult>; where u32 is the position in bind() + requires()
     */
 }
 
@@ -114,6 +88,7 @@ where
     https://docs.rs/dep-graph/latest/dep_graph/
     https://lib.rs/crates/petgraph
     https://docs.rs/solvent/latest/solvent/
+    https://lib.rs/crates/cargo-depgraph
         => check "peer" is always mutual
         => graph with the "peer" elements replaced by some merged id
         => check there is no loop (there could be surprises)

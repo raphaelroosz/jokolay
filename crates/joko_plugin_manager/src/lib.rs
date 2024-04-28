@@ -26,4 +26,8 @@ impl JokolayComponent<(), ()> for JokolayPlugin {
     ) {
     }
 }
-impl JokolayComponentDeps for JokolayPlugin {}
+impl JokolayComponentDeps for JokolayPlugin {
+    fn requires(&self) -> Vec<&str> {
+        vec!["mumble_link_back"]
+    }
+}

@@ -1,14 +1,18 @@
 
 [workspace]
 members = [
-    "crates/joko_render",
+    "crates/joko_render_manager",
     "crates/joko_render_models",
-    "crates/joko_package",
+    "crates/joko_package_manager",
     "crates/joko_package_models",
-    "crates/jokolink",
+    "crates/joko_link_manager",
+    "crates/joko_link_models",
     "crates/jokoapi",
     "crates/jokolay",
     "crates/joko_core",
+    "crates/joko_component_manager",
+    "crates/joko_component_models",
+    "crates/joko_plugin_manager",
     "crates/joko_ext",
 ]
 resolver = "2"
@@ -16,34 +20,33 @@ resolver = "2"
 [workspace.dependencies]
 #https://docs.rs/tracing/latest/tracing/level_filters/index.html
 
+bincode = "1.3.3"
 bytemuck = { version = "1", features = ["derive"] }
-tracing = { version = "0.1", features = ["max_level_trace", "release_max_level_info"] }
-ringbuffer = { version = "0.14" }
-egui = { version = "0.26" }
-egui_extras = { version = "0.26" }
 cap-directories = { version = "2" }
 cap-std = { version = "2", features = ["fs_utf8"] }
-serde = { version = "*", features = ["derive"] }
-miette = { version = "*", features = ["fancy"] }
-url = { version = "*", features = ["serde"] }
-serde_json = { version = "*" }
-rayon = { version = "*" }
-paste = { version = "*" }
+egui = { version = "0.26" }
+egui_extras = { version = "0.26" }
+enumflags2 = { version = "*", features = ["serde"] }
 glam = { version = "*", features = ["fast-math"] }
-time = { version = "*" }
-ureq = { version = "*" }
-enumflags2 = { version = "*" }
 indexmap = { version = "2" }
-rfd = { version = "*" }
-smol_str = { version = "*" }
-uuid = { version = "*" }
 itertools = { version = "*" }
+miette = { version = "*", features = ["fancy"] }
 ordered_hash_map = { version = "*", features= ["serde"] }
+paste = { version = "*" }
+rayon = { version = "*" }
+rfd = { version = "*" }
+ringbuffer = { version = "0.14" }
+serde = { version = "*", features = ["derive"] }
+serde_json = { version = "*" }
+smol_str = { version = "*", features = ["serde"] }
+time = { version = "*" }
+tokio = { version = "1.37.0", features = ["sync"] }
+tracing = { version = "0.1", features = ["max_level_trace", "release_max_level_info"] }
 tracing-appender = { version = "*" }
-tracing-subscriber = { version = "0.3", features = [
-    "env-filter",
-    "time",
-] } # for ErrorLayer
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time",] } # for ErrorLayer
+ureq = { version = "*" }
+url = { version = "*", features = ["serde"] }
+uuid = { version = "*" }
 
 
 #https://corrode.dev/blog/tips-for-faster-rust-compile-times/#use-cargo-check-instead-of-cargo-build

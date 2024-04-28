@@ -4,7 +4,7 @@ use crate::prelude::*;
 
 #[bitflags]
 #[repr(u8)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Race {
     Unknown = 1 << 1,
     Asura = 1 << 2,

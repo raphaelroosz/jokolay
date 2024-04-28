@@ -1155,7 +1155,7 @@ impl ToString for Cull {
 /// Filter for which festivals will the marker be active for
 #[bitflags]
 #[repr(u8)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Festival {
     DragonBash = 1 << 0,
     #[allow(clippy::enum_variant_names)]

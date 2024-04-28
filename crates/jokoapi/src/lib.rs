@@ -23,7 +23,7 @@ pub(crate) mod prelude {
     pub type HttpClient = ureq::Agent;
     pub use crate::end_point::EndPoint;
     pub use enumflags2::bitflags;
-    pub use miette::{IntoDiagnostic, Result, WrapErr};
+    pub use miette::{IntoDiagnostic, Result};
     pub use serde::{de::DeserializeOwned, Deserialize, Serialize};
     pub use std::fmt::Display;
     const API_BASE_URL: &str = "https://api.guildwars2.com";

@@ -85,9 +85,8 @@ impl Jokolay {
             MumbleManager::new("MumbleLink", true).wrap_err("failed to create mumble manager")?;
 
         let dummy_plugin = Box::new(JokolayPlugin {});
-        component_manager.register("dummy_plugin", dummy_plugin);
         component_manager.register(
-            "mumble_link_ui",
+            "mumble_link_back",
             Box::new(
                 MumbleManager::new("MumbleLink", true)
                     .wrap_err("failed to create mumble manager")?,
@@ -100,6 +99,7 @@ impl Jokolay {
                     .wrap_err("failed to create mumble manager")?,
             ),
         );
+        component_manager.register("dummy_plugin", dummy_plugin);
 
         match component_manager.build_routes() {
             Ok(_) => {}

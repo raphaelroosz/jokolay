@@ -4,12 +4,19 @@ use serde::{
 };
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct Vec3(pub glam::Vec3);
 
 impl From<Vec3> for glam::Vec3 {
     fn from(src: Vec3) -> glam::Vec3 {
         src.0
+    }
+}
+
+unsafe impl bytemuck::Pod for Vec3 {}
+unsafe impl bytemuck::Zeroable for Vec3 {
+    fn zeroed() -> Self {
+        Self::default()
     }
 }
 

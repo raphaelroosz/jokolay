@@ -160,7 +160,7 @@ pub enum UISize {
 
 #[bitflags]
 #[repr(u32)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 /// The Uistate enum to represent the status of the UI in game
 pub enum UIState {
     IsMapOpen = 0b00000001,

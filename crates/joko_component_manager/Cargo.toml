@@ -12,3 +12,6 @@ scopeguard = "1.2.0"
 smol_str = { workspace = true }
 tokio = { workspace = true }
 joko_component_models = { path = "../joko_component_models" }
+solvent = "0.8.3"
+petgraph = "0.6.4"
+tracing.workspace = true
