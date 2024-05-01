@@ -799,12 +799,15 @@ impl LoadedPackTexture {
 }
 
 pub fn jokolay_to_editable_path(jokolay_path: &std::path::Path) -> std::path::PathBuf {
-    let marker_manager_path = jokolay_to_marker_path(jokolay_path);
-    marker_manager_path.join(EDITABLE_PACKAGE_NAME)
+    jokolay_path
+        .join(PACKAGE_MANAGER_DIRECTORY_NAME)
+        .join(EDITABLE_PACKAGE_NAME)
 }
 
 pub fn jokolay_to_extract_path(jokolay_path: &std::path::Path) -> std::path::PathBuf {
-    jokolay_path.join(EXTRACT_DIRECTORY_NAME)
+    jokolay_path
+        .join(PACKAGE_MANAGER_DIRECTORY_NAME)
+        .join(EXTRACT_DIRECTORY_NAME)
 }
 
 pub fn jokolay_to_marker_path(jokolay_path: &std::path::Path) -> std::path::PathBuf {

@@ -6,15 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
-[features]
-default = ["messages_any"]
-messages_any = []
-messages_downcast = []
-messages_bincode = []
-
-
 [dependencies]
 joko_component_models = { path = "../joko_component_models" }
 scopeguard = "1.2.0"
-smol_str = { workspace = true }
 tokio = { workspace = true }

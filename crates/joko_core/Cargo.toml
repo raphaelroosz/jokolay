@@ -11,11 +11,3 @@ glam = { workspace = true }
 scopeguard = "1.2.0"
 smol_str = { workspace = true }
 serde = { workspace = true }
-mutually_exclusive_features = { workspace = true }
-
-
-[features]
-default = ["messages_any"]
-messages_any = []
-messages_downcast = []
-messages_bincode = []

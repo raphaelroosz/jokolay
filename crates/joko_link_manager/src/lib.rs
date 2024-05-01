@@ -12,8 +12,7 @@ use std::vec;
 
 use enumflags2::BitFlags;
 use joko_component_models::{
-    from_data, to_data, ComponentDataExchange, JokolayComponent, JokolayComponentDeps,
-    PeerComponentChannel,
+    from_data, to_data, ComponentChannels, ComponentDataExchange, JokolayComponent,
 };
 use joko_core::serde_glam::{IVec2, UVec2, Vec3};
 use joko_link_models::{
@@ -226,6 +225,10 @@ impl MumbleManager {
 
 impl JokolayComponent for MumbleManager {
     fn flush_all_messages(&mut self) {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let channels = self.channels.as_mut().unwrap();
         let mut messages = Vec::new();
         while let Ok(msg) = channels.notification_receiver.try_recv() {
@@ -237,34 +240,23 @@ impl JokolayComponent for MumbleManager {
     }
 
     fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let link = self._tick().unwrap_or(None);
         self.state.link = link.cloned();
         to_data(self.state.clone())
     }
-    fn bind(
-        &mut self,
-        _deps: std::collections::HashMap<
-            u32,
-            tokio::sync::broadcast::Receiver<ComponentDataExchange>,
-        >,
-        mut bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-        _input_notification: std::collections::HashMap<
-            u32,
-            tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-        >,
-        _notify: std::collections::HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-    ) {
-        let (notification_receiver, _) = bound.remove(&0).unwrap();
+    fn bind(&mut self, mut channels: ComponentChannels) {
+        let (_, notification_receiver) = channels.peers.remove(&0).unwrap();
         let channels = MumbleChannels {
             notification_receiver,
         };
         self.channels = Some(channels);
     }
-}
-
-impl JokolayComponentDeps for MumbleManager {
     //default is enough
-    fn peer(&self) -> Vec<&str> {
+    fn peers(&self) -> Vec<&str> {
         if self.is_ui {
             vec!["back:mumble_link"]
         } else {

@@ -8,12 +8,12 @@ use image::EncodableLayout;
 use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 
 use joko_render_models::messages::MessageToRenderer;
+use serde::{Deserialize, Serialize};
 use tracing::{info_span, trace};
 
 use crate::message::MessageToPackageBack;
 use joko_component_models::{
-    from_data, to_data, ComponentDataExchange, JokolayComponentDeps, JokolayUIComponent,
-    PeerComponentChannel,
+    from_data, to_data, ComponentChannels, ComponentDataExchange, JokolayComponent,
 };
 use joko_core::{serde_glam::Vec3, RelativePath};
 use joko_link_models::{MumbleChanges, MumbleLink, MumbleLinkResult};
@@ -25,7 +25,7 @@ use crate::manager::pack::loaded::{LoadedPackTexture, PackTasks};
 use crate::message::MessageToPackageUI;
 
 //FIXME: there is an interest to merge the PackageUIManager and the render
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PackageUISharedState {
     list_of_textures_changed: bool, //Meant as an optimisation to only update when choice_of_category_changed have produced the list of textures to display
     first_load_done: bool,
@@ -35,8 +35,6 @@ pub struct PackageUISharedState {
 
 struct PackageUIChannels {
     subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
-    subscription_near_scene: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
-
     notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
 
     back_end_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
@@ -51,6 +49,8 @@ pub struct PackageUIManager {
     reports: BTreeMap<Uuid, PackageImportReport>,
     tasks: PackTasks,
 
+    egui_context: Arc<egui::Context>,
+    z_near: f32,
     currently_used_files: BTreeMap<Uuid, bool>,
     all_files_activation_status: bool, // this consume a change of display event
     show_only_active: bool,
@@ -64,7 +64,8 @@ pub struct PackageUIManager {
 }
 
 impl PackageUIManager {
-    pub fn new() -> Self {
+    pub fn new(egui_context: Arc<egui::Context>, z_near: f32) -> Self {
+        //z_near is a constant, make it a https://docs.rs/tokio/latest/tokio/sync/watch/index.html if required to be dynamic
         let state = PackageUISharedState {
             list_of_textures_changed: false,
             first_load_done: false,
@@ -78,6 +79,8 @@ impl PackageUIManager {
             default_marker_texture: None,
             default_trail_texture: None,
 
+            egui_context,
+            z_near,
             all_files_activation_status: false,
             show_only_active: true,
             currently_used_files: Default::default(), // UI copy to (de-)activate files
@@ -114,8 +117,7 @@ impl PackageUIManager {
             }
             MessageToPackageUI::ImportFailure(message) => {
                 tracing::trace!("Handling of MessageToPackageUI::ImportFailure");
-                *self.state.import_status.lock().unwrap() =
-                    ImportStatus::PackError(miette::Report::msg(message));
+                *self.state.import_status.lock().unwrap() = ImportStatus::PackError(message);
             }
             MessageToPackageUI::LoadedPack(pack_texture, report) => {
                 tracing::trace!("Handling of MessageToPackageUI::LoadedPack");
@@ -315,7 +317,7 @@ impl PackageUIManager {
                 *import_status.lock().unwrap() = ImportStatus::LoadingPack(file_path);
             } else {
                 *import_status.lock().unwrap() =
-                    ImportStatus::PackError(miette::miette!("file chooser was cancelled"));
+                    ImportStatus::PackError("file chooser was cancelled".to_string());
             }
         });
     }
@@ -696,8 +698,9 @@ impl PackageUIManager {
     }
 }
 
-impl JokolayUIComponent<PackageUISharedState> for PackageUIManager {
+impl JokolayComponent for PackageUIManager {
     fn flush_all_messages(&mut self) {
+        assert!(self.channels.is_some());
         let channels = self.channels.as_mut().unwrap();
         let mut messages = Vec::new();
         while let Ok(msg) = channels.notification_receiver.try_recv() {
@@ -708,7 +711,8 @@ impl JokolayUIComponent<PackageUISharedState> for PackageUIManager {
         }
     }
 
-    fn tick(&mut self, timestamp: f64, egui_context: &egui::Context) -> PackageUISharedState {
+    fn tick(&mut self, timestamp: f64) -> ComponentDataExchange {
+        assert!(self.channels.is_some());
         let raw_link = {
             let channels = self.channels.as_mut().unwrap();
             channels.subscription_mumblelink.blocking_recv().unwrap()
@@ -720,7 +724,7 @@ impl JokolayUIComponent<PackageUISharedState> for PackageUIManager {
         {
             self.load_marker_texture(
                 pack_uuid,
-                egui_context,
+                &Arc::clone(&self.egui_context),
                 tex_path,
                 marker_uuid,
                 position,
@@ -732,56 +736,40 @@ impl JokolayUIComponent<PackageUISharedState> for PackageUIManager {
         {
             self.load_trail_texture(
                 pack_uuid,
-                egui_context,
+                &Arc::clone(&self.egui_context),
                 tex_path,
                 trail_uuid,
                 common_attributes,
             );
         }
 
-        let channels = self.channels.as_mut().unwrap();
-        let raw_z_near = channels.subscription_near_scene.blocking_recv().unwrap();
-        let z_near: f32 = from_data(raw_z_near);
-        let _ = self._tick(timestamp, link_result.link.as_ref().unwrap(), z_near);
-        self.state.clone()
+        //let channels = self.channels.as_mut().unwrap();
+        //let raw_z_near = channels.subscription_near_scene.blocking_recv().unwrap();
+        //let z_near: f32 = from_data(raw_z_near);
+        let _ = self._tick(timestamp, link_result.link.as_ref().unwrap(), self.z_near);
+        to_data(self.state.clone())
     }
-    fn bind(
-        &mut self,
-        mut deps: std::collections::HashMap<
-            u32,
-            tokio::sync::broadcast::Receiver<ComponentDataExchange>,
-        >,
-        mut bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-        mut input_notification: std::collections::HashMap<
-            u32,
-            tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-        >,
-        mut notify: std::collections::HashMap<
-            u32,
-            tokio::sync::mpsc::Sender<ComponentDataExchange>,
-        >, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-    ) {
-        let (_, back_end_notifier) = bound.remove(&0).unwrap();
+    fn bind(&mut self, mut channels: ComponentChannels) {
+        let (back_end_notifier, _) = channels.peers.remove(&0).unwrap();
         let channels = PackageUIChannels {
-            subscription_mumblelink: deps.remove(&0).unwrap(),
-            subscription_near_scene: deps.remove(&1).unwrap(),
-            notification_receiver: input_notification.remove(&0).unwrap(),
+            subscription_mumblelink: channels.requirements.remove(&2).unwrap(),
+            notification_receiver: channels.input_notification.unwrap(),
             back_end_notifier,
-            renderer_notifier: notify.remove(&0).unwrap(),
+            renderer_notifier: channels.notify.remove(&1).unwrap(),
         };
 
         self.channels = Some(channels);
     }
-}
-
-impl JokolayComponentDeps for PackageUIManager {
     fn notify(&self) -> Vec<&str> {
         vec!["ui:jokolay_renderer"]
     }
-    fn peer(&self) -> Vec<&str> {
+    fn peers(&self) -> Vec<&str> {
         vec!["back:jokolay_package_manager"]
     }
-    fn requires(&self) -> Vec<&str> {
-        vec!["ui:mumble_link", "ui:jokolay_near_scene"]
+    fn requirements(&self) -> Vec<&str> {
+        vec!["ui:mumble_link"]
+    }
+    fn accept_notifications(&self) -> bool {
+        true
     }
 }

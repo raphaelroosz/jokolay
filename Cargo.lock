@@ -1450,13 +1450,12 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 name = "joko_component_manager"
 version = "0.2.1"
 dependencies = [
+ "bimap",
  "bincode",
  "egui",
  "joko_component_models",
  "petgraph",
  "scopeguard",
- "smol_str",
- "solvent",
  "tokio",
  "tracing",
 ]
@@ -1470,7 +1469,6 @@ dependencies = [
  "egui",
  "scopeguard",
  "serde",
- "smol_str",
  "tokio",
 ]
 
@@ -1480,7 +1478,6 @@ version = "0.2.1"
 dependencies = [
  "bytemuck",
  "glam",
- "mutually_exclusive_features",
  "scopeguard",
  "serde",
  "smol_str",
@@ -1521,26 +1518,17 @@ name = "joko_link_models"
 version = "0.2.1"
 dependencies = [
  "arcdps",
- "bincode",
  "enumflags2",
  "glam",
- "joko_component_models",
  "joko_core",
  "miette",
- "mutually_exclusive_features",
  "notify",
  "num-derive",
  "num-traits",
  "serde",
- "serde_json",
- "time",
- "tokio",
- "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "widestring",
  "windows",
- "x11rb",
 ]
 
 [[package]]
@@ -1548,7 +1536,6 @@ name = "joko_package_manager"
 version = "0.2.1"
 dependencies = [
  "base64",
- "bincode",
  "bytemuck",
  "cap-std",
  "cxx",
@@ -1567,7 +1554,6 @@ dependencies = [
  "joko_render_models",
  "jokoapi",
  "miette",
- "mutually_exclusive_features",
  "once",
  "ordered_hash_map",
  "paste",
@@ -1595,7 +1581,6 @@ version = "0.2.1"
 dependencies = [
  "base64",
  "bimap",
- "bincode",
  "bytemuck",
  "cxx-build",
  "data-encoding",
@@ -1603,11 +1588,9 @@ dependencies = [
  "glam",
  "indexmap",
  "itertools",
- "joko_component_models",
  "joko_core",
  "jokoapi",
  "miette",
- "mutually_exclusive_features",
  "ordered_hash_map",
  "paste",
  "phf",
@@ -1628,7 +1611,6 @@ version = "0.2.1"
 dependencies = [
  "joko_component_models",
  "scopeguard",
- "smol_str",
  "tokio",
 ]
 
@@ -1636,7 +1618,6 @@ dependencies = [
 name = "joko_render_manager"
 version = "0.2.1"
 dependencies = [
- "bincode",
  "bytemuck",
  "egui",
  "egui_render_three_d",
@@ -1653,12 +1634,9 @@ dependencies = [
 name = "joko_render_models"
 version = "0.2.1"
 dependencies = [
- "bincode",
  "bytemuck",
  "glam",
- "joko_component_models",
  "joko_core",
- "mutually_exclusive_features",
  "serde",
 ]
 
@@ -1694,7 +1672,6 @@ dependencies = [
  "joko_plugin_manager",
  "joko_render_manager",
  "miette",
- "mutually_exclusive_features",
  "rayon",
  "rfd",
  "ringbuffer",
@@ -1915,12 +1892,6 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
-
-[[package]]
-name = "mutually_exclusive_features"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e94e1e6445d314f972ff7395df2de295fe51b71821694f0b0e1e79c4f12c8577"
 
 [[package]]
 name = "next-gen"
@@ -2757,12 +2728,6 @@ checksum = "e6845563ada680337a52d43bb0b29f396f2d911616f6573012645b9e3d048a49"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "solvent"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14a50198e546f29eb0a4f977763c8277ec2184b801923c3be71eeaec05471f16"
 
 [[package]]
 name = "spin"

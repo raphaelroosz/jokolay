@@ -4,18 +4,10 @@ version = "0.2.1"
 edition = "2021"
 
 
-[features]
-default = ["messages_any"]
-messages_any = []
-messages_downcast = []
-messages_bincode = []
-
-
 [dependencies]
 # jmf deps
 # for marker packs 
 base64 = "0.21.2"
-bincode = { workspace = true }
 bytemuck = { workspace = true }
 cap-std = { workspace = true }
 cxx = { version = "1.0", features = ["std"] } # for rapid xml bindings
@@ -50,7 +42,6 @@ uuid = { version = "1", features = ["v4", "fast-rng", "macro-diagnostics", "serd
 xot = { version = "0.16.0" }
 zip = { version = "0.6", default-features = false, features = ["deflate"] } # for easier extraction to folers and compression of folders into zip files (.taco format alias)
 walkdir = "2.5.0"
-mutually_exclusive_features = { workspace = true }
 
 
 

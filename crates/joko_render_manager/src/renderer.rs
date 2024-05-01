@@ -14,10 +14,9 @@ use egui_window_glfw_passthrough::GlfwBackend;
 use glam::Mat4;
 use joko_component_models::default_data_exchange;
 use joko_component_models::from_data;
+use joko_component_models::ComponentChannels;
 use joko_component_models::ComponentDataExchange;
 use joko_component_models::JokolayComponent;
-use joko_component_models::JokolayComponentDeps;
-use joko_component_models::PeerComponentChannel;
 use joko_link_models::MumbleLink;
 use joko_link_models::UIState;
 use joko_render_models::messages::MessageToRenderer;
@@ -41,13 +40,17 @@ pub struct JokoRenderer {
 }
 
 impl JokoRenderer {
-    pub fn new(glfw_backend: &mut GlfwBackend) -> Self {
-        let glfw = glfw_backend.glfw.clone();
+    pub fn new(glfw_backend: &GlfwBackend) -> Self {
+        /*
+        FIXME: Box + JokoRenderer => segfault when panic
+            Arc vs Box: no change
+        */
+        //let glfw = glfw_backend.glfw.clone();
         let backend = ThreeDBackend::new(
             ThreeDConfig {
                 glow_config: Default::default(),
             },
-            |s| glfw.get_proc_address_raw(s),
+            |s| glfw_backend.glfw.get_proc_address_raw(s),
             //glfw_backend.window.raw_window_handle(),
             glfw_backend.framebuffer_size_physical,
         );
@@ -246,27 +249,21 @@ impl JokoRenderer {
     }
 }
 
-impl JokolayComponentDeps for JokoRenderer {}
 impl JokolayComponent for JokoRenderer {
-    fn bind(
-        &mut self,
-        _deps: std::collections::HashMap<
-            u32,
-            tokio::sync::broadcast::Receiver<ComponentDataExchange>,
-        >,
-        _bound: std::collections::HashMap<u32, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-        mut input_notification: std::collections::HashMap<
-            u32,
-            tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-        >,
-        _notify: std::collections::HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-    ) {
+    fn bind(&mut self, channels: ComponentChannels) {
         let channels = JokoRendererChannels {
-            notification_receiver: input_notification.remove(&0).unwrap(),
+            notification_receiver: channels.input_notification.unwrap(),
         };
         self.channels = Some(channels);
     }
+    fn accept_notifications(&self) -> bool {
+        true
+    }
     fn flush_all_messages(&mut self) {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let channels = self.channels.as_mut().unwrap();
 
         //two steps reading due to self mutability required by channel
@@ -279,6 +276,10 @@ impl JokolayComponent for JokoRenderer {
         }
     }
     fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let link: Option<&MumbleLink> = None;
         if let Some(link) = link {
             //x positive => east

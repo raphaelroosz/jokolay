@@ -16,7 +16,7 @@ use crate::app::mumble::mumble_gui;
 use crate::manager::{theme::ThemeManager, trace::JokolayTracingLayer};
 use init::{get_jokolay_dir, get_jokolay_path};
 use joko_component_manager::ComponentManager;
-use joko_component_models::{from_data, JokolayComponent, JokolayUIComponent};
+use joko_component_models::{from_data, JokolayComponent};
 use joko_package_manager::{PackageDataManager, PackageUIManager};
 
 use joko_link_manager::MumbleManager;
@@ -57,7 +57,7 @@ struct JokolayGui {
     ui_configuration: ui_parameters::JokolayUIConfiguration,
     menu_panel: MenuPanel,
     joko_renderer: JokoRenderer,
-    egui_context: egui::Context,
+    egui_context: Arc<egui::Context>,
     glfw_backend: GlfwBackend,
     theme_manager: ThemeManager,
     mumble_manager: MumbleManager,
@@ -86,21 +86,21 @@ impl Jokolay {
             MumbleManager::new("MumbleLink", true).wrap_err("failed to create mumble manager")?;
 
         let dummy_plugin = Box::new(JokolayPlugin {});
-        component_manager.register(
+        let _ = component_manager.register(
             "ui:mumble_link",
             Box::new(
                 MumbleManager::new("MumbleLink", true)
                     .wrap_err("failed to create mumble manager")?,
             ),
         );
-        component_manager.register(
+        let _ = component_manager.register(
             "back:mumble_link",
             Box::new(
                 MumbleManager::new("MumbleLink", false)
                     .wrap_err("failed to create mumble manager")?,
             ),
         );
-        component_manager.register("dummy_plugin", dummy_plugin);
+        let _ = component_manager.register("dummy_plugin", dummy_plugin);
 
         /*
         components can be migrated to plugins
@@ -121,7 +121,8 @@ impl Jokolay {
                     ...
         */
 
-        component_manager.register(
+        let egui_context = Arc::new(egui::Context::default());
+        let _ = component_manager.register(
             "back:jokolay_package_manager",
             Box::new(PackageDataManager::new(
                 Arc::clone(&root_dir), //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
@@ -136,7 +137,6 @@ impl Jokolay {
         let mut theme_manager =
             ThemeManager::new(Arc::clone(&root_dir)).wrap_err("failed to create theme manager")?;
 
-        let egui_context = egui::Context::default();
         theme_manager.init_egui(&egui_context);
         let mut glfw_backend = GlfwBackend::new(GlfwConfig {
             glfw_callback: Box::new(|glfw_context| {
@@ -167,20 +167,24 @@ impl Jokolay {
         let maximal_window_width = video_mode.unwrap().width;
         let maximal_window_height = video_mode.unwrap().height;
 
-        component_manager.register(
+        let _ = component_manager.register(
             "ui:jokolay_package_manager",
-            Box::new(PackageUIManager::new()),
+            Box::new(PackageUIManager::new(
+                Arc::clone(&egui_context),
+                JokoRenderer::get_z_near(),
+            )),
         );
-        let mut package_ui_manager = PackageUIManager::new();
+        let mut package_ui_manager =
+            PackageUIManager::new(Arc::clone(&egui_context), JokoRenderer::get_z_near());
 
         glfw_backend.window.set_floating(true);
         glfw_backend.window.set_decorated(false);
 
-        component_manager.register(
+        let joko_renderer = JokoRenderer::new(&glfw_backend);
+        let _ = component_manager.register(
             "ui:jokolay_renderer",
-            Box::new(JokoRenderer::new(&mut glfw_backend)),
+            Box::new(JokoRenderer::new(&glfw_backend)),
         );
-        let joko_renderer = JokoRenderer::new(&mut glfw_backend);
 
         let editable_path = jokolay_to_editable_path(&root_path)
             .to_str()
@@ -372,7 +376,7 @@ impl Jokolay {
             } = &mut gui;
             let latest_time = glfw_backend.glfw.get_time();
 
-            let etx = egui_context.clone();
+            let etx = Arc::clone(&egui_context);
 
             /*
             if etx.input(|i| {
@@ -438,7 +442,8 @@ impl Jokolay {
                 let _ = u2mb_sender.send(MessageToMumbleLinkBack::Value(local_state.link.clone()));
             } else {
                 let is_mumble_alive = mumble_manager.is_alive();
-                let res: MumbleLinkResult = from_data(mumble_manager.tick(latest_time));
+                let data = mumble_manager.tick(latest_time);
+                let res: MumbleLinkResult = from_data(data);
                 match &res.link {
                     Some(link) => {
                         if link.changes.contains(MumbleChanges::WindowPosition)
@@ -478,7 +483,7 @@ impl Jokolay {
                         .window
                         .set_size((client_size_x - 1) as i32, (client_size_y - 1) as i32);
                 }
-                package_manager.tick(latest_time, egui_context);
+                package_manager.tick(latest_time);
                 local_state.window_changed = false;
             }
 

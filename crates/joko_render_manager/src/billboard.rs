@@ -45,6 +45,7 @@ impl BillBoardRenderer {
 
             let marker_vertex_buffer = create_buffer(gl);
             let marker_vertex_array = create_marker_array(gl, marker_vertex_buffer);
+            gl_error!(gl);
 
             Self {
                 markers: Vec::new(),

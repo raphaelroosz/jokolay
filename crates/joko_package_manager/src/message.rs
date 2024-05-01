@@ -1,8 +1,5 @@
-mutually_exclusive_features::exactly_one_of!("messages_any", "messages_bincode");
-
 use std::collections::{BTreeMap, HashSet};
 
-use joko_component_models::ComponentDataExchange;
 use joko_package_models::{
     attributes::CommonAttributes,
     package::{PackCore, PackageImportReport},
@@ -29,19 +26,6 @@ pub enum MessageToPackageUI {
     TextureSwapChain, // The list of texture to load was changed, will be soon followed by a RenderSwapChain
     TrailTexture(Uuid, RelativePath, Uuid, CommonAttributes),
 }
-/*
-impl From<MessageToPackageUI> for ComponentDataExchange {
-    fn from(src: MessageToPackageUI) -> ComponentDataExchange {
-        bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
-    }
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<MessageToPackageUI> for ComponentDataExchange {
-    fn into(self) -> MessageToPackageUI {
-        bincode::deserialize(&self).unwrap()
-    }
-}*/
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum MessageToPackageBack {
@@ -55,17 +39,3 @@ pub enum MessageToPackageBack {
     ReloadPack,
     SavePack(String, PackCore),
 }
-/*
-impl From<MessageToPackageBack> for ComponentDataExchange {
-    fn from(src: MessageToPackageBack) -> ComponentDataExchange {
-        bincode::serialize(&src).unwrap() //shall crash if wrong serialization of messages
-    }
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<MessageToPackageBack> for ComponentDataExchange {
-    fn into(self) -> MessageToPackageBack {
-        bincode::deserialize(&self).unwrap()
-    }
-}
-*/

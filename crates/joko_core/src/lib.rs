@@ -1,5 +1,3 @@
-mutually_exclusive_features::exactly_one_of!("messages_any", "messages_bincode");
-
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};

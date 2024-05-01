@@ -5,8 +5,8 @@ use std::{
 
 use cap_std::fs_utf8::Dir;
 use joko_component_models::{
-    default_data_exchange, from_data, to_data, ComponentDataExchange, JokolayComponent,
-    JokolayComponentDeps,
+    default_data_exchange, from_data, to_data, ComponentChannels, ComponentDataExchange,
+    JokolayComponent,
 };
 use joko_package_models::package::PackageImportReport;
 
@@ -485,6 +485,10 @@ impl PackageDataManager {
     }
 
     pub fn load_all(&mut self) {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         once::assert_has_not_been_called!("Early load must happen only once");
         let channels = self.channels.as_mut().unwrap();
         // Called only once at application start.
@@ -521,6 +525,10 @@ impl PackageDataManager {
 
 impl JokolayComponent for PackageDataManager {
     fn flush_all_messages(&mut self) {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let channels = self.channels.as_mut().unwrap();
         let mut messages = Vec::new();
         while let Ok(msg) = channels.notification_receiver.try_recv() {
@@ -530,38 +538,36 @@ impl JokolayComponent for PackageDataManager {
             self.handle_message(msg);
         }
     }
-    fn bind(
-        &mut self,
-        mut deps: HashMap<u32, tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
-        mut bound: HashMap<u32, joko_component_models::PeerComponentChannel>, // Private channel only two bounded modules can use between each others.
-        mut input_notification: HashMap<u32, tokio::sync::mpsc::Receiver<ComponentDataExchange>>,
-        _notify: HashMap<u32, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
-    ) {
-        let (_, front_end_notifier) = bound.remove(&0).unwrap();
+    fn bind(&mut self, mut channels: ComponentChannels) {
+        let (front_end_notifier, _) = channels.peers.remove(&0).unwrap();
         let channels = PackageDataChannels {
-            subscription_mumblelink: deps.remove(&0).unwrap(),
+            subscription_mumblelink: channels.requirements.remove(&1).unwrap(),
             front_end_notifier,
-            notification_receiver: input_notification.remove(&0).unwrap(),
+            notification_receiver: channels.input_notification.unwrap(),
         };
         self.channels = Some(channels);
     }
     fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let channels = self.channels.as_mut().unwrap();
         let raw_mlr = channels.subscription_mumblelink.blocking_recv().unwrap();
         let mumble_link_result: MumbleLinkResult = from_data(raw_mlr);
         self._tick(&mumble_link_result);
         default_data_exchange()
     }
-}
-
-impl JokolayComponentDeps for PackageDataManager {
     fn notify(&self) -> Vec<&str> {
         vec![]
     }
-    fn peer(&self) -> Vec<&str> {
+    fn peers(&self) -> Vec<&str> {
         vec!["ui:jokolay_package_manager"]
     }
-    fn requires(&self) -> Vec<&str> {
+    fn requirements(&self) -> Vec<&str> {
         vec!["back:mumble_link"]
+    }
+    fn accept_notifications(&self) -> bool {
+        true
     }
 }

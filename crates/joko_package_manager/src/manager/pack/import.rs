@@ -1,7 +1,8 @@
 use joko_package_models::package::PackCore;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub enum ImportStatus {
     #[default]
     UnInitialized,
@@ -9,7 +10,7 @@ pub enum ImportStatus {
     LoadingPack(std::path::PathBuf),
     WaitingLoading(std::path::PathBuf),
     PackDone(String, PackCore, bool),
-    PackError(miette::Report),
+    PackError(String),
 }
 
 pub fn import_pack_from_zip_file_path(
