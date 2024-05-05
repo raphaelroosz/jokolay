@@ -5,8 +5,8 @@ use std::{
 
 use cap_std::fs_utf8::Dir;
 use joko_component_models::{
-    default_data_exchange, from_data, to_data, ComponentChannels, ComponentDataExchange,
-    JokolayComponent,
+    default_component_result, from_broadcast, from_data, to_data, Component, ComponentChannels,
+    ComponentMessage, ComponentResult,
 };
 use joko_package_models::package::PackageImportReport;
 
@@ -43,10 +43,10 @@ pub struct PackageBackSharedState {
 }
 
 struct PackageDataChannels {
-    subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
+    subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentResult>,
 
-    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
-    front_end_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
+    front_end_notifier: tokio::sync::mpsc::Sender<ComponentMessage>,
+    front_end_receiver: tokio::sync::mpsc::Receiver<ComponentMessage>,
 }
 
 /// It manage everything that has to do with marker packs.
@@ -299,69 +299,43 @@ impl PackageDataManager {
             }
             MessageToPackageBack::SavePack(name, pack) => {
                 tracing::trace!("Handling of MessageToPackageBack::SavePack");
-                let std_file = std::fs::OpenOptions::new()
+                println!("save in {:?}", self.marker_packs_path);
+
+                /*let std_file = std::fs::OpenOptions::new()
                     .open(&self.marker_packs_path)
-                    .or(Err("Could not open file"))
                     .unwrap();
-                let marker_packs_dir = cap_std::fs_utf8::Dir::from_std_file(std_file);
+                let marker_packs_dir = cap_std::fs_utf8::Dir::from_std_file(std_file);*/
                 let name = name.as_str();
-                if marker_packs_dir.exists(name) {
-                    match marker_packs_dir.remove_dir_all(name).into_diagnostic() {
+                let pack_path = self.marker_packs_path.join(name);
+
+                if pack_path.exists() {
+                    match std::fs::remove_dir_all(pack_path.clone()).into_diagnostic() {
                         Ok(_) => {}
                         Err(e) => {
                             error!(?e, "failed to delete already existing marker pack");
                         }
                     }
                 }
-                if let Err(e) = marker_packs_dir.create_dir_all(name) {
+                if let Err(e) = std::fs::create_dir_all(pack_path.clone()) {
                     error!(?e, "failed to create directory for pack");
                 }
-                match marker_packs_dir.open_dir(name) {
-                    Ok(dir) => {
-                        let pack_path = self.marker_packs_path.join(name);
-                        let (data_pack, mut texture_pack, mut report) =
-                            build_from_core(name.to_string(), dir.into(), pack_path, pack);
-                        tracing::trace!("Package loaded into data and texture");
-                        let uuid_of_insertion = self.save(data_pack, report.clone());
-                        report.uuid = uuid_of_insertion;
-                        texture_pack.uuid = uuid_of_insertion;
-                        let channels = self.channels.as_mut().unwrap();
-                        let _ = channels.front_end_notifier.blocking_send(to_data(
-                            MessageToPackageUI::LoadedPack(texture_pack, report),
-                        ));
-                    }
-                    Err(e) => {
-                        error!(
-                            ?e,
-                            "failed to open marker pack directory to save pack {:?} {}",
-                            self.marker_packs_path,
-                            name
-                        );
-                    }
-                };
+
+                let (data_pack, mut texture_pack, mut report) =
+                    build_from_core(name.to_string(), pack_path, pack);
+                tracing::trace!("Package loaded into data and texture");
+                let uuid_of_insertion = self.save(data_pack, report.clone());
+                report.uuid = uuid_of_insertion;
+                texture_pack.uuid = uuid_of_insertion;
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels.front_end_notifier.blocking_send(to_data(
+                    MessageToPackageUI::LoadedPack(texture_pack, report),
+                ));
             }
             #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!("Handling MessageToPackageBack has not been implemented yet");
             }
         }
-    }
-
-    pub fn flush_all_messages(&mut self) -> PackageBackSharedState {
-        tracing::trace!(
-            "choice_of_category_changed: {}",
-            self.state.choice_of_category_changed
-        );
-
-        let mut messages = Vec::new();
-        let channels = self.channels.as_mut().unwrap();
-        while let Ok(msg) = channels.notification_receiver.try_recv() {
-            messages.push(from_data(msg));
-        }
-        for msg in messages {
-            self.handle_message(msg);
-        }
-        self.state.clone()
     }
 
     pub fn _tick(&mut self, mumble_link_result: &MumbleLinkResult) {
@@ -379,6 +353,10 @@ impl PackageDataManager {
             let mut have_used_files_list_changed = false;
             let map_changed = self.current_map_id != link.map_id;
             self.current_map_id = link.map_id;
+            trace!(
+                "PackageDataManager::tick map id is: {}",
+                self.current_map_id
+            );
             for pack in self.packs.values_mut() {
                 if let Some(current_map) = pack.maps.get(&link.map_id) {
                     for marker in current_map.markers.values() {
@@ -449,6 +427,8 @@ impl PackageDataManager {
                     .front_end_notifier
                     .blocking_send(to_data(MessageToPackageUI::TextureSwapChain));
             }
+        } else {
+            trace!("PackageDataManager::tick no link")
         }
         self.state.choice_of_category_changed = false;
     }
@@ -466,8 +446,7 @@ impl PackageDataManager {
             }
         }
         self.delete_packs(to_delete);
-        self.tasks
-            .save_report(Arc::clone(&data_pack.dir), report, true);
+        self.tasks.save_report(data_pack.path.clone(), report, true);
         self.tasks.save_data(&mut data_pack, true);
         let mut uuid_to_insert = data_pack.uuid;
         while self.packs.contains_key(&uuid_to_insert) {
@@ -490,6 +469,7 @@ impl PackageDataManager {
             "channels must be initialized before interacting with component."
         );
         once::assert_has_not_been_called!("Early load must happen only once");
+        trace!("Load all packages");
         let channels = self.channels.as_mut().unwrap();
         // Called only once at application start.
         let _ = channels
@@ -508,6 +488,7 @@ impl PackageDataManager {
             for ((_, texture_pack), (_, report)) in
                 std::iter::zip(texture_packages, report_packages)
             {
+                trace!("load_all notify front of a valid loaded package");
                 let _ = channels.front_end_notifier.blocking_send(to_data(
                     MessageToPackageUI::LoadedPack(texture_pack, report),
                 ));
@@ -523,40 +504,51 @@ impl PackageDataManager {
     }
 }
 
-impl JokolayComponent for PackageDataManager {
+impl Component for PackageDataManager {
+    fn init(&mut self) {
+        self.load_all();
+    }
+
     fn flush_all_messages(&mut self) {
         assert!(
             self.channels.is_some(),
             "channels must be initialized before interacting with component."
         );
+        tracing::trace!(
+            "choice_of_category_changed: {}",
+            self.state.choice_of_category_changed
+        );
+
         let channels = self.channels.as_mut().unwrap();
         let mut messages = Vec::new();
-        while let Ok(msg) = channels.notification_receiver.try_recv() {
-            messages.push(from_data(msg));
+        while let Ok(msg) = channels.front_end_receiver.try_recv() {
+            messages.push(from_data(&msg));
         }
         for msg in messages {
             self.handle_message(msg);
         }
     }
     fn bind(&mut self, mut channels: ComponentChannels) {
-        let (front_end_notifier, _) = channels.peers.remove(&0).unwrap();
+        let (front_end_notifier, front_end_receiver) = channels.peers.remove(&0).unwrap();
         let channels = PackageDataChannels {
             subscription_mumblelink: channels.requirements.remove(&1).unwrap(),
             front_end_notifier,
-            notification_receiver: channels.input_notification.unwrap(),
+            front_end_receiver,
         };
         self.channels = Some(channels);
     }
-    fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+    fn tick(&mut self, _latest_time: f64) -> ComponentResult {
         assert!(
             self.channels.is_some(),
             "channels must be initialized before interacting with component."
         );
         let channels = self.channels.as_mut().unwrap();
-        let raw_mlr = channels.subscription_mumblelink.blocking_recv().unwrap();
-        let mumble_link_result: MumbleLinkResult = from_data(raw_mlr);
+        //trace!("blocking waiting for subscription_mumblelink {}", channels.subscription_mumblelink.len());
+        let raw_mlr = channels.subscription_mumblelink.try_recv().unwrap();
+        let mumble_link_result: MumbleLinkResult = from_broadcast(&raw_mlr);
+        //trace!("subscription_mumblelink provided data");
         self._tick(&mumble_link_result);
-        default_data_exchange()
+        default_component_result()
     }
     fn notify(&self) -> Vec<&str> {
         vec![]
@@ -568,6 +560,6 @@ impl JokolayComponent for PackageDataManager {
         vec!["back:mumble_link"]
     }
     fn accept_notifications(&self) -> bool {
-        true
+        false
     }
 }

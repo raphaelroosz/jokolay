@@ -1,4 +1,4 @@
-use joko_component_models::{to_data, ComponentDataExchange};
+use joko_component_models::{to_data, ComponentMessage};
 use joko_package_models::{
     attributes::CommonAttributes,
     category::Category,
@@ -213,7 +213,7 @@ impl CategorySelection {
     }
 
     fn context_menu(
-        u2b_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        u2b_sender: &tokio::sync::mpsc::Sender<ComponentMessage>,
         cs: &mut CategorySelection,
         ui: &mut egui::Ui,
     ) {
@@ -236,7 +236,7 @@ impl CategorySelection {
     }
 
     pub fn recursive_selection_ui(
-        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentMessage>,
         selection: &mut OrderedHashMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         is_dirty: &mut bool,

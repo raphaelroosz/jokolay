@@ -11,10 +11,16 @@ use joko_package_models::{
     trail::{TBin, TBinStatus, Trail},
 };
 use ordered_hash_map::OrderedHashMap;
-use std::{collections::VecDeque, io::Read, str::FromStr};
+use std::{
+    collections::VecDeque,
+    io::{Cursor, Read},
+    path::Path,
+    str::FromStr,
+};
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 use uuid::Uuid;
 use xot::{Element, Node, Xot};
+use zip::result::{ZipError, ZipResult};
 
 const MAX_TRAIL_CHUNK_LENGTH: f32 = 400.0;
 
@@ -729,6 +735,53 @@ fn parse_category_categories_xml_recursive(
     Ok(())
 }
 
+//copy of zip::ZipArchive extract, but handling the bad windows path
+fn extract<P: AsRef<Path>>(
+    zip_archive: &mut zip::ZipArchive<Cursor<Vec<u8>>>,
+    directory: P,
+) -> ZipResult<()> {
+    use std::fs;
+    use std::io;
+
+    for i in 0..zip_archive.len() {
+        let mut file = zip_archive.by_index(i)?;
+        let filepath = file
+            .enclosed_name()
+            .ok_or(ZipError::InvalidArchive("Invalid file path"))?;
+
+        let filepath = filepath
+            .to_owned()
+            .as_mut_os_str()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_lowercase();
+        let filepath = std::path::Path::new(&filepath);
+        let outpath = directory.as_ref().join(filepath);
+
+        if file.name().replace('\\', "/").ends_with('/') {
+            fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(p)?;
+                }
+            }
+            let mut outfile = fs::File::create(&outpath)?;
+            io::copy(&mut file, &mut outfile)?;
+        }
+        // Get and Set permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(mode) = file.unix_mode() {
+                fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
+            }
+        }
+    }
+    Ok(())
+}
 pub(crate) fn get_pack_from_taco_zip(
     input_path: std::path::PathBuf,
     extract_temporary_path: &std::path::PathBuf,
@@ -744,8 +797,7 @@ pub(crate) fn get_pack_from_taco_zip(
     if extract_temporary_path.exists() {
         std::fs::remove_dir_all(extract_temporary_path).or(Err("Could not purge target folder"))?;
     }
-    zip_archive
-        .extract(extract_temporary_path)
+    extract(&mut zip_archive, extract_temporary_path)
         .or(Err("Could not extract archive into target folder"))?;
 
     _get_pack_from_taco_folder(extract_temporary_path)

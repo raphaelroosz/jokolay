@@ -3,14 +3,13 @@ use crate::{
     BASE64_ENGINE,
 };
 use base64::Engine;
-use cap_std::fs_utf8::Dir;
 use glam::Vec3;
 use joko_package_models::{
     attributes::XotAttributeNameIDs, category::Category, marker::Marker, route::Route, trail::Trail,
 };
 use miette::Result;
 use ordered_hash_map::OrderedHashMap;
-use std::io::Write;
+use std::{io::Write, path::Path};
 use tracing::info;
 use uuid::Uuid;
 use xot::{Element, Node, SerializeOptions, Xot};
@@ -18,15 +17,17 @@ use xot::{Element, Node, SerializeOptions, Xot};
 /// Save the pack core as xml pack using the given directory as pack root path.
 pub(crate) fn save_pack_data_to_dir(
     pack_data: &LoadedPackData,
-    writing_directory: &Dir,
+    writing_directory: &Path,
 ) -> Result<(), String> {
     // save categories
     info!(
-        "Saving data pack {}, {} categories, {} maps",
+        "Saving data pack {}, {} topmost categories, {} maps into {:?}",
         pack_data.name,
         pack_data.categories.len(),
-        pack_data.maps.len()
+        pack_data.maps.len(),
+        writing_directory
     );
+    std::fs::create_dir_all(writing_directory).or(Err("failed to create core pack directory"))?;
     let mut tree = Xot::new();
     let names = XotAttributeNameIDs::register_with_xot(&mut tree);
     let od = tree.new_element(names.overlay_data);
@@ -38,15 +39,22 @@ pub(crate) fn save_pack_data_to_dir(
         .with_serialize_options(SerializeOptions { pretty: true })
         .to_string(root_node)
         .or(Err("failed to convert cats xot to string"))?;
-    writing_directory
-        .create("categories.xml")
+
+    let target = writing_directory.join("categories.xml");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(target)
         .or(Err("failed to create categories.xml"))?
         .write_all(cats.as_bytes())
         .or(Err("failed to write to categories.xml"))?;
+
     // save maps
     for (map_id, map_data) in pack_data.maps.iter() {
         if map_data.markers.is_empty() && map_data.trails.is_empty() {
-            if let Err(e) = writing_directory.remove_file(format!("{map_id}.xml")) {
+            let map_file_name = writing_directory.join(format!("{map_id}.xml"));
+            if let Err(e) = std::fs::remove_file(map_file_name) {
                 info!(
                     ?e,
                     map_id, "failed to remove xml file that had nothing to write to"
@@ -86,8 +94,12 @@ pub(crate) fn save_pack_data_to_dir(
             .with_serialize_options(SerializeOptions { pretty: true })
             .to_string(root_node)
             .or(Err("failed to serialize map data to string"))?;
-        writing_directory
-            .create(format!("{map_id}.xml"))
+        let target = writing_directory.join(format!("{map_id}.xml"));
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(target)
             .or(Err("failed to create map xml file"))?
             .write_all(map_xml.as_bytes())
             .or(Err("failed to write map data to file"))?;
@@ -96,7 +108,7 @@ pub(crate) fn save_pack_data_to_dir(
 }
 pub(crate) fn save_pack_texture_to_dir(
     pack_texture: &LoadedPackTexture,
-    writing_directory: &Dir,
+    writing_directory: &Path,
 ) -> Result<(), String> {
     info!(
         "Saving texture pack {}, {} textures, {} tbins",
@@ -104,25 +116,30 @@ pub(crate) fn save_pack_texture_to_dir(
         pack_texture.textures.len(),
         pack_texture.tbins.len()
     );
+    std::fs::create_dir_all(writing_directory).or(Err("failed to create core pack directory"))?;
     // save images
     for (img_path, img) in pack_texture.textures.iter() {
         if let Some(parent) = img_path.parent() {
-            writing_directory.create_dir_all(parent).or(Err(format!(
+            std::fs::create_dir_all(writing_directory.join(parent)).or(Err(format!(
                 "failed to create parent dir for an image: {img_path}"
             )))?;
         }
-        let amount = writing_directory
-            .create(img_path.as_str())
+        let target = writing_directory.join(img_path.as_str());
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(target)
             .or(Err(format!("failed to create file for image: {img_path}")))?
-            .write(img);
-        if amount.is_err() {
-            return Err(format!("failed to write image bytes to file: {img_path}"));
-        }
+            .write_all(img)
+            .or(Err(format!(
+                "failed to write image bytes to file: {img_path}"
+            )))?;
     }
     // save tbins
     for (tbin_path, tbin) in pack_texture.tbins.iter() {
         if let Some(parent) = tbin_path.parent() {
-            writing_directory.create_dir_all(parent).or(Err(format!(
+            std::fs::create_dir_all(writing_directory.join(parent)).or(Err(format!(
                 "failed to create parent dir of tbin: {tbin_path}"
             )))?;
         }
@@ -136,11 +153,14 @@ pub(crate) fn save_pack_texture_to_dir(
             bytes.extend_from_slice(&node[1].to_ne_bytes());
             bytes.extend_from_slice(&node[2].to_ne_bytes());
         }
-        writing_directory
-            .create(tbin_path.as_str())
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(writing_directory.join(tbin_path.as_str()))
             .or(Err(format!("failed to create tbin file: {tbin_path}")))?
-            .write_all(&bytes)
-            .or(Err(format!("failed to write tbin to path: {tbin_path}")))?;
+            .write_all(bytes.as_slice())
+            .or(Err(format!("failed to write tbin to file: {tbin_path}")))?;
     }
     Ok(())
 }

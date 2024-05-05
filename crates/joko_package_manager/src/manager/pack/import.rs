@@ -10,6 +10,7 @@ pub enum ImportStatus {
     LoadingPack(std::path::PathBuf),
     WaitingLoading(std::path::PathBuf),
     PackDone(String, PackCore, bool),
+    WaitingForSave,
     PackError(String),
 }
 

@@ -1,10 +1,11 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    path::PathBuf,
+    io::{Read, Write},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use joko_component_models::{to_data, ComponentDataExchange};
+use joko_component_models::{to_data, ComponentMessage};
 use joko_package_models::{
     attributes::{Behavior, CommonAttributes},
     category::Category,
@@ -59,7 +60,7 @@ pub(crate) struct PackTasks {
     //an object that can handle such tasks should be passed as argument of any function that may required an async action
     save_texture_task: AsyncTask<LoadedPackTexture, Result<(), String>>,
     save_data_task: AsyncTask<LoadedPackData, Result<(), String>>,
-    save_report_task: AsyncTask<(Arc<Dir>, PackageImportReport), Result<(), String>>,
+    save_report_task: AsyncTask<(PathBuf, PackageImportReport), Result<(), String>>,
     load_all_packs_task:
         AsyncTask<(Arc<Dir>, std::path::PathBuf), Result<ImportAllTriplet, String>>,
 }
@@ -69,7 +70,7 @@ pub(crate) struct PackTasks {
 pub struct LoadedPackData {
     pub name: String,
     pub uuid: Uuid,
-    pub dir: Arc<Dir>,
+    pub path: PathBuf,
     /// The actual xml pack.
     //pub core: PackCore,
     pub categories: OrderedHashMap<Uuid, Category>,
@@ -133,11 +134,9 @@ impl PackTasks {
         //saved on load, or change of list of what to display
         if status {
             std::mem::take(&mut texture_pack._is_dirty);
-            let _ = self
-                .save_texture_task
-                .lock()
-                .unwrap()
-                .send(texture_pack.clone());
+            let t = self.save_texture_task.lock().unwrap();
+            let _ = t.send(texture_pack.clone());
+            t.recv().unwrap().unwrap(); //expose errors of the save function call. If it had an error, we shall crash.
         }
     }
 
@@ -147,7 +146,7 @@ impl PackTasks {
             let _ = self.save_data_task.lock().unwrap().send(data_pack.clone());
         }
     }
-    pub fn save_report(&self, target_dir: Arc<Dir>, report: PackageImportReport, status: bool) {
+    pub fn save_report(&self, target_dir: PathBuf, report: PackageImportReport, status: bool) {
         if status {
             let _ = self
                 .save_report_task
@@ -157,11 +156,15 @@ impl PackTasks {
         }
     }
     pub fn load_all_packs(&self, jokolay_dir: Arc<Dir>, root_path: std::path::PathBuf) {
-        let _ = self
+        match self
             .load_all_packs_task
             .lock()
             .unwrap()
-            .send((jokolay_dir, root_path));
+            .send((jokolay_dir, root_path))
+        {
+            Ok(_) => {}
+            Err(e) => error!(?e),
+        }
     }
     pub fn wait_for_load_all_packs(&self) -> Result<ImportAllTriplet, String> {
         self.load_all_packs_task.lock().unwrap().recv().unwrap()
@@ -181,70 +184,68 @@ impl PackTasks {
 
     fn async_save_texture(pack_texture: LoadedPackTexture) -> Result<(), String> {
         trace!("Save texture package {:?}", pack_texture.path);
-        let std_file = std::fs::OpenOptions::new()
-            .open(&pack_texture.path)
-            .or(Err("Could not open file"))?;
-        let dir = cap_std::fs_utf8::Dir::from_std_file(std_file);
+
         match serde_json::to_string_pretty(&pack_texture.selectable_categories) {
-            Ok(cs_json) => match dir.write(LoadedPackData::CATEGORY_SELECTION_FILE_NAME, cs_json) {
-                Ok(_) => {
-                    debug!("wrote cat selections to disk after creating a default from pack");
-                }
-                Err(e) => {
-                    debug!(?e, "failed to write category data to disk");
-                }
-            },
+            Ok(cs_json) => {
+                let target = pack_texture
+                    .path
+                    .join(LoadedPackData::CATEGORY_SELECTION_FILE_NAME);
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(target)
+                    .expect("failed to open category selection data file on disk")
+                    .write_all(cs_json.as_bytes())
+                    .expect("failed to write category selection data to disk");
+            }
             Err(e) => {
                 error!(?e, "failed to serialize cat selection");
             }
         }
         match serde_json::to_string_pretty(&pack_texture.activation_data) {
-            Ok(ad_json) => match dir.write(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME, ad_json) {
-                Ok(_) => {
-                    debug!("wrote activation to disk after creating a default from pack");
-                }
-                Err(e) => {
-                    debug!(?e, "failed to write activation data to disk");
-                }
-            },
+            Ok(ad_json) => {
+                let target = pack_texture
+                    .path
+                    .join(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME);
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(target)
+                    .expect("failed to open activation data file on disk")
+                    .write_all(ad_json.as_bytes())
+                    .expect("failed to write activation data to disk");
+            }
             Err(e) => {
                 error!(?e, "failed to serialize activation");
             }
         }
-        let writing_directory = dir
-            .open_dir(LoadedPackData::CORE_PACK_DIR_NAME)
-            .or(Err("failed to open core pack directory"))?;
-        save_pack_texture_to_dir(&pack_texture, &writing_directory)?;
-        Ok(())
+        let target = pack_texture.path.join(LoadedPackData::CORE_PACK_DIR_NAME);
+        save_pack_texture_to_dir(&pack_texture, &target)
     }
 
     fn async_save_data(pack_data: LoadedPackData) -> Result<(), String> {
-        trace!("Save data package {:?}", pack_data.dir);
-        pack_data
-            .dir
-            .create_dir_all(LoadedPackData::CORE_PACK_DIR_NAME)
-            .or(Err("failed to create xmlpack directory"))?;
-        let writing_directory = pack_data
-            .dir
-            .open_dir(LoadedPackData::CORE_PACK_DIR_NAME)
-            .or(Err("failed to open core pack directory"))?;
-        save_pack_data_to_dir(&pack_data, &writing_directory)?;
+        trace!("Save data package {:?}", pack_data.path);
+        let target = pack_data.path.join(LoadedPackData::CORE_PACK_DIR_NAME);
+        save_pack_data_to_dir(&pack_data, &target)?;
         Ok(())
     }
 
-    fn async_save_report(input: (Arc<Dir>, PackageImportReport)) -> Result<(), String> {
+    fn async_save_report(input: (PathBuf, PackageImportReport)) -> Result<(), String> {
         let (writing_directory, report) = input;
         trace!("Save report package {:?}", writing_directory);
         match serde_json::to_string_pretty(&report) {
             Ok(cs_json) => {
-                match writing_directory.write(PackageImportReport::REPORT_FILE_NAME, cs_json) {
-                    Ok(_) => {
-                        debug!("wrote import quality report to disk");
-                    }
-                    Err(e) => {
-                        debug!(?e, "failed to write import quality report to disk");
-                    }
-                }
+                let target = writing_directory.join(PackageImportReport::REPORT_FILE_NAME);
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(target)
+                    .expect("failed to open import quality report file on disk")
+                    .write_all(cs_json.as_bytes())
+                    .expect("failed to write import quality report to disk");
             }
             Err(e) => {
                 error!(?e, "failed to serialize import quality report");
@@ -259,13 +260,16 @@ impl LoadedPackData {
     const CATEGORY_SELECTION_FILE_NAME: &'static str = "cats.json";
 
     fn load_selectable_categories(
-        pack_dir: &Arc<Dir>,
+        path: &Path,
         pack: &PackCore,
     ) -> OrderedHashMap<String, CategorySelection> {
         //FIXME: we need to patch those categories from the one in the files
-        (if pack_dir.is_file(Self::CATEGORY_SELECTION_FILE_NAME) {
-            match pack_dir.read_to_string(Self::CATEGORY_SELECTION_FILE_NAME) {
-                Ok(cd_json) => match serde_json::from_str(&cd_json) {
+        let target = path.join(Self::CATEGORY_SELECTION_FILE_NAME);
+        trace!("load_selectable_categories open {:?}", target);
+        let mut cd_json = String::new();
+        (if let Ok(mut file) = std::fs::OpenOptions::new().read(true).open(&target) {
+            match file.read_to_string(&mut cd_json) {
+                Ok(_n) => match serde_json::from_str(&cd_json) {
                     Ok(cd) => Some(cd),
                     Err(e) => {
                         error!(?e, "failed to deserialize category data");
@@ -284,14 +288,17 @@ impl LoadedPackData {
         .unwrap_or_else(|| {
             let cs = CategorySelection::default_from_pack_core(pack);
             match serde_json::to_string_pretty(&cs) {
-                Ok(cs_json) => match pack_dir.write(Self::CATEGORY_SELECTION_FILE_NAME, cs_json) {
-                    Ok(_) => {
-                        debug!("wrote cat selections to disk after creating a default from pack");
-                    }
-                    Err(e) => {
-                        debug!(?e, "failed to write category data to disk");
-                    }
-                },
+                Ok(cs_json) => {
+                    let target = path.join(Self::CATEGORY_SELECTION_FILE_NAME);
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(target)
+                        .expect("failed to open category file on disk")
+                        .write_all(cs_json.as_bytes())
+                        .expect("failed to write category data to disk");
+                }
                 Err(e) => {
                     error!(?e, "failed to serialize cat selection");
                 }
@@ -321,7 +328,7 @@ impl LoadedPackData {
         })
         .flatten()
     }
-    pub fn load_from_dir(name: String, pack_dir: Arc<Dir>) -> Result<Self, String> {
+    pub fn load_from_dir(name: String, pack_dir: Arc<Dir>, path: PathBuf) -> Result<Self, String> {
         if !pack_dir
             .try_exists(Self::CORE_PACK_DIR_NAME)
             .or(Err("failed to check if pack core exists"))?
@@ -344,12 +351,12 @@ impl LoadedPackData {
 
         //FIXME: Since categories have randomly generated uuids (and not saved), one need to build from those, all the time.
         //let selectable_categories = CategorySelection::default_from_pack_core(&core);
-        let selectable_categories = Self::load_selectable_categories(&pack_dir, &core);
+        let selectable_categories = Self::load_selectable_categories(&path, &core);
 
         Ok(LoadedPackData {
             name,
             uuid: core.uuid,
-            dir: pack_dir,
+            path,
             selected_files: Default::default(),
             all_categories: core.all_categories,
             categories: core.categories,
@@ -393,7 +400,7 @@ impl LoadedPackData {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tick(
         &mut self,
-        b2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        b2u_sender: &tokio::sync::mpsc::Sender<ComponentMessage>,
         link: &MumbleLink,
         currently_used_files: &BTreeMap<Uuid, bool>,
         list_of_active_or_selected_elements_changed: bool,
@@ -417,7 +424,7 @@ impl LoadedPackData {
 
     fn on_map_changed(
         &mut self,
-        b2u_sender: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        b2u_sender: &tokio::sync::mpsc::Sender<ComponentMessage>,
         link: &MumbleLink,
         currently_used_files: &BTreeMap<Uuid, bool>,
         active_elements: &mut HashSet<Uuid>,
@@ -601,7 +608,7 @@ impl LoadedPackTexture {
     }
     pub fn category_sub_menu(
         &mut self,
-        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentMessage>,
         ui: &mut egui::Ui,
         show_only_active: bool,
         import_quality_report: &PackageImportReport,
@@ -629,7 +636,7 @@ impl LoadedPackTexture {
     }
     pub(crate) fn tick(
         &mut self,
-        renderer_notifier: &tokio::sync::mpsc::Sender<ComponentDataExchange>,
+        renderer_notifier: &tokio::sync::mpsc::Sender<ComponentMessage>,
         _timestamp: f64,
         link: &MumbleLink,
         //next_on_screen: &mut HashSet<Uuid>,
@@ -847,14 +854,14 @@ pub fn jokolay_to_marker_dir(jokolay_dir: &Arc<Dir>) -> Result<Dir> {
             PACKAGES_DIRECTORY_NAME
         ))?;
 
-    marker_packs_dir
+    marker_manager_dir
         .create_dir_all(EDITABLE_PACKAGE_NAME)
         .into_diagnostic()
         .wrap_err("failed to create editable package directory")?;
-    let editable_package = marker_packs_dir
+    let editable_package = marker_manager_dir
         .open_dir(EDITABLE_PACKAGE_NAME)
         .into_diagnostic()
-        .wrap_err("failed to create editable package directory")?;
+        .wrap_err("failed to open editable package directory")?;
 
     editable_package
         .create_dir_all("data")
@@ -868,8 +875,14 @@ pub fn load_all_from_dir(
     input: (Arc<Dir>, std::path::PathBuf),
 ) -> Result<ImportAllTriplet, String> {
     let (jokolay_dir, root_path) = input;
-    let marker_packs_dir =
-        jokolay_to_marker_dir(&jokolay_dir).or(Err("Failed to open packages directory"))?;
+    trace!("load_all_from_dir {:?}", root_path);
+    let marker_packs_dir = match jokolay_to_marker_dir(&jokolay_dir) {
+        Ok(marker_packs_dir) => marker_packs_dir,
+        Err(e) => {
+            error!("Failed to open packages directory {:?}", e);
+            return Err("Failed to open packages directory".to_string());
+        }
+    };
     let marker_packs_path = jokolay_to_marker_path(&root_path);
     let mut data_packs: BTreeMap<Uuid, LoadedPackData> = Default::default();
     let mut texture_packs: BTreeMap<Uuid, LoadedPackTexture> = Default::default();
@@ -897,8 +910,7 @@ pub fn load_all_from_dir(
                 if name == EDITABLE_PACKAGE_NAME {
                     //TODO: have a version of loading that does not involve already ingested packages
                     if let Ok(pack_core) = load_pack_core_from_normalized_folder(&pack_dir, None) {
-                        let lp =
-                            build_from_core(name.clone(), pack_dir.into(), pack_path, pack_core);
+                        let lp = build_from_core(name.clone(), pack_path, pack_core);
                         let (data, tex, report) = lp;
                         data_packs.insert(data.uuid, data);
                         texture_packs.insert(tex.uuid, tex);
@@ -952,21 +964,16 @@ fn build_from_dir(
         name,
         elaspsed.as_millis()
     );
-    let res = build_from_core(name.clone(), pack_dir, pack_path, core);
+    let res = build_from_core(name.clone(), pack_path, core);
     Ok(res)
 }
 
-pub fn build_from_core(
-    name: String,
-    pack_dir: Arc<Dir>,
-    path: PathBuf,
-    core: PackCore,
-) -> ImportTriplet {
-    let selectable_categories = LoadedPackData::load_selectable_categories(&pack_dir, &core);
+pub fn build_from_core(name: String, path: PathBuf, core: PackCore) -> ImportTriplet {
+    let selectable_categories = LoadedPackData::load_selectable_categories(&path, &core);
     let data = LoadedPackData {
         name: name.clone(),
         uuid: core.uuid,
-        dir: Arc::clone(&pack_dir),
+        path: path.clone(),
         selected_files: Default::default(),
         all_categories: core.all_categories,
         categories: core.categories,
@@ -978,25 +985,28 @@ pub fn build_from_core(
         selectable_categories: selectable_categories.clone(),
         entities_parents: core.entities_parents,
     };
-    let activation_data = (if pack_dir.is_file(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME) {
-        match pack_dir.read_to_string(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME) {
-            Ok(contents) => match serde_json::from_str(&contents) {
-                Ok(cd) => Some(cd),
+    let target = path.join(LoadedPackTexture::ACTIVATION_DATA_FILE_NAME);
+    let mut cd_json = String::new();
+    let activation_data =
+        (if let Ok(mut file) = std::fs::OpenOptions::new().read(true).open(target) {
+            match file.read_to_string(&mut cd_json) {
+                Ok(_n) => match serde_json::from_str(&cd_json) {
+                    Ok(cd) => Some(cd),
+                    Err(e) => {
+                        error!(?e, "failed to deserialize activation data");
+                        None
+                    }
+                },
                 Err(e) => {
-                    error!(?e, "failed to deserialize activation data");
+                    error!(?e, "failed to read string of category data");
                     None
                 }
-            },
-            Err(e) => {
-                error!(?e, "failed to read string of category data");
-                None
             }
-        }
-    } else {
-        None
-    })
-    .flatten()
-    .unwrap_or_default();
+        } else {
+            None
+        })
+        .flatten()
+        .unwrap_or_default();
     let tex = LoadedPackTexture {
         uuid: core.uuid,
         selectable_categories,

@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::RwLock;
+
 use crate::billboard::BillBoardRenderer;
 use crate::gl_error;
 use egui_render_three_d::three_d;
@@ -10,14 +13,17 @@ use egui_render_three_d::three_d::ScissorBox;
 use egui_render_three_d::three_d::Viewport;
 use egui_render_three_d::ThreeDBackend;
 use egui_render_three_d::ThreeDConfig;
+use egui_window_glfw_passthrough::glfw::Context;
 use egui_window_glfw_passthrough::GlfwBackend;
 use glam::Mat4;
-use joko_component_models::default_data_exchange;
+use joko_component_models::default_component_result;
+use joko_component_models::from_broadcast;
 use joko_component_models::from_data;
+use joko_component_models::Component;
 use joko_component_models::ComponentChannels;
-use joko_component_models::ComponentDataExchange;
-use joko_component_models::JokolayComponent;
-use joko_link_models::MumbleLink;
+use joko_component_models::ComponentMessage;
+use joko_component_models::ComponentResult;
+use joko_link_models::MumbleLinkResult;
 use joko_link_models::UIState;
 use joko_render_models::messages::MessageToRenderer;
 use three_d::prelude::*;
@@ -25,7 +31,8 @@ use three_d::prelude::*;
 use joko_render_models::{marker::MarkerObject, trail::TrailObject};
 
 struct JokoRendererChannels {
-    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+    notification_receiver: tokio::sync::mpsc::Receiver<ComponentMessage>,
+    subscription_mumble_link: tokio::sync::broadcast::Receiver<ComponentResult>,
 }
 pub struct JokoRenderer {
     pub view_proj: Mat4,
@@ -35,30 +42,36 @@ pub struct JokoRenderer {
     pub has_link: bool,
     pub is_map_open: bool,
     pub billboard_renderer: BillBoardRenderer,
+    glfw_backend: Arc<RwLock<GlfwBackend>>,
+    egui_context: Arc<egui::Context>,
     pub gl: egui_render_three_d::ThreeDBackend,
     channels: Option<JokoRendererChannels>,
 }
 
+/// Necessary lies for GlfwBackend, which despite not moved (Arc + Mutex) shall prevent compilation
+unsafe impl Send for JokoRenderer {}
+unsafe impl Sync for JokoRenderer {}
+
 impl JokoRenderer {
-    pub fn new(glfw_backend: &GlfwBackend) -> Self {
+    pub fn new(glfw_backend: Arc<RwLock<GlfwBackend>>, egui_context: Arc<egui::Context>) -> Self {
         /*
         FIXME: Box + JokoRenderer => segfault when panic
             Arc vs Box: no change
         */
         //let glfw = glfw_backend.glfw.clone();
+        let framebuffer_size_physical = glfw_backend.read().unwrap().framebuffer_size_physical;
         let backend = ThreeDBackend::new(
             ThreeDConfig {
                 glow_config: Default::default(),
             },
-            |s| glfw_backend.glfw.get_proc_address_raw(s),
-            //glfw_backend.window.raw_window_handle(),
-            glfw_backend.framebuffer_size_physical,
+            |s| glfw_backend.read().unwrap().glfw.get_proc_address_raw(s),
+            framebuffer_size_physical,
         );
         let viewport = Viewport {
             x: 0,
             y: 0,
-            width: glfw_backend.framebuffer_size_physical[0],
-            height: glfw_backend.framebuffer_size_physical[1],
+            width: framebuffer_size_physical[0],
+            height: framebuffer_size_physical[1],
         };
         let gl = &backend.context;
         unsafe { gl_error!(gl) };
@@ -79,7 +92,9 @@ impl JokoRenderer {
             has_link: false,
             is_map_open: false,
             gl: backend,
+            egui_context,
             billboard_renderer,
+            glfw_backend,
             cam_pos: Default::default(),
             channels: None,
         }
@@ -145,7 +160,7 @@ impl JokoRenderer {
         ];
       }
       */
-    fn handle_u2u_message(&mut self, msg: MessageToRenderer) {
+    fn handle_message(&mut self, msg: MessageToRenderer) {
         match msg {
             MessageToRenderer::BulkMarkerObject(marker_objects) => {
                 tracing::debug!(
@@ -194,7 +209,8 @@ impl JokoRenderer {
         self.billboard_renderer.trails_wip.push(trail_object);
     }
 
-    pub fn prepare_frame(&mut self, latest_framebuffer_size_getter: impl FnMut() -> [u32; 2]) {
+    pub fn prepare_frame(&mut self) {
+        let latest_framebuffer_size_getter = || Self::frame_size(Arc::clone(&self.glfw_backend));
         self.gl.prepare_frame(latest_framebuffer_size_getter);
         unsafe {
             let gl = self.gl.context.clone();
@@ -247,12 +263,38 @@ impl JokoRenderer {
         };
         self.gl.resize_framebuffer(latest_size);
     }
+
+    fn frame_size(glfw_backend: Arc<RwLock<GlfwBackend>>) -> [u32; 2] {
+        let mut glfw_backend = glfw_backend.write().unwrap();
+        let latest_size = glfw_backend.window.get_framebuffer_size();
+
+        let latest_size = [latest_size.0 as _, latest_size.1 as _];
+
+        glfw_backend.framebuffer_size_physical = latest_size;
+        glfw_backend.window_size_logical = [
+            latest_size[0] as f32 / glfw_backend.scale,
+            latest_size[1] as f32 / glfw_backend.scale,
+        ];
+        glfw_backend.resized_event_pending = false;
+        latest_size
+    }
+    fn _window_tick(&mut self) {
+        let resized_event_pending = { self.glfw_backend.read().unwrap().resized_event_pending };
+        if resized_event_pending {
+            let latest_size = Self::frame_size(Arc::clone(&self.glfw_backend));
+            self.resize_framebuffer(latest_size);
+        }
+
+        self.prepare_frame();
+    }
 }
 
-impl JokolayComponent for JokoRenderer {
-    fn bind(&mut self, channels: ComponentChannels) {
+impl Component for JokoRenderer {
+    fn init(&mut self) {}
+    fn bind(&mut self, mut channels: ComponentChannels) {
         let channels = JokoRendererChannels {
             notification_receiver: channels.input_notification.unwrap(),
+            subscription_mumble_link: channels.requirements.remove(&0).unwrap(),
         };
         self.channels = Some(channels);
     }
@@ -269,19 +311,27 @@ impl JokolayComponent for JokoRenderer {
         //two steps reading due to self mutability required by channel
         let mut messages = Vec::new();
         while let Ok(msg) = channels.notification_receiver.try_recv() {
-            messages.push(from_data(msg));
+            messages.push(from_data(&msg));
         }
         for msg in messages {
-            self.handle_u2u_message(msg);
+            self.handle_message(msg);
         }
     }
-    fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+    fn requirements(&self) -> Vec<&str> {
+        vec!["ui:mumble_link"]
+    }
+    fn tick(&mut self, latest_time: f64) -> ComponentResult {
         assert!(
             self.channels.is_some(),
             "channels must be initialized before interacting with component."
         );
-        let link: Option<&MumbleLink> = None;
-        if let Some(link) = link {
+
+        self._window_tick();
+        let channels = self.channels.as_mut().unwrap();
+        let raw_link = channels.subscription_mumble_link.blocking_recv().unwrap();
+        let link: MumbleLinkResult = from_broadcast(&raw_link);
+        if let Some(link) = link.link {
+            //trace!("JokoRenderer {:?} {:?}", link.player_pos, link.cam_pos);
             //x positive => east
             //y positive => ascention
             //z positive => north
@@ -358,6 +408,37 @@ impl JokolayComponent for JokoRenderer {
         } else {
             self.has_link = false;
         }
-        default_data_exchange()
+        let egui::FullOutput {
+            platform_output,
+            textures_delta,
+            shapes,
+            ..
+        } = self.egui_context.end_frame();
+        if !platform_output.copied_text.is_empty() {
+            self.glfw_backend
+                .write()
+                .unwrap()
+                .window
+                .set_clipboard_string(&platform_output.copied_text);
+        }
+
+        // if it doesn't require either keyboard or pointer, set passthrough to true
+        self.glfw_backend
+            .write()
+            .unwrap()
+            .window
+            .set_mouse_passthrough(
+                !(self.egui_context.wants_keyboard_input()
+                    || self.egui_context.wants_pointer_input()),
+            );
+
+        let meshes = self
+            .egui_context
+            .tessellate(shapes, self.egui_context.pixels_per_point());
+        let window_size_logical = self.glfw_backend.read().unwrap().window_size_logical;
+        self.render_egui(meshes, textures_delta, window_size_logical, latest_time);
+        self.present();
+        self.glfw_backend.write().unwrap().window.swap_buffers();
+        default_component_result()
     }
 }

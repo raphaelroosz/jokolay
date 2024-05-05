@@ -14,9 +14,7 @@ messages_bincode = ["dep:bincode"]
 [dependencies]
 bimap = { workspace = true }
 bincode = { workspace = true, optional = true }
-egui = { workspace = true }
-scopeguard = "1.2.0"
 tokio = { workspace = true }
 joko_component_models = { path = "../joko_component_models" }
 petgraph = "0.6.4"
-tracing.workspace = true
+tracing = {workspace = true}

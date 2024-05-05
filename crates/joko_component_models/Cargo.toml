@@ -14,8 +14,6 @@ messages_bincode = ["dep:bincode"]
 
 [dependencies]
 bincode = { workspace = true, optional = true }
-downcast-rs = "1.2.1"
-egui = { workspace = true }
-scopeguard = "1.2.0"
+#downcast-rs = "1.2.1" # TODO: implement messages_downcast feature
 tokio = { workspace = true }
 serde = { workspace = true }

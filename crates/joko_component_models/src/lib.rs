@@ -9,11 +9,11 @@ mod messages_bincode;
 pub use messages_bincode::*;
 
 pub type PeerComponentChannel = (
-    tokio::sync::mpsc::Sender<ComponentDataExchange>,
-    tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+    tokio::sync::mpsc::Sender<ComponentMessage>,
+    tokio::sync::mpsc::Receiver<ComponentMessage>,
 );
 
-pub trait JokolayComponent {
+pub trait Component: Send + Sync {
     /**
     Names are external to traits and implementation. That way it is easy to change it without change in binary.
     In case of first class components, name is hardcoded.
@@ -44,10 +44,13 @@ pub trait JokolayComponent {
         https://docs.rs/tokio/latest/tokio/sync/watch/index.html
     */
 
+    /// called once after building relationships
+    fn init(&mut self);
+
     /// Drain every notifications sent by any other component
     fn flush_all_messages(&mut self);
 
-    fn tick(&mut self, latest_time: f64) -> ComponentDataExchange;
+    fn tick(&mut self, latest_time: f64) -> ComponentResult;
 
     /// when reasing the channels, the id of channels are set by their appearance order in "peers", then "requirements", then "notify"
     fn bind(&mut self, channels: ComponentChannels);
@@ -59,11 +62,12 @@ pub trait JokolayComponent {
     */
 }
 
+/// when reasing the channels, the id of channels are set by their appearance order in "peers", then "requirements", then "notify"
 #[derive(Default)]
 pub struct ComponentChannels {
     pub requirements:
-        std::collections::HashMap<usize, tokio::sync::broadcast::Receiver<ComponentDataExchange>>,
+        std::collections::HashMap<usize, tokio::sync::broadcast::Receiver<ComponentResult>>,
     pub peers: std::collections::HashMap<usize, PeerComponentChannel>, // ??? scsc if exists, this is a private channel only two bounded modules can use between each others.
-    pub input_notification: Option<tokio::sync::mpsc::Receiver<ComponentDataExchange>>,
-    pub notify: std::collections::HashMap<usize, tokio::sync::mpsc::Sender<ComponentDataExchange>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
+    pub input_notification: Option<tokio::sync::mpsc::Receiver<ComponentMessage>>,
+    pub notify: std::collections::HashMap<usize, tokio::sync::mpsc::Sender<ComponentMessage>>, // used to send a message to another plugin. This is a reversed requirement. A plugin force itself into the path of another.
 }

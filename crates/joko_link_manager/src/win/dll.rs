@@ -253,7 +253,7 @@ pub mod d3d11 {
     //     0
     // }
     pub mod wine {
-        use crate::mumble::ctypes::*;
+        use crate::ctypes::*;
         use crate::win::MumbleWinImpl;
         use crate::DEFAULT_MUMBLELINK_NAME;
         use miette::{Context, IntoDiagnostic, Result};

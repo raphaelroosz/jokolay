@@ -1,4 +1,5 @@
 use std::{
+    borrow::BorrowMut,
     collections::{BTreeMap, HashSet},
     sync::{Arc, Mutex},
 };
@@ -8,12 +9,14 @@ use image::EncodableLayout;
 use joko_package_models::{attributes::CommonAttributes, package::PackageImportReport};
 
 use joko_render_models::messages::MessageToRenderer;
+use joko_ui_models::{UIArea, UIPanel};
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, trace};
 
 use crate::message::MessageToPackageBack;
 use joko_component_models::{
-    from_data, to_data, ComponentChannels, ComponentDataExchange, JokolayComponent,
+    from_broadcast, from_data, to_broadcast, to_data, Component, ComponentChannels,
+    ComponentMessage, ComponentResult,
 };
 use joko_core::{serde_glam::Vec3, RelativePath};
 use joko_link_models::{MumbleChanges, MumbleLink, MumbleLinkResult};
@@ -34,11 +37,11 @@ pub struct PackageUISharedState {
 }
 
 struct PackageUIChannels {
-    subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentDataExchange>,
-    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+    subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentResult>,
 
-    back_end_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
-    renderer_notifier: tokio::sync::mpsc::Sender<ComponentDataExchange>,
+    back_end_notifier: tokio::sync::mpsc::Sender<ComponentMessage>,
+    back_end_receiver: tokio::sync::mpsc::Receiver<ComponentMessage>,
+    renderer_notifier: tokio::sync::mpsc::Sender<ComponentMessage>,
 }
 
 #[must_use]
@@ -72,7 +75,7 @@ impl PackageUIManager {
             nb_running_tasks_on_back: 0,
             import_status: Default::default(),
         };
-        Self {
+        let mut res = Self {
             packs: Default::default(),
             tasks: PackTasks::new(),
             reports: Default::default(),
@@ -90,7 +93,9 @@ impl PackageUIManager {
             delayed_trail_texture: Default::default(),
             channels: None,
             state,
-        }
+        };
+        res._init();
+        res
     }
 
     fn handle_message(&mut self, msg: MessageToPackageUI) {
@@ -108,6 +113,10 @@ impl PackageUIManager {
                 self.delete_packs(to_delete);
             }
             MessageToPackageUI::FirstLoadDone => {
+                let channels = self.channels.as_ref().unwrap();
+                let renderer_notifier = &channels.renderer_notifier;
+                let _ =
+                    renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
                 self.state.first_load_done = true;
             }
             MessageToPackageUI::ImportedPack(file_name, pack) => {
@@ -127,6 +136,9 @@ impl PackageUIManager {
                 let _ = channels.back_end_notifier.blocking_send(to_data(
                     MessageToPackageBack::CategoryActivationStatusChanged,
                 ));
+                let renderer_notifier = &channels.renderer_notifier;
+                let _ =
+                    renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
             }
             MessageToPackageUI::MarkerTexture(
                 pack_uuid,
@@ -179,27 +191,8 @@ impl PackageUIManager {
         }
     }
 
-    pub fn flush_all_messages(&mut self) -> PackageUISharedState {
-        let channels = self.channels.as_mut().unwrap();
-        if let Ok(mut import_status) = self.state.import_status.lock() {
-            if let ImportStatus::LoadingPack(file_path) = &mut *import_status {
-                let _ = channels
-                    .back_end_notifier
-                    .blocking_send(to_data(MessageToPackageBack::ImportPack(file_path.clone())));
-                *import_status = ImportStatus::WaitingLoading(file_path.clone());
-            }
-        }
-        let mut messages = Vec::new();
-        while let Ok(msg) = channels.notification_receiver.try_recv() {
-            messages.push(from_data(msg));
-        }
-        for msg in messages {
-            self.handle_message(msg);
-        }
-        self.state.clone()
-    }
-
-    pub fn late_init(&mut self, egui_context: &egui::Context) {
+    fn _init(&mut self) {
+        let egui_context: &egui::Context = &self.egui_context;
         //TODO: make it even later, at another place
         if self.default_marker_texture.is_none() {
             let img = image::load_from_memory(include_bytes!("../../images/marker.png")).unwrap();
@@ -329,6 +322,7 @@ impl PackageUIManager {
     }
 
     pub fn _tick(&mut self, timestamp: f64, link: &MumbleLink, z_near: f32) -> Result<()> {
+        trace!("PackageUIManager::_tick for {} packages", self.packs.len());
         let tasks = &self.tasks;
         let channels = self.channels.as_ref().unwrap();
         let renderer_notifier = &channels.renderer_notifier;
@@ -337,6 +331,7 @@ impl PackageUIManager {
         }
         if link.changes.contains(MumbleChanges::Position)
             || link.changes.contains(MumbleChanges::Map)
+            || self.state.list_of_textures_changed
         {
             for pack in self.packs.values_mut() {
                 let span_guard = info_span!("Updating package status").entered();
@@ -344,62 +339,11 @@ impl PackageUIManager {
                 std::mem::drop(span_guard);
             }
             let _ = renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
+            self.state.list_of_textures_changed = false;
         }
         Ok(())
     }
 
-    pub fn menu_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        nb_running_tasks_on_back: i32,
-        nb_running_tasks_on_network: i32,
-    ) {
-        ui.menu_button("Markers", |ui| {
-            if self.show_only_active {
-                if ui.button("Show everything").clicked() {
-                    self.show_only_active = false;
-                }
-            } else if ui.button("Show only active").clicked() {
-                self.show_only_active = true;
-            }
-            if ui.button("Activate all elements").clicked() {
-                self.category_set_all(true);
-                let channels = self.channels.as_mut().unwrap();
-                let _ = channels
-                    .back_end_notifier
-                    .blocking_send(to_data(MessageToPackageBack::CategorySetAll(true)));
-            }
-            if ui.button("Deactivate all elements").clicked() {
-                self.category_set_all(false);
-                let channels = self.channels.as_mut().unwrap();
-                let _ = channels
-                    .back_end_notifier
-                    .blocking_send(to_data(MessageToPackageBack::CategorySetAll(false)));
-            }
-
-            let channels = self.channels.as_mut().unwrap();
-            for (pack, import_quality_report) in
-                std::iter::zip(self.packs.values_mut(), self.reports.values())
-            {
-                //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
-                //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
-                pack.category_sub_menu(
-                    &channels.back_end_notifier,
-                    ui,
-                    self.show_only_active,
-                    import_quality_report,
-                );
-            }
-        });
-        if self.tasks.is_running()
-            || nb_running_tasks_on_back > 0
-            || nb_running_tasks_on_network > 0
-        {
-            let sp = egui::Spinner::new()
-                .color(self.status_as_color(nb_running_tasks_on_back, nb_running_tasks_on_network));
-            ui.add(sp);
-        }
-    }
     pub fn status_as_color(
         &self,
         nb_running_tasks_on_back: i32,
@@ -435,12 +379,14 @@ impl PackageUIManager {
         egui::Color32::from_rgb(color_ui, color_back, color_network)
     }
 
-    fn gui_file_manager(&mut self, etx: &egui::Context, open: &mut bool) {
+    fn gui_file_manager(&mut self, is_open: &mut bool) {
+        //FIXME: the deactivate all for all files, seems to toggle only the next one not in target state
+        let egui_context = self.egui_context.borrow_mut();
         let channels = self.channels.as_mut().unwrap();
         let mut files_changed = false;
         Window::new("File Manager")
-            .open(open)
-            .show(etx, |ui| -> Result<()> {
+            .open(is_open)
+            .show(egui_context, |ui| -> Result<()> {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     egui::Grid::new("link grid")
                         .num_columns(4)
@@ -531,153 +477,153 @@ impl PackageUIManager {
         }
     }
 
-    fn gui_package_details(&mut self, ui: &mut Ui, uuid: Uuid) {
+    fn gui_package_details(ui: &mut Ui, data: (&LoadedPackTexture, &PackageImportReport)) {
         // protection against deletion while displaying details
-        if let Some(pack) = self.packs.get(&uuid) {
-            if let Some(report) = self.reports.get(&uuid) {
-                let collapsing =
-                    CollapsingHeader::new(format!("Last load details of package {}", pack.name));
-                let header_response = collapsing
-                    .open(Some(true))
+        let (pack, report) = data;
+
+        let collapsing =
+            CollapsingHeader::new(format!("Last load details of package {}", pack.name));
+        //FIXME: clear the pack details
+        let _header_response = collapsing
+            .open(Some(true))
+            .show(ui, |ui| {
+                egui::Grid::new("packs details")
+                    .striped(true)
                     .show(ui, |ui| {
-                        egui::Grid::new("packs details")
-                            .striped(true)
-                            .show(ui, |ui| {
-                                let number_of = &report.number_of;
-                                ui.label("categories");
-                                ui.label(format!("{}", number_of.categories));
-                                ui.end_row();
-                                ui.label("missing_categories");
-                                ui.label(format!("{}", number_of.missing_categories));
-                                ui.end_row();
-                                ui.label("textures");
-                                ui.label(format!("{}", number_of.textures));
-                                ui.end_row();
-                                ui.label("missing_textures");
-                                ui.label(format!("{}", number_of.missing_textures));
-                                ui.end_row();
-                                ui.label("entities");
-                                ui.label(format!("{}", number_of.entities));
-                                ui.end_row();
-                                ui.label("markers");
-                                ui.label(format!("{}", number_of.markers));
-                                ui.end_row();
-                                ui.label("trails");
-                                ui.label(format!("{}", number_of.trails));
-                                ui.end_row();
-                                ui.label("routes");
-                                ui.label(format!("{}", number_of.routes));
-                                ui.end_row();
-                                ui.label("maps");
-                                ui.label(format!("{}", number_of.maps));
-                                ui.end_row();
-                                ui.label("source_files");
-                                ui.label(format!("{}", number_of.source_files));
-                                ui.end_row();
-                            })
+                        let number_of = &report.number_of;
+                        ui.label("categories");
+                        ui.label(format!("{}", number_of.categories));
+                        ui.end_row();
+                        ui.label("missing_categories");
+                        ui.label(format!("{}", number_of.missing_categories));
+                        ui.end_row();
+                        ui.label("textures");
+                        ui.label(format!("{}", number_of.textures));
+                        ui.end_row();
+                        ui.label("missing_textures");
+                        ui.label(format!("{}", number_of.missing_textures));
+                        ui.end_row();
+                        ui.label("entities");
+                        ui.label(format!("{}", number_of.entities));
+                        ui.end_row();
+                        ui.label("markers");
+                        ui.label(format!("{}", number_of.markers));
+                        ui.end_row();
+                        ui.label("trails");
+                        ui.label(format!("{}", number_of.trails));
+                        ui.end_row();
+                        ui.label("routes");
+                        ui.label(format!("{}", number_of.routes));
+                        ui.end_row();
+                        ui.label("maps");
+                        ui.label(format!("{}", number_of.maps));
+                        ui.end_row();
+                        ui.label("source_files");
+                        ui.label(format!("{}", number_of.source_files));
+                        ui.end_row();
                     })
-                    .header_response;
-                if header_response.clicked() {
+            })
+            .header_response;
+        /*if header_response.clicked() {
+            self.pack_details = None;
+        }*/
+    }
+    fn gui_package_list(&mut self, is_open: &mut bool) {
+        let egui_context = self.egui_context.borrow_mut();
+        let import_status = self.state.import_status.clone();
+        let details = if let Some(uuid) = self.pack_details {
+            if let Some(pack) = self.packs.get(&uuid) {
+                if let Some(report) = self.reports.get(&uuid) {
+                    Some((pack, report))
+                } else {
                     self.pack_details = None;
+                    None
                 }
             } else {
                 self.pack_details = None;
+                None
             }
         } else {
-            self.pack_details = None;
-        }
-    }
-    fn gui_package_list(
-        &mut self,
-        etx: &egui::Context,
-        import_status: &Arc<Mutex<ImportStatus>>,
-        open: &mut bool,
-        first_load_done: bool,
-    ) {
-        Window::new("Package Loader").open(open).show(etx, |ui| -> Result<()> {
+            None
+        };
+        Window::new("Package Loader").open(is_open).show(egui_context, |ui| -> Result<()> {
             let channels = self.channels.as_mut().unwrap();
-            CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
-                egui::Grid::new("packs").striped(true).show(ui, |ui| {
-                    if !first_load_done {
-                        ui.label("Loading in progress...");
-                    }
-                    let mut to_delete = vec![];
-                    for pack in self.packs.values() {
-                        ui.label(pack.name.clone());
-                        if ui.button("delete").clicked() {
-                            to_delete.push(pack.uuid);
+            if !self.state.first_load_done {
+                ui.label("Loading in progress...");
+            } else {
+                CollapsingHeader::new("Loaded Packs").show(ui, |ui| {
+                    egui::Grid::new("packs").striped(true).show(ui, |ui| {
+                        let mut to_delete = vec![];
+                        for pack in self.packs.values() {
+                            ui.label(pack.name.clone());
+                            if ui.button("delete").clicked() {
+                                to_delete.push(pack.uuid);
+                            }
+                            if ui.button("Details").clicked() {
+                                self.pack_details = Some(pack.uuid);
+                            }
+                            if ui.button("Export").clicked() {
+                                //TODO
+                            }
+                            ui.end_row();
                         }
-                        if ui.button("Details").clicked() {
-                            self.pack_details = Some(pack.uuid);
+                        if !to_delete.is_empty() {
+                            let _ = channels.back_end_notifier.blocking_send(to_data(MessageToPackageBack::DeletePacks(to_delete)));
                         }
-                        if ui.button("Export").clicked() {
-                            //TODO
-                        }
-                        ui.end_row();
-                    }
-                    if !to_delete.is_empty() {
-                        let _ = channels.back_end_notifier.blocking_send(to_data(MessageToPackageBack::DeletePacks(to_delete)));
-                    }
+                    });
                 });
-            });
-            if let Some(uuid) = self.pack_details {
-                self.gui_package_details(ui, uuid);
-            } else if let Ok(mut status) = import_status.lock() {
-                match &mut *status {
-                    ImportStatus::UnInitialized => {
-                        if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
-                            Self::pack_importer(Arc::clone(import_status));
+                if let Some(data) = details {
+                    Self::gui_package_details(ui, data);
+                } else if let Ok(mut status) = import_status.lock() {
+                    match &mut *status {
+                        ImportStatus::UnInitialized => {
+                            if ui.button("import pack").on_hover_text("select a taco/zip file to import the marker pack from").clicked() {
+                                Self::pack_importer(Arc::clone(&import_status));
+                            }
+                            //ui.label("import not started yet");
                         }
-                        //ui.label("import not started yet");
-                    }
-                    ImportStatus::WaitingForFileChooser => {
-                        ui.label(
-                            "wailting for the file dialog. choose a taco/zip file to import",
-                        );
-                    }
-                    ImportStatus::LoadingPack(p) | ImportStatus::WaitingLoading(p) => {
-                        ui.label(format!("pack is being imported from {p:?}"));
-                    }
-                    ImportStatus::PackDone(name, pack, saved) => {
-                        if *saved {
-                            ui.colored_label(egui::Color32::GREEN, "pack is saved. press click `clear` button to remove this message");
-                        } else {
-                            ui.horizontal(|ui| {
-                                ui.label("choose a pack name: ");    
-                                ui.text_edit_singleline(name);
-                            });
-                            if ui.button("save").clicked() {
-                                let _ = channels.back_end_notifier.blocking_send(to_data(MessageToPackageBack::SavePack(name.clone(), pack.clone())));
+                        ImportStatus::WaitingForFileChooser => {
+                            ui.label(
+                                "waiting for the file dialog. choose a taco/zip file to import",
+                            );
+                        }
+                        ImportStatus::LoadingPack(p) | ImportStatus::WaitingLoading(p) => {
+                            ui.label(format!("pack is being imported from {p:?}"));
+                        }
+                        ImportStatus::PackDone(name, pack, saved) => {
+                            if *saved {
+                                ui.colored_label(egui::Color32::GREEN, "pack is saved. press click `clear` button to remove this message");
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label("choose a pack name: ");    
+                                    ui.text_edit_singleline(name);
+                                });
+                                if ui.button("save").clicked() {
+                                    let _ = channels.back_end_notifier.blocking_send(to_data(MessageToPackageBack::SavePack(name.clone(), pack.clone())));
+                                    *status = ImportStatus::WaitingForSave;
+                                }
                             }
                         }
-                    }
-                    ImportStatus::PackError(e) => {
-                        let error_msg = format!("failed to import pack due to error: {e:#?}");
-                        if ui.button("clear").on_hover_text(
-                            "This will cancel any pack import in progress. If import is already finished, then it wil simply clear the import status").clicked() {
-                                *status = ImportStatus::UnInitialized;
+                        ImportStatus::WaitingForSave => {
+                            ui.colored_label(egui::Color32::GREEN, "Waiting for pack to be saved.");
                         }
-                        ui.colored_label(
-                            egui::Color32::RED,
-                            error_msg,
-                        );
+                        ImportStatus::PackError(e) => {
+                            let error_msg = format!("failed to import pack due to error: {e:#?}");
+                            if ui.button("clear").on_hover_text(
+                                "This will cancel any pack import in progress. If import is already finished, then it wil simply clear the import status").clicked() {
+                                    *status = ImportStatus::UnInitialized;
+                            }
+                            ui.colored_label(
+                                egui::Color32::RED,
+                                error_msg,
+                            );
+                        }
                     }
                 }
             }
 
             Ok(())
         });
-    }
-    pub fn gui(
-        &mut self,
-        etx: &egui::Context,
-        is_marker_open: &mut bool,
-        import_status: &Arc<Mutex<ImportStatus>>,
-        is_file_open: &mut bool,
-        first_load_done: bool,
-    ) {
-        self.gui_package_list(etx, import_status, is_marker_open, first_load_done);
-        self.gui_file_manager(etx, is_file_open);
     }
 
     pub fn save(&mut self, mut texture_pack: LoadedPackTexture, report: PackageImportReport) {
@@ -698,26 +644,40 @@ impl PackageUIManager {
     }
 }
 
-impl JokolayComponent for PackageUIManager {
+impl Component for PackageUIManager {
+    fn init(&mut self) {}
+
     fn flush_all_messages(&mut self) {
         assert!(self.channels.is_some());
         let channels = self.channels.as_mut().unwrap();
+
+        if let Ok(mut import_status) = self.state.import_status.lock() {
+            if let ImportStatus::LoadingPack(file_path) = &mut *import_status {
+                let _ = channels
+                    .back_end_notifier
+                    .blocking_send(to_data(MessageToPackageBack::ImportPack(file_path.clone())));
+                *import_status = ImportStatus::WaitingLoading(file_path.clone());
+            }
+        }
         let mut messages = Vec::new();
-        while let Ok(msg) = channels.notification_receiver.try_recv() {
-            messages.push(from_data(msg));
+        while let Ok(msg) = channels.back_end_receiver.try_recv() {
+            messages.push(from_data(&msg));
         }
         for msg in messages {
             self.handle_message(msg);
         }
     }
 
-    fn tick(&mut self, timestamp: f64) -> ComponentDataExchange {
+    fn tick(&mut self, timestamp: f64) -> ComponentResult {
         assert!(self.channels.is_some());
+
         let raw_link = {
             let channels = self.channels.as_mut().unwrap();
-            channels.subscription_mumblelink.blocking_recv().unwrap()
+            //trace!("blocking waiting for subscription_mumblelink {}", channels.subscription_mumblelink.len());
+            channels.subscription_mumblelink.try_recv().unwrap()
         };
-        let link_result: MumbleLinkResult = from_data(raw_link);
+        let link_result: MumbleLinkResult = from_broadcast(&raw_link);
+        //trace!("subscription_mumblelink provided data");
 
         for (pack_uuid, tex_path, marker_uuid, position, common_attributes) in
             std::mem::take(&mut self.delayed_marker_texture)
@@ -746,16 +706,18 @@ impl JokolayComponent for PackageUIManager {
         //let channels = self.channels.as_mut().unwrap();
         //let raw_z_near = channels.subscription_near_scene.blocking_recv().unwrap();
         //let z_near: f32 = from_data(raw_z_near);
-        let _ = self._tick(timestamp, link_result.link.as_ref().unwrap(), self.z_near);
-        to_data(self.state.clone())
+        if let Some(link) = link_result.link.as_ref() {
+            let _ = self._tick(timestamp, link, self.z_near);
+        }
+        to_broadcast(self.state.clone())
     }
     fn bind(&mut self, mut channels: ComponentChannels) {
-        let (back_end_notifier, _) = channels.peers.remove(&0).unwrap();
+        let (back_end_notifier, back_end_receiver) = channels.peers.remove(&0).unwrap();
         let channels = PackageUIChannels {
-            subscription_mumblelink: channels.requirements.remove(&2).unwrap(),
-            notification_receiver: channels.input_notification.unwrap(),
+            subscription_mumblelink: channels.requirements.remove(&1).unwrap(),
             back_end_notifier,
-            renderer_notifier: channels.notify.remove(&1).unwrap(),
+            back_end_receiver,
+            renderer_notifier: channels.notify.remove(&2).unwrap(),
         };
 
         self.channels = Some(channels);
@@ -770,6 +732,84 @@ impl JokolayComponent for PackageUIManager {
         vec!["ui:mumble_link"]
     }
     fn accept_notifications(&self) -> bool {
-        true
+        false
+    }
+}
+
+impl UIPanel for PackageUIManager {
+    fn areas(&self) -> Vec<UIArea> {
+        vec![
+            UIArea {
+                is_open: false,
+                name: "Package Manager".to_string(),
+                id: "package_loading".to_string(),
+            },
+            UIArea {
+                is_open: false,
+                name: "File Manager".to_string(),
+                id: "file_manager".to_string(),
+            },
+        ]
+    }
+    fn init(&mut self) {}
+    fn gui(&mut self, is_open: &mut bool, area_id: &str) {
+        match area_id {
+            "package_loading" => {
+                self.gui_package_list(is_open);
+            }
+            "file_manager" => {
+                self.gui_file_manager(is_open);
+            }
+            _ => {}
+        }
+    }
+    fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        let nb_running_tasks_on_back: i32 = 0;
+        let nb_running_tasks_on_network: i32 = 0;
+        ui.menu_button("Markers", |ui| {
+            if self.show_only_active {
+                if ui.button("Show everything").clicked() {
+                    self.show_only_active = false;
+                }
+            } else if ui.button("Show only active").clicked() {
+                self.show_only_active = true;
+            }
+            if ui.button("Activate all elements").clicked() {
+                self.category_set_all(true);
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .back_end_notifier
+                    .blocking_send(to_data(MessageToPackageBack::CategorySetAll(true)));
+            }
+            if ui.button("Deactivate all elements").clicked() {
+                self.category_set_all(false);
+                let channels = self.channels.as_mut().unwrap();
+                let _ = channels
+                    .back_end_notifier
+                    .blocking_send(to_data(MessageToPackageBack::CategorySetAll(false)));
+            }
+
+            let channels = self.channels.as_mut().unwrap();
+            for (pack, import_quality_report) in
+                std::iter::zip(self.packs.values_mut(), self.reports.values())
+            {
+                //pack.is_dirty = pack.is_dirty || force_activation || force_deactivation;
+                //category_sub_menu is for display only, it's a bad idea to use it to manipulate status
+                pack.category_sub_menu(
+                    &channels.back_end_notifier,
+                    ui,
+                    self.show_only_active,
+                    import_quality_report,
+                );
+            }
+        });
+        if self.tasks.is_running()
+            || nb_running_tasks_on_back > 0
+            || nb_running_tasks_on_network > 0
+        {
+            let sp = egui::Spinner::new()
+                .color(self.status_as_color(nb_running_tasks_on_back, nb_running_tasks_on_network));
+            ui.add(sp);
+        }
     }
 }

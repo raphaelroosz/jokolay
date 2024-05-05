@@ -1,44 +1,63 @@
+use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
+    sync::{Arc, RwLock},
 };
 
-use joko_component_models::{ComponentChannels, ComponentDataExchange, JokolayComponent};
+use joko_component_models::{Component, ComponentChannels, ComponentMessage, ComponentResult};
 use petgraph::{
     csr::IndexType,
+    dot::Dot,
     graph::NodeIndex,
     stable_graph::{EdgeReference, StableDiGraph},
     visit::{EdgeRef, IntoNodeIdentifiers},
 };
-use tracing::trace;
+use tracing::{info_span, trace};
 
 type BroadcastChannels = (
-    tokio::sync::broadcast::Sender<ComponentDataExchange>,
-    tokio::sync::broadcast::Receiver<ComponentDataExchange>,
+    tokio::sync::broadcast::Sender<ComponentResult>,
+    tokio::sync::broadcast::Receiver<ComponentResult>,
 );
 pub struct ComponentManager {
     //TODO: make it a component too ?
     known_components: HashMap<String, ComponentHandle>,
     broadcasters: HashMap<String, BroadcastChannels>, //a receiver is kept idle in order to not close the channels. https://docs.rs/tokio/latest/tokio/sync/broadcast/#closing
-    notifications: HashMap<String, tokio::sync::mpsc::Sender<ComponentDataExchange>>,
+    notifications: HashMap<String, tokio::sync::mpsc::Sender<ComponentMessage>>,
+    invocation_order: Vec<String>,
 }
 
 struct ComponentHandle {
     name: String,
-    component: Box<dyn JokolayComponent>,
+    component: Arc<RwLock<dyn Component>>,
     channels: ComponentChannels,
     relations_to_ids: HashMap<String, usize>,
 }
+
 pub struct ComponentExecutor {
+    world: String,
+    broadcasters: HashMap<String, tokio::sync::broadcast::Sender<ComponentResult>>,
     components: Vec<ComponentHandle>, //FIXME: how to type erase result ?
+    has_been_initialized: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum RelationShip {
     Requires,
     Peer,
     Notify,
 }
+
+impl fmt::Display for RelationShip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            RelationShip::Requires => write!(f, "Requires"),
+            RelationShip::Peer => write!(f, "Peer"),
+            RelationShip::Notify => write!(f, "Notify"),
+        }
+    }
+}
+
 fn get_invocation_order<N, E, Ix, F>(
     graph: &mut StableDiGraph<N, E, Ix>,
     filter: F,
@@ -96,39 +115,43 @@ impl ComponentManager {
             known_components: Default::default(),
             broadcasters: Default::default(),
             notifications: Default::default(),
+            invocation_order: Default::default(),
         }
     }
 
     /// Register a component.
     /// On its relationship, each component reference (names) shall be assigned an id.
-    /// That id is 0 based and goes in following order: peers, notify, requirements
+    /// That id is 0 based and goes in following order: peers, requirements, notify
     /// A component, when binding must retrieve the with the proper id.
     pub fn register(
         &mut self,
         component_name: &str,
-        component: Box<dyn JokolayComponent>,
+        component: Arc<RwLock<dyn Component>>,
     ) -> Result<(), String> {
-        if !has_unique_elements(
-            component
+        let mut relations_to_ids: HashMap<String, usize> = Default::default();
+        {
+            let component = component.as_ref().read().unwrap();
+            if !has_unique_elements(
+                component
+                    .peers()
+                    .iter()
+                    .chain(component.requirements().iter())
+                    .chain(component.notify().iter()),
+            ) {
+                return Err(format!(
+                    "Service {} has duplicate elements. Each name can only appear at one place",
+                    component_name
+                ));
+            }
+            for (idx, name) in component
                 .peers()
                 .iter()
+                .chain(component.requirements().iter())
                 .chain(component.notify().iter())
-                .chain(component.requirements().iter()),
-        ) {
-            return Err(format!(
-                "Service {} has duplicate elements. Each name can only appear at one place",
-                component_name
-            ));
-        }
-        let mut relations_to_ids: HashMap<String, usize> = Default::default();
-        for (idx, name) in component
-            .peers()
-            .iter()
-            .chain(component.notify().iter())
-            .chain(component.requirements().iter())
-            .enumerate()
-        {
-            relations_to_ids.insert(name.to_string(), idx);
+                .enumerate()
+            {
+                relations_to_ids.insert(name.to_string(), idx);
+            }
         }
 
         let handle = ComponentHandle {
@@ -143,15 +166,37 @@ impl ComponentManager {
         Ok(())
     }
 
-    pub fn executor(&self, world: &str) -> ComponentExecutor {
+    pub fn executor(&mut self, world: &str) -> ComponentExecutor {
         /*
         TODO:
             extract the list of components of this world
             bind them
             insert them into the executor
         */
+        let mut component_names: Vec<String> = Default::default();
+        for name in self.invocation_order.iter() {
+            if name.starts_with(world) {
+                component_names.push(name.clone());
+            }
+        }
+        trace!(
+            "executor of world: {} shall be built from: {:?}",
+            world,
+            component_names
+        );
+        let mut components: Vec<ComponentHandle> = Default::default();
+        let mut broadcasters: HashMap<String, tokio::sync::broadcast::Sender<ComponentResult>> =
+            Default::default();
+        for name in component_names {
+            components.push(self.known_components.remove(&name).unwrap());
+            let channels = self.broadcasters.get(&name).unwrap();
+            broadcasters.insert(name.clone(), channels.0.clone());
+        }
         ComponentExecutor {
-            components: Default::default(),
+            world: world.to_owned(),
+            components,
+            broadcasters,
+            has_been_initialized: false,
         }
     }
 
@@ -166,7 +211,7 @@ impl ComponentManager {
         type G = petgraph::stable_graph::StableDiGraph<String, RelationShip, u16>;
 
         //TODO: those are temporary channels, one should work between existing and new channels => we need to save the work of a previous build
-        let mut notifications: HashMap<String, tokio::sync::mpsc::Sender<ComponentDataExchange>> =
+        let mut notifications: HashMap<String, tokio::sync::mpsc::Sender<ComponentMessage>> =
             Default::default();
         let mut broadcasters: HashMap<String, BroadcastChannels> = Default::default();
 
@@ -175,9 +220,10 @@ impl ComponentManager {
 
         // initialize the basic channels
         for (component_name, handle) in self.known_components.iter_mut() {
+            let component = handle.component.read().unwrap();
             let node_id = depgraph.add_node(component_name.clone());
             known_services.insert(component_name.clone(), node_id);
-            if handle.component.accept_notifications() {
+            if component.accept_notifications() {
                 let (sender, receiver) = tokio::sync::mpsc::channel(1000);
                 handle.channels.input_notification = Some(receiver);
                 notifications.insert(component_name.clone(), sender);
@@ -187,7 +233,7 @@ impl ComponentManager {
 
         // register nodes
         for handle in self.known_components.values() {
-            let component = &handle.component;
+            let component = handle.component.read().unwrap();
             for peer_name in component.peers() {
                 let peer_name = peer_name.to_string();
                 if !known_services.contains_left(&peer_name) {
@@ -213,14 +259,14 @@ impl ComponentManager {
 
         // register relationships
         for (component_name, handle) in self.known_components.iter() {
-            let component = &handle.component;
+            let component = handle.component.read().unwrap();
             let node_id = *known_services.get_by_left(component_name).unwrap();
 
             trace!("node: {}, peers: {:?}", component_name, component.peers());
             for peer_name in component.peers() {
                 let peer_name = peer_name.to_string();
                 if let Some(peer_handle) = self.known_components.get(&peer_name) {
-                    let peer = &peer_handle.component;
+                    let peer = &peer_handle.component.read().unwrap();
                     trace!("peer: {}, peers: {:?}", peer_name, peer.peers());
                     if !peer.peers().contains(&component_name.as_str()) {
                         return Err(format!(
@@ -270,6 +316,9 @@ impl ComponentManager {
         }
         //If we reached here, it means all peers agree.
 
+        //println!("{}", Dot::with_config(&depgraph, &[Config::EdgeNoLabel]));
+        println!("{}", Dot::with_config(&depgraph, &[]));
+
         //Is there a difference between keys of known_services vs hosted_services.
         let hosted_keys: HashSet<String> = self.known_components.keys().cloned().collect();
         let known_keys: HashSet<String> = depgraph.node_weights().cloned().collect();
@@ -286,7 +335,9 @@ impl ComponentManager {
 
         // check for cycles
         let mut graph_copy = depgraph.clone();
-        let invocation_order = get_invocation_order(&mut graph_copy, |e| matches!(e.weight(), RelationShip::Requires));
+        let invocation_order = get_invocation_order(&mut graph_copy, |e| {
+            matches!(e.weight(), RelationShip::Requires)
+        });
         if graph_copy.node_count() > 0 {
             return Err(format!(
                 "Found a cyclic dependancy between {:?}",
@@ -313,7 +364,9 @@ impl ComponentManager {
             peers_channels.insert(node_id.clone(), tokio::sync::mpsc::channel(1000));
         }*/
         for node_id in depgraph.node_indices() {
-            let notify_rel = depgraph.edges(node_id).filter(|e| matches!(e.weight(), RelationShip::Notify));
+            let notify_rel = depgraph
+                .edges(node_id)
+                .filter(|e| matches!(e.weight(), RelationShip::Notify));
             for rel in notify_rel {
                 let dst_node_id = rel.target();
                 let dst_component_name = known_services.get_by_right(&dst_node_id).unwrap();
@@ -337,7 +390,9 @@ impl ComponentManager {
                     }
                 }
             }
-            let peer_rel = depgraph.edges(node_id).filter(|e| matches!(e.weight(), RelationShip::Peer));
+            let peer_rel = depgraph
+                .edges(node_id)
+                .filter(|e| matches!(e.weight(), RelationShip::Peer));
             for rel in peer_rel {
                 // we shall overwrite the channels, but this is ok since we are not using them yet.
                 // TODO: if in the future there is dynamic loading, there shall be a need to dynamically rebuilt and thus get and reuse the existing channels.
@@ -350,6 +405,7 @@ impl ComponentManager {
                 let src_component_name = known_services.get_by_right(&src_node_id).unwrap();
                 let dst_node_id = rel.target();
                 let dst_component_name = known_services.get_by_right(&dst_node_id).unwrap();
+                trace!("{} is a peer of {}", src_component_name, dst_component_name);
 
                 let src_handle = self.known_components.get_mut(src_component_name).unwrap();
                 let dst_relative_id = *src_handle.relations_to_ids.get(dst_component_name).unwrap();
@@ -360,7 +416,9 @@ impl ComponentManager {
                 dst_handle.channels.peers.insert(src_relative_id, remote);
             }
 
-            let requirement_rel = depgraph.edges(node_id).filter(|e| matches!(e.weight(), RelationShip::Requires));
+            let requirement_rel = depgraph
+                .edges(node_id)
+                .filter(|e| matches!(e.weight(), RelationShip::Requires));
             for rel in requirement_rel {
                 let src_node_id = rel.source();
                 let src_component_name = known_services.get_by_right(&src_node_id).unwrap();
@@ -369,15 +427,31 @@ impl ComponentManager {
 
                 let src_handle = self.known_components.get_mut(src_component_name).unwrap();
                 let dst_relative_id = *src_handle.relations_to_ids.get(dst_component_name).unwrap();
-                let (sender, _) = broadcasters.get(src_component_name).unwrap();
+                let (sender, _) = broadcasters.get(dst_component_name).unwrap();
+                trace!(
+                    "{} requires a value from {}",
+                    src_component_name,
+                    dst_component_name
+                );
+                trace!(
+                    "build broadcast of {}. Before subscribe: {}",
+                    dst_component_name,
+                    sender.receiver_count()
+                );
                 src_handle
                     .channels
                     .requirements
                     .insert(dst_relative_id, sender.subscribe());
+                trace!(
+                    "build broadcast of {}. After subscribe: {}",
+                    dst_component_name,
+                    sender.receiver_count()
+                );
             }
         }
 
         for (service_name, handle) in self.known_components.iter_mut() {
+            let mut component = handle.component.write().unwrap();
             trace!(
                 "bind {} with, notified: {}, notify: {}, requirements: {}, peers: {}",
                 service_name,
@@ -387,12 +461,16 @@ impl ComponentManager {
                 handle.channels.peers.len(),
             );
             trace!("Component ids: {:?}", handle.relations_to_ids);
-            handle.component.bind(std::mem::take(&mut handle.channels));
+            component.bind(std::mem::take(&mut handle.channels));
         }
 
         //unimplemented!("The algorithm to build and check dependancies between components is not implemented");
         self.broadcasters = broadcasters;
         self.notifications = notifications;
+        self.invocation_order = invocation_order
+            .iter()
+            .map(|node_id| known_services.get_by_right(node_id).unwrap().to_string())
+            .collect();
         Ok(())
     }
 }
@@ -403,20 +481,43 @@ impl Default for ComponentManager {
     }
 }
 
-impl ComponentHandle {
-    fn broadcast(&mut self, data: ComponentDataExchange) {
-        println!("{:?}", data);
-        unimplemented!("The broadcast of data is not implemented");
-    }
-}
-
 impl ComponentExecutor {
-    fn tick(&mut self, latest_time: f64) {
+    pub fn init(&mut self) {
+        assert!(
+            !self.has_been_initialized,
+            "An executor can only initialize once the components"
+        );
+        trace!(
+            "ComponentExecutor::init() {} {}",
+            self.world,
+            self.components.len()
+        );
         for handle in self.components.iter_mut() {
-            let res = handle.component.tick(latest_time);
-            handle.broadcast(res);
+            let mut component = handle.component.write().unwrap();
+            component.init();
         }
-        unimplemented!("The component executor tick is not implemented");
+        self.has_been_initialized = true;
+        //unimplemented!("The component executor init is not implemented");
+    }
+    pub fn tick(&mut self, latest_time: f64) {
+        let span_guard = info_span!("ComponentExecutor::tick()", self.world).entered();
+        //trace!("start {}", latest_time);
+        for handle in self.components.iter_mut() {
+            let mut component = handle.component.write().unwrap();
+            //trace!("flush_all_messages of {}", handle.name);
+            component.flush_all_messages();
+
+            //trace!("tick for {}", handle.name);
+            let res = component.tick(latest_time);
+
+            //trace!("broadcast result for {}", handle.name);
+            let b = self.broadcasters.get_mut(&handle.name).unwrap();
+            //trace!("broadcast size for {} before {}, {}", handle.name, b.len(), b.receiver_count());
+            let _ = b.send(res);
+            //trace!("broadcast size for {} after {}", handle.name, b.len());
+        }
+        //trace!("end");
+        drop(span_guard);
     }
 }
 

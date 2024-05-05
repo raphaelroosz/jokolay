@@ -12,7 +12,7 @@ use std::vec;
 
 use enumflags2::BitFlags;
 use joko_component_models::{
-    from_data, to_data, ComponentChannels, ComponentDataExchange, JokolayComponent,
+    from_data, to_broadcast, Component, ComponentChannels, ComponentMessage, ComponentResult,
 };
 use joko_core::serde_glam::{IVec2, UVec2, Vec3};
 use joko_link_models::{
@@ -36,7 +36,7 @@ use linux::MumbleLinuxImpl as MumblePlatformImpl;
 use win::MumbleWinImpl as MumblePlatformImpl;
 
 struct MumbleChannels {
-    notification_receiver: tokio::sync::mpsc::Receiver<ComponentDataExchange>,
+    notification_receiver: tokio::sync::mpsc::Receiver<ComponentMessage>,
 }
 // Useful link size is only [ctypes::USEFUL_C_MUMBLE_LINK_SIZE] . And we add 100 more bytes so that jokolink can put some extra stuff in there
 // pub(crate) const JOKOLINK_MUMBLE_BUFFER_SIZE: usize = ctypes::USEFUL_C_MUMBLE_LINK_SIZE + 100;
@@ -67,7 +67,7 @@ impl MumbleManager {
             channels: None,
             is_ui,
             state: MumbleLinkResult {
-                read_ui_link: true,
+                read_ui_link: false,
                 link: None,
                 ui_link: None,
             },
@@ -103,6 +103,7 @@ impl MumbleManager {
             return Ok(None);
         }
 
+        //println!("mumble_link {} map found {}", self.is_ui, self.link.map_id);
         if !self.backend.is_alive() {
             self.link.client_size.0.x = 0;
             self.link.client_size.0.y = 0;
@@ -223,7 +224,14 @@ impl MumbleManager {
     }
 }
 
-impl JokolayComponent for MumbleManager {
+impl Component for MumbleManager {
+    fn init(&mut self) {}
+
+    fn accept_notifications(&self) -> bool {
+        // we may want to receive data from a manually edited form
+        !self.is_ui
+    }
+
     fn flush_all_messages(&mut self) {
         assert!(
             self.channels.is_some(),
@@ -232,21 +240,22 @@ impl JokolayComponent for MumbleManager {
         let channels = self.channels.as_mut().unwrap();
         let mut messages = Vec::new();
         while let Ok(msg) = channels.notification_receiver.try_recv() {
-            messages.push(from_data(msg));
+            messages.push(from_data(&msg));
         }
         for msg in messages {
             self.handle_message(msg);
         }
     }
 
-    fn tick(&mut self, _latest_time: f64) -> ComponentDataExchange {
+    fn tick(&mut self, _latest_time: f64) -> ComponentResult {
         assert!(
             self.channels.is_some(),
             "channels must be initialized before interacting with component."
         );
         let link = self._tick().unwrap_or(None);
         self.state.link = link.cloned();
-        to_data(self.state.clone())
+        //println!("mumble_link result {} has link: {}", self.is_ui, self.state.link.is_some());
+        to_broadcast(self.state.clone())
     }
     fn bind(&mut self, mut channels: ComponentChannels) {
         let (_, notification_receiver) = channels.peers.remove(&0).unwrap();

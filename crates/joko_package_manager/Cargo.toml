@@ -22,10 +22,11 @@ joko_core = { path = "../joko_core" }
 joko_component_models = { path = "../joko_component_models" }
 joko_render_models = { path = "../joko_render_models" }
 joko_package_models = { path = "../joko_package_models" }
+joko_ui_models = { path = "../joko_ui_models" }
 jokoapi = { path = "../jokoapi" }
 joko_link_models = { path = "../joko_link_models" }
 miette = { workspace = true }
-once = "0.3.4"
+once = {workspace = true}
 ordered_hash_map = { workspace = true }
 paste = { workspace = true }
 phf = { version = "*", features = ["macros"] }

@@ -786,12 +786,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 
 [[package]]
-name = "downcast-rs"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
-
-[[package]]
 name = "ecolor"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1452,10 +1446,8 @@ version = "0.2.1"
 dependencies = [
  "bimap",
  "bincode",
- "egui",
  "joko_component_models",
  "petgraph",
- "scopeguard",
  "tokio",
  "tracing",
 ]
@@ -1465,9 +1457,6 @@ name = "joko_component_models"
 version = "0.2.1"
 dependencies = [
  "bincode",
- "downcast-rs",
- "egui",
- "scopeguard",
  "serde",
  "tokio",
 ]
@@ -1532,6 +1521,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "joko_link_ui_manager"
+version = "0.2.1"
+dependencies = [
+ "egui",
+ "enumflags2",
+ "glam",
+ "joko_component_models",
+ "joko_core",
+ "joko_link_models",
+ "joko_ui_models",
+ "miette",
+ "num-derive",
+ "num-traits",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "joko_package_manager"
 version = "0.2.1"
 dependencies = [
@@ -1552,6 +1559,7 @@ dependencies = [
  "joko_link_models",
  "joko_package_models",
  "joko_render_models",
+ "joko_ui_models",
  "jokoapi",
  "miette",
  "once",
@@ -1610,7 +1618,6 @@ name = "joko_plugin_manager"
 version = "0.2.1"
 dependencies = [
  "joko_component_models",
- "scopeguard",
  "tokio",
 ]
 
@@ -1641,6 +1648,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "joko_ui_models"
+version = "0.2.1"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "jokoapi"
 version = "0.2.1"
 dependencies = [
@@ -1668,9 +1682,11 @@ dependencies = [
  "joko_component_models",
  "joko_link_manager",
  "joko_link_models",
+ "joko_link_ui_manager",
  "joko_package_manager",
  "joko_plugin_manager",
  "joko_render_manager",
+ "joko_ui_models",
  "miette",
  "rayon",
  "rfd",

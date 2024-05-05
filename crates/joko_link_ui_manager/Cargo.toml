@@ -1,0 +1,23 @@
+[package]
+name = "joko_link_ui_manager"
+version = "0.2.1"
+edition = "2021"
+[lib]
+crate-type = ["cdylib", "lib"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+joko_core = { path = "../joko_core" }
+joko_link_models = { path = "../joko_link_models" }
+joko_ui_models = { path = "../joko_ui_models" }
+joko_component_models = { path = "../joko_component_models" }
+num-derive = { version = "0", default-features = false }
+num-traits = { version = "0", default-features = false }
+enumflags2 = { workspace = true }
+miette = { workspace = true }
+serde = { workspace = true }
+glam = { workspace = true }
+tokio = { workspace = true }
+egui = { workspace = true }
+

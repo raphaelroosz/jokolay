@@ -3,7 +3,7 @@
 pub mod dll;
 //putting all the winapi specific stuff here. so that i can lock it all behind a cfg attr at the mod declaration
 
-use crate::mumble::ctypes::{CMumbleLink, C_MUMBLE_LINK_SIZE_FULL};
+use crate::ctypes::{CMumbleLink, C_MUMBLE_LINK_SIZE_FULL};
 use miette::{bail, Context, IntoDiagnostic, Result};
 use notify::Watcher;
 use std::{
@@ -101,6 +101,7 @@ pub struct MumbleWinImpl {
 }
 
 unsafe impl Send for MumbleWinImpl {}
+unsafe impl Sync for MumbleWinImpl {}
 
 impl MumbleWinImpl {
     pub fn new(key: &str) -> Result<Self> {

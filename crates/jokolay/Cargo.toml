@@ -19,10 +19,12 @@ wayland = ["egui_window_glfw_passthrough/wayland"]
 enumflags2 = { workspace = true }
 joko_component_manager = { path = "../joko_component_manager" }
 joko_component_models = { path = "../joko_component_models" }
+joko_ui_models = { path = "../joko_ui_models" }
 joko_plugin_manager = { path = "../joko_plugin_manager" }
 joko_render_manager = { path = "../joko_render_manager" }
 joko_package_manager = { path = "../joko_package_manager" }
 joko_link_manager = { path = "../joko_link_manager" }
+joko_link_ui_manager = { path = "../joko_link_ui_manager" }
 joko_link_models = { path = "../joko_link_models" }
 egui_window_glfw_passthrough = { version = "0.8" }
 # we use this instead of cap-dirs because we want to debug/show the jokolay path to users

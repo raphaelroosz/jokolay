@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, io::Read, sync::Arc};
 
 use cap_std::fs_utf8::Dir;
 use egui::Style;
+use joko_ui_models::{UIArea, UIPanel};
 use miette::{Context, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
@@ -13,6 +14,7 @@ pub struct ThemeManager {
     fonts: BTreeMap<String, Vec<u8>>,
     config: ThemeManagerConfig,
     ui_data: ThemeUIData,
+    egui_context: Arc<egui::Context>,
 }
 
 #[derive(Debug, Default)]
@@ -52,7 +54,7 @@ impl ThemeManager {
     const DEFAULT_FONT_NAME: &'static str = "default";
     const DEFAULT_THEME_NAME: &'static str = "default";
     const THEME_MANAGER_CONFIG_NAME: &'static str = "theme_manager_config";
-    pub fn new(jokolay_dir: Arc<Dir>) -> Result<Self> {
+    pub fn new(jokolay_dir: Arc<Dir>, egui_context: Arc<egui::Context>) -> Result<Self> {
         jokolay_dir
             .create_dir_all(Self::THEME_MANAGER_DIR_NAME)
             .into_diagnostic()
@@ -197,9 +199,21 @@ impl ThemeManager {
             fonts,
             config,
             ui_data: Default::default(),
+            egui_context,
         })
     }
-    pub fn init_egui(&mut self, etx: &egui::Context) {
+}
+
+impl UIPanel for ThemeManager {
+    fn areas(&self) -> Vec<UIArea> {
+        vec![UIArea {
+            is_open: false,
+            name: "Themes".to_string(),
+            id: "themes_ui".to_string(),
+        }]
+    }
+    fn init(&mut self) {
+        let egui_context = &mut self.egui_context;
         let mut fonts = egui::FontDefinitions::default();
         for (name, font_data) in self.fonts.iter() {
             fonts.font_data.insert(
@@ -207,19 +221,19 @@ impl ThemeManager {
                 egui::FontData::from_owned(font_data.to_owned()),
             );
         }
-        etx.set_fonts(fonts);
+        egui_context.set_fonts(fonts);
         if let Some(theme) = self.themes.get(&self.config.default_theme) {
-            etx.set_style(theme.style.clone());
+            egui_context.set_style(theme.style.clone());
         } else {
             error!(%self.config.default_theme, "failed to find the default theme in the loaded themes :(");
         }
     }
-
-    pub fn gui(&mut self, etx: &egui::Context, open: &mut bool) {
+    fn gui(&mut self, is_open: &mut bool, _area_id: &str) {
+        let egui_context = &mut self.egui_context;
         egui::Window::new("Theme Manager")
-            .open(open)
+            .open(is_open)
             .scroll2([false, true])
-            .show(etx, |ui| {
+            .show(egui_context, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(
                         &mut self.ui_data.tab,
@@ -240,7 +254,7 @@ impl ThemeManager {
                                 .on_hover_text("save this theme with the above name")
                                 .clicked()
                             {
-                                let style = etx.style().as_ref().clone();
+                                let style = egui_context.style().as_ref().clone();
                                 let theme = Theme { style };
                                 let theme_name = self.ui_data.theme_name.clone();
                                 match serde_json::to_string_pretty(&theme) {
@@ -276,7 +290,7 @@ impl ThemeManager {
                                 }
                                 self.themes.insert(theme_name, theme);
                             }
-                            etx.style_ui(ui);
+                            egui_context.style_ui(ui);
                         });
                     }
                     ThemeUITab::Config => {
@@ -315,7 +329,7 @@ impl ThemeManager {
                                                     .clicked()
                                                     && !checked
                                                 {
-                                                    etx.set_style(theme.style.clone());
+                                                    egui_context.set_style(theme.style.clone());
                                                 }
                                             }
                                         });

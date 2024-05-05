@@ -6,10 +6,12 @@ members = [
     "crates/joko_package_manager",
     "crates/joko_package_models",
     "crates/joko_link_manager",
+    "crates/joko_link_ui_manager",
     "crates/joko_link_models",
     "crates/jokoapi",
     "crates/jokolay",
     "crates/joko_core",
+    "crates/joko_ui_models",
     "crates/joko_component_manager",
     "crates/joko_component_models",
     "crates/joko_plugin_manager",
@@ -34,6 +36,7 @@ itertools = { version = "*" }
 miette = { version = "*", features = ["fancy"] }
 ordered_hash_map = { version = "*", features= ["serde"] }
 paste = { version = "*" }
+once = "0.3.4"
 rayon = { version = "*" }
 rfd = { version = "*" }
 ringbuffer = { version = "0.14" }
@@ -49,6 +52,8 @@ ureq = { version = "*" }
 url = { version = "*", features = ["serde"] }
 uuid = { version = "*" }
 mutually_exclusive_features = "0.1.0"
+ractor = "0.9.8"
+
 
 
 #https://corrode.dev/blog/tips-for-faster-rust-compile-times/#use-cargo-check-instead-of-cargo-build
