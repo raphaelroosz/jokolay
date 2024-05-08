@@ -25,7 +25,7 @@ use joko_render_models::{
 #[derive(Clone)]
 pub struct ActiveTrail {
     pub trail_object: TrailObject,
-    pub texture_handle: TextureHandle,
+    //pub texture_handle: TextureHandle,
 }
 /// This is an active marker.
 /// It stores all the info that we need to scan every frame
@@ -34,7 +34,7 @@ pub(crate) struct ActiveMarker {
     /// texture id from managed textures
     pub texture_id: u64,
     /// owned texture handle to keep it alive
-    pub _texture: TextureHandle,
+    //pub _texture: TextureHandle,
     /// position
     pub pos: Vec3,
     /// billboard must not be bigger than this size in pixels
@@ -52,7 +52,7 @@ impl ActiveMarker {
             texture_id,
             pos,
             common_attributes: attrs,
-            _texture,
+            //_texture,
             max_pixel_size,
             min_pixel_size,
             ..
@@ -280,7 +280,7 @@ impl ActiveTrail {
                     egui::TextureId::User(_) => todo!(),
                 },
             },
-            texture_handle: texture,
+            //texture_handle: texture,
         })
     }
 }
@@ -295,8 +295,6 @@ pub(crate) struct CurrentMapData {
     /// The key is the index of the marker in the map markers
     /// Their position in the map markers serves as their "id" as uuids can be duplicates.
     pub active_markers: IndexMap<Uuid, ActiveMarker>,
-    pub wip_markers: IndexMap<Uuid, ActiveMarker>,
     /// The key is the position/index of this trail in the map trails. same as markers
     pub active_trails: IndexMap<Uuid, ActiveTrail>,
-    pub wip_trails: IndexMap<Uuid, ActiveTrail>,
 }

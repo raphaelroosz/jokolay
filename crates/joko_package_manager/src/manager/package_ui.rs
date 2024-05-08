@@ -49,10 +49,11 @@ pub struct PackageUIManager {
     default_marker_texture: Option<TextureHandle>,
     default_trail_texture: Option<TextureHandle>,
     packs: BTreeMap<Uuid, LoadedPackTexture>,
+    nb_swap: u128,
     reports: BTreeMap<Uuid, PackageImportReport>,
     tasks: PackTasks,
 
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
     z_near: f32,
     currently_used_files: BTreeMap<Uuid, bool>,
     all_files_activation_status: bool, // this consume a change of display event
@@ -67,7 +68,7 @@ pub struct PackageUIManager {
 }
 
 impl PackageUIManager {
-    pub fn new(egui_context: Arc<egui::Context>, z_near: f32) -> Self {
+    pub fn new(egui_context: egui::Context, z_near: f32) -> Self {
         //z_near is a constant, make it a https://docs.rs/tokio/latest/tokio/sync/watch/index.html if required to be dynamic
         let state = PackageUISharedState {
             list_of_textures_changed: false,
@@ -77,6 +78,7 @@ impl PackageUIManager {
         };
         let mut res = Self {
             packs: Default::default(),
+            nb_swap: 0,
             tasks: PackTasks::new(),
             reports: Default::default(),
             default_marker_texture: None,
@@ -113,11 +115,8 @@ impl PackageUIManager {
                 self.delete_packs(to_delete);
             }
             MessageToPackageUI::FirstLoadDone => {
-                let channels = self.channels.as_ref().unwrap();
-                let renderer_notifier = &channels.renderer_notifier;
-                let _ =
-                    renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
                 self.state.first_load_done = true;
+                self.state.list_of_textures_changed = true;
             }
             MessageToPackageUI::ImportedPack(file_name, pack) => {
                 tracing::trace!("Handling of MessageToPackageUI::ImportedPack");
@@ -133,12 +132,12 @@ impl PackageUIManager {
                 self.save(pack_texture, report);
                 self.state.import_status = Default::default();
                 let channels = self.channels.as_mut().unwrap();
-                let _ = channels.back_end_notifier.blocking_send(to_data(
+                /*let _ = channels.back_end_notifier.blocking_send(to_data(
                     MessageToPackageBack::CategoryActivationStatusChanged,
                 ));
+                self.state.list_of_textures_changed = true;*/
                 let renderer_notifier = &channels.renderer_notifier;
-                let _ =
-                    renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
+                let _ = renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderFlush));
             }
             MessageToPackageUI::MarkerTexture(
                 pack_uuid,
@@ -148,7 +147,6 @@ impl PackageUIManager {
                 common_attributes,
             ) => {
                 tracing::trace!("Handling of MessageToPackageUI::MarkerTexture");
-                //FIXME: make it a TODO on tick()
                 self.delayed_marker_texture.push((
                     pack_uuid,
                     tex_path,
@@ -165,9 +163,15 @@ impl PackageUIManager {
                 tracing::trace!("Handling of MessageToPackageUI::PackageActiveElements");
                 self.update_pack_active_categories(pack_uuid, &active_elements);
             }
+            MessageToPackageUI::TextureBegin => {
+                tracing::trace!("Handling of MessageToPackageUI::TextureBegin");
+                self.clear();
+            }
             MessageToPackageUI::TextureSwapChain => {
-                tracing::debug!("Handling of MessageToPackageUI::TextureSwapChain");
-                self.swap();
+                tracing::trace!(
+                    "Handling of MessageToPackageUI::TextureSwapChain {}",
+                    self.nb_swap
+                );
                 self.state.list_of_textures_changed = true;
             }
             MessageToPackageUI::TrailTexture(
@@ -253,16 +257,17 @@ impl PackageUIManager {
             }
         }
     }
-    pub fn swap(&mut self) {
+    pub fn clear(&mut self) {
+        self.nb_swap += 1;
         for pack in self.packs.values_mut() {
-            pack.swap();
+            pack.clear();
         }
     }
 
     pub fn load_marker_texture(
         &mut self,
         pack_uuid: Uuid,
-        egui_context: &egui::Context,
+        egui_context: egui::Context,
         tex_path: RelativePath,
         marker_uuid: Uuid,
         position: Vec3,
@@ -270,7 +275,7 @@ impl PackageUIManager {
     ) {
         if let Some(pack) = self.packs.get_mut(&pack_uuid) {
             pack.load_marker_texture(
-                egui_context,
+                &egui_context,
                 self.default_marker_texture.as_ref().unwrap(),
                 &tex_path,
                 marker_uuid,
@@ -282,14 +287,14 @@ impl PackageUIManager {
     pub fn load_trail_texture(
         &mut self,
         pack_uuid: Uuid,
-        egui_context: &egui::Context,
+        egui_context: egui::Context,
         tex_path: RelativePath,
         trail_uuid: Uuid,
         common_attributes: CommonAttributes,
     ) {
         if let Some(pack) = self.packs.get_mut(&pack_uuid) {
             pack.load_trail_texture(
-                egui_context,
+                &egui_context,
                 self.default_trail_texture.as_ref().unwrap(),
                 &tex_path,
                 trail_uuid,
@@ -323,6 +328,9 @@ impl PackageUIManager {
 
     pub fn _tick(&mut self, timestamp: f64, link: &MumbleLink, z_near: f32) -> Result<()> {
         trace!("PackageUIManager::_tick for {} packages", self.packs.len());
+        if self.packs.is_empty() {
+            return Ok(());
+        }
         let tasks = &self.tasks;
         let channels = self.channels.as_ref().unwrap();
         let renderer_notifier = &channels.renderer_notifier;
@@ -333,9 +341,11 @@ impl PackageUIManager {
             || link.changes.contains(MumbleChanges::Map)
             || self.state.list_of_textures_changed
         {
+            let _ = renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderBegin));
+
             for pack in self.packs.values_mut() {
                 let span_guard = info_span!("Updating package status").entered();
-                pack.tick(renderer_notifier, timestamp, link, z_near, tasks)?;
+                pack.tick(renderer_notifier, timestamp, link, z_near, tasks)?; // compute the vertices: textures position, size, rotation and so on
                 std::mem::drop(span_guard);
             }
             let _ = renderer_notifier.blocking_send(to_data(MessageToRenderer::RenderSwapChain));
@@ -380,7 +390,6 @@ impl PackageUIManager {
     }
 
     fn gui_file_manager(&mut self, is_open: &mut bool) {
-        //FIXME: the deactivate all for all files, seems to toggle only the next one not in target state
         let egui_context = self.egui_context.borrow_mut();
         let channels = self.channels.as_mut().unwrap();
         let mut files_changed = false;
@@ -410,7 +419,6 @@ impl PackageUIManager {
                             ui.end_row();
 
                             for pack in self.packs.values_mut() {
-                                //TODO: first loop to list what is active per pack, to not display all packs
                                 let report = self.reports.get(&pack.uuid).unwrap();
                                 let mut pack_files_toggle = false;
                                 let mut pack_files_activation_status = true;
@@ -483,7 +491,6 @@ impl PackageUIManager {
 
         let collapsing =
             CollapsingHeader::new(format!("Last load details of package {}", pack.name));
-        //FIXME: clear the pack details
         let _header_response = collapsing
             .open(Some(true))
             .show(ui, |ui| {
@@ -684,7 +691,7 @@ impl Component for PackageUIManager {
         {
             self.load_marker_texture(
                 pack_uuid,
-                &Arc::clone(&self.egui_context),
+                self.egui_context.clone(),
                 tex_path,
                 marker_uuid,
                 position,
@@ -696,7 +703,7 @@ impl Component for PackageUIManager {
         {
             self.load_trail_texture(
                 pack_uuid,
-                &Arc::clone(&self.egui_context),
+                self.egui_context.clone(),
                 tex_path,
                 trail_uuid,
                 common_attributes,
@@ -752,7 +759,7 @@ impl UIPanel for PackageUIManager {
         ]
     }
     fn init(&mut self) {}
-    fn gui(&mut self, is_open: &mut bool, area_id: &str) {
+    fn gui(&mut self, is_open: &mut bool, area_id: &str, _latest_time: f64) {
         match area_id {
             "package_loading" => {
                 self.gui_package_list(is_open);

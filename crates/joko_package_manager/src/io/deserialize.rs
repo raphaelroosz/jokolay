@@ -1,6 +1,5 @@
 use crate::BASE64_ENGINE;
 use base64::Engine;
-use cap_std::fs_utf8::{Dir, DirEntry};
 use joko_core::{serde_glam::Vec3, RelativePath};
 use joko_package_models::{
     attributes::{CommonAttributes, XotAttributeNameIDs},
@@ -25,7 +24,7 @@ use zip::result::{ZipError, ZipResult};
 const MAX_TRAIL_CHUNK_LENGTH: f32 = 400.0;
 
 pub(crate) fn load_pack_core_from_normalized_folder(
-    core_dir: &Dir,
+    core_path: &Path,
     import_report: Option<PackageImportReport>,
 ) -> Result<PackCore, String> {
     //called from already parsed data
@@ -38,7 +37,7 @@ pub(crate) fn load_pack_core_from_normalized_folder(
     // walks the directory and loads all files into the hashmap
     let start = std::time::SystemTime::now();
     recursive_walk_dir_and_read_images_and_tbins(
-        core_dir,
+        core_path,
         &mut core_pack,
         &RelativePath::default(),
     )
@@ -50,8 +49,7 @@ pub(crate) fn load_pack_core_from_normalized_folder(
     );
 
     //categories are required to register other objects
-    let cats_xml = core_dir
-        .read_to_string("categories.xml")
+    let cats_xml = std::fs::read_to_string(core_path.join("categories.xml"))
         .or(Err("failed to read categories.xml"))?;
     let categories_file = String::from("categories.xml");
     let parse_categories_file_start = std::time::SystemTime::now();
@@ -61,16 +59,13 @@ pub(crate) fn load_pack_core_from_normalized_folder(
     info!("parse_categories_file took {} ms", elapsed.as_millis());
 
     // parse map data of the pack
-    for entry in core_dir
-        .entries()
-        .or(Err("failed to read entries of pack dir"))?
-    {
+    for entry in std::fs::read_dir(core_path).or(Err("failed to read entries of pack dir"))? {
         let dir_entry = entry.or(Err("entry error whiel reading xml files"))?;
 
         let name = dir_entry
             .file_name()
-            .or(Err("map data entry name not utf-8"))?
-            .to_string();
+            .into_string()
+            .or(Err("map data entry name not utf-8"))?;
 
         if name.ends_with(".xml") {
             if let Some(name_as_str) = name.strip_suffix(".xml") {
@@ -82,7 +77,11 @@ pub(crate) fn load_pack_core_from_normalized_folder(
                         // parse map file
                         let span_guard = info_span!("load file", file_name).entered();
                         //let mut partial_pack = PackCore::partial(&core_pack.all_categories);
-                        load_xml_from_normalized_file(file_name, &dir_entry, &mut core_pack)?;
+                        load_xml_from_normalized_file(
+                            file_name,
+                            &dir_entry.path(),
+                            &mut core_pack,
+                        )?;
                         //core_pack.merge_partial(partial_pack);
                         std::mem::drop(span_guard);
                     }
@@ -108,13 +107,16 @@ pub(crate) fn load_pack_core_from_normalized_folder(
 }
 
 fn recursive_walk_dir_and_read_images_and_tbins(
-    dir: &Dir,
+    core_path: &Path,
     pack: &mut PackCore,
     parent_path: &RelativePath,
 ) -> Result<(), String> {
-    for entry in dir.entries().or(Err("failed to get directory entries"))? {
+    for entry in std::fs::read_dir(core_path).or(Err("failed to get directory entries"))? {
         let entry = entry.or(Err("dir entry error when iterating dir entries"))?;
-        let name = entry.file_name().or(Err("No file name found"))?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .or(Err("No file name found"))?;
         let path = parent_path.join_str(&name);
 
         if entry
@@ -123,12 +125,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
             .is_file()
         {
             if path.ends_with(".png") || path.ends_with(".trl") {
-                let mut bytes = vec![];
-                entry
-                    .open()
-                    .or(Err("failed to open file"))?
-                    .read_to_end(&mut bytes)
-                    .or(Err("failed to read file contents"))?;
+                let bytes = std::fs::read(entry.path()).or(Err("failed to read file contents"))?;
                 if name.ends_with(".png") {
                     pack.register_texture(name, &path, bytes);
                 } else if name.ends_with(".trl") {
@@ -146,11 +143,7 @@ fn recursive_walk_dir_and_read_images_and_tbins(
                 }
             }
         } else {
-            recursive_walk_dir_and_read_images_and_tbins(
-                &entry.open_dir().or(Err("Could not open directory"))?,
-                pack,
-                &path,
-            )?;
+            recursive_walk_dir_and_read_images_and_tbins(&entry.path(), pack, &path)?;
         }
     }
     Ok(())
@@ -430,12 +423,13 @@ fn parse_categories_from_normalized_file(
 
 fn load_xml_from_normalized_file(
     file_name: &str,
-    dir_entry: &DirEntry,
+    file_path: &Path,
     target: &mut PackCore,
 ) -> Result<(), String> {
     let mut xml_str = String::new();
-    dir_entry
-        .open()
+    std::fs::OpenOptions::new()
+        .read(true)
+        .open(file_path)
         .or(Err("failed to open xml file"))?
         .read_to_string(&mut xml_str)
         .or(Err("failed to read xml string"))?;

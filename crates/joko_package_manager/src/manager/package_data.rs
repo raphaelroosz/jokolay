@@ -1,9 +1,5 @@
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use cap_std::fs_utf8::Dir;
 use joko_component_models::{
     default_component_result, from_broadcast, from_data, to_data, Component, ComponentChannels,
     ComponentMessage, ComponentResult,
@@ -35,7 +31,6 @@ pub const LOCAL_EXPANDED_PACKAGE_NAME: &str = "_local_expanded"; //result of imp
 #[derive(Clone)]
 pub struct PackageBackSharedState {
     choice_of_category_changed: bool, //Meant as an optimisation to only update when there is a change in UI
-    pub root_dir: Arc<Dir>,
     pub root_path: std::path::PathBuf,
     #[allow(dead_code)]
     pub editable_path: std::path::PathBuf, //copy of the editable path in ui_configuration
@@ -93,7 +88,7 @@ impl PackageDataManager {
     /// 4. loads all the packs
     /// 5. loads all the activation data
     /// 6. returns self
-    pub fn new(root_dir: Arc<Dir>, root_path: &std::path::Path) -> Result<Self> {
+    pub fn new(root_path: &std::path::Path) -> Result<Self> {
         let marker_packs_path = jokolay_to_marker_path(root_path);
         //TODO: load configuration from disk (ui.toml)
         let editable_path = jokolay_to_editable_path(root_path)
@@ -102,7 +97,6 @@ impl PackageDataManager {
             .to_string();
         let state = PackageBackSharedState {
             choice_of_category_changed: false,
-            root_dir,
             root_path: root_path.to_owned(),
             editable_path: std::path::PathBuf::from(editable_path),
             extract_path: jokolay_to_extract_path(root_path),
@@ -209,48 +203,50 @@ impl PackageDataManager {
     }
 
     fn handle_message(&mut self, msg: MessageToPackageBack) {
-        //let (b2u_sender, _) = package_manager.channels();
         match msg {
             MessageToPackageBack::ActiveFiles(currently_used_files) => {
-                tracing::trace!("Handling of MessageToPackageBack::ActiveFiles");
+                trace!(
+                    "Handling of MessageToPackageBack::ActiveFiles {}",
+                    currently_used_files.len()
+                );
+                trace!(
+                    "Handling of MessageToPackageBack::ActiveFiles {:?}",
+                    currently_used_files
+                );
                 self.set_currently_used_files(currently_used_files);
                 self.state.choice_of_category_changed = true;
             }
             MessageToPackageBack::CategoryActivationElementStatusChange(category_uuid, status) => {
-                tracing::trace!(
-                    "Handling of MessageToPackageBack::CategoryActivationElementStatusChange"
-                );
+                trace!("Handling of MessageToPackageBack::CategoryActivationElementStatusChange");
                 self.category_set(category_uuid, status);
+                self.state.choice_of_category_changed = true;
             }
             MessageToPackageBack::CategoryActivationBranchStatusChange(category_uuid, status) => {
-                tracing::trace!(
-                    "Handling of MessageToPackageBack::CategoryActivationBranchStatusChange"
-                );
+                trace!("Handling of MessageToPackageBack::CategoryActivationBranchStatusChange");
                 self.category_branch_set(category_uuid, status);
+                self.state.choice_of_category_changed = true;
             }
             MessageToPackageBack::CategoryActivationStatusChanged => {
-                tracing::trace!(
-                    "Handling of MessageToPackageBack::CategoryActivationStatusChanged"
-                );
+                trace!("Handling of MessageToPackageBack::CategoryActivationStatusChanged");
                 self.state.choice_of_category_changed = true;
             }
             MessageToPackageBack::CategorySetAll(status) => {
-                tracing::trace!("Handling of MessageToPackageBack::CategorySetAll");
+                trace!(
+                    "Handling of MessageToPackageBack::CategorySetAll {}",
+                    status
+                );
                 self.category_set_all(status);
                 self.state.choice_of_category_changed = true;
             }
             MessageToPackageBack::DeletePacks(to_delete) => {
                 tracing::trace!("Handling of MessageToPackageBack::DeletePacks");
-                let std_file = std::fs::OpenOptions::new()
-                    .open(&self.marker_packs_path)
-                    .or(Err("Could not open file"))
-                    .unwrap();
-                let marker_packs_dir = cap_std::fs_utf8::Dir::from_std_file(std_file);
+
                 let mut deleted = Vec::new();
 
                 for pack_uuid in to_delete {
                     if let Some(pack) = self.packs.remove(&pack_uuid) {
-                        if let Err(e) = marker_packs_dir.remove_dir_all(&pack.name) {
+                        let target = self.marker_packs_path.join(&pack.name);
+                        if let Err(e) = std::fs::remove_dir_all(target) {
                             error!(?e, pack.name, "failed to remove pack");
                         } else {
                             info!("deleted marker pack: {}", pack.name);
@@ -299,7 +295,7 @@ impl PackageDataManager {
             }
             MessageToPackageBack::SavePack(name, pack) => {
                 tracing::trace!("Handling of MessageToPackageBack::SavePack");
-                println!("save in {:?}", self.marker_packs_path);
+                trace!("save in {:?}", self.marker_packs_path);
 
                 /*let std_file = std::fs::OpenOptions::new()
                     .open(&self.marker_packs_path)
@@ -339,9 +335,6 @@ impl PackageDataManager {
     }
 
     pub fn _tick(&mut self, mumble_link_result: &MumbleLinkResult) {
-        let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
-        let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
-
         let link = if mumble_link_result.read_ui_link {
             mumble_link_result.ui_link.as_ref()
         } else {
@@ -357,6 +350,7 @@ impl PackageDataManager {
                 "PackageDataManager::tick map id is: {}",
                 self.current_map_id
             );
+            let mut currently_used_files: BTreeMap<Uuid, bool> = Default::default();
             for pack in self.packs.values_mut() {
                 if let Some(current_map) = pack.maps.get(&link.map_id) {
                     for marker in current_map.markers.values() {
@@ -389,48 +383,59 @@ impl PackageDataManager {
                     }
                 }
             }
+            trace!(
+                "currently_used_files: {} {:?}",
+                currently_used_files.len(),
+                currently_used_files
+            );
             let tasks = &self.tasks;
-            for pack in self.packs.values_mut() {
-                let span_guard = info_span!("Updating package status").entered();
-                let channels = self.channels.as_mut().unwrap();
-                let _ = channels
-                    .front_end_notifier
-                    .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(tasks.count())));
-                tasks.save_data(pack, pack.is_dirty());
-                pack.tick(
-                    &channels.front_end_notifier,
-                    link,
-                    &currently_used_files,
-                    have_used_files_list_changed || self.state.choice_of_category_changed,
-                    map_changed,
-                    tasks,
-                    &mut categories_and_elements_to_be_loaded,
-                );
-                std::mem::drop(span_guard);
-            }
-            if map_changed {
-                self.get_active_elements_parents(categories_and_elements_to_be_loaded);
-                let channels = self.channels.as_mut().unwrap();
-                let _ = channels.front_end_notifier.blocking_send(to_data(
-                    MessageToPackageUI::ActiveElements(self.loaded_elements.clone()),
-                ));
-            }
             if map_changed || have_used_files_list_changed || self.state.choice_of_category_changed
             {
-                let channels = self.channels.as_mut().unwrap();
+                let mut categories_and_elements_to_be_loaded: HashSet<Uuid> = Default::default();
+                {
+                    let channels = self.channels.as_mut().unwrap();
+                    let _ = channels
+                        .front_end_notifier
+                        .blocking_send(to_data(MessageToPackageUI::TextureBegin));
+                }
+                for pack in self.packs.values_mut() {
+                    let span_guard = info_span!("Updating package status").entered();
+                    let channels = self.channels.as_mut().unwrap();
+                    let _ = channels
+                        .front_end_notifier
+                        .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(tasks.count())));
+                    tasks.save_data(pack, pack.is_dirty());
+                    pack.tick(
+                        &channels.front_end_notifier,
+                        link,
+                        &currently_used_files,
+                        tasks,
+                        &mut categories_and_elements_to_be_loaded,
+                    );
+                    std::mem::drop(span_guard);
+                }
+
+                self.get_active_elements_parents(categories_and_elements_to_be_loaded);
+
                 //there is no point in sending a new list if nothing changed
+
+                let channels = self.channels.as_mut().unwrap();
                 let _ = channels.front_end_notifier.blocking_send(to_data(
                     MessageToPackageUI::CurrentlyUsedFiles(currently_used_files.clone()),
                 ));
                 self.currently_used_files = currently_used_files;
+
+                let _ = channels.front_end_notifier.blocking_send(to_data(
+                    MessageToPackageUI::ActiveElements(self.loaded_elements.clone()),
+                ));
                 let _ = channels
                     .front_end_notifier
                     .blocking_send(to_data(MessageToPackageUI::TextureSwapChain));
             }
+            self.state.choice_of_category_changed = false;
         } else {
             trace!("PackageDataManager::tick no link")
         }
-        self.state.choice_of_category_changed = false;
     }
 
     fn delete_packs(&mut self, to_delete: Vec<Uuid>) {
@@ -475,10 +480,7 @@ impl PackageDataManager {
         let _ = channels
             .front_end_notifier
             .blocking_send(to_data(MessageToPackageUI::NbTasksRunning(1)));
-        self.tasks.load_all_packs(
-            Arc::clone(&self.state.root_dir),
-            self.state.root_path.clone(),
-        );
+        self.tasks.load_all_packs(self.state.root_path.clone());
         if let Ok((data_packages, texture_packages, report_packages)) =
             self.tasks.wait_for_load_all_packs()
         {
@@ -520,6 +522,7 @@ impl Component for PackageDataManager {
         );
 
         let channels = self.channels.as_mut().unwrap();
+        //println!("PackageDataManager: nb messages to read: {}", channels.front_end_receiver.len());
         let mut messages = Vec::new();
         while let Ok(msg) = channels.front_end_receiver.try_recv() {
             messages.push(from_data(&msg));

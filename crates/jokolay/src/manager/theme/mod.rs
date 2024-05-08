@@ -14,7 +14,7 @@ pub struct ThemeManager {
     fonts: BTreeMap<String, Vec<u8>>,
     config: ThemeManagerConfig,
     ui_data: ThemeUIData,
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
 }
 
 #[derive(Debug, Default)]
@@ -54,7 +54,7 @@ impl ThemeManager {
     const DEFAULT_FONT_NAME: &'static str = "default";
     const DEFAULT_THEME_NAME: &'static str = "default";
     const THEME_MANAGER_CONFIG_NAME: &'static str = "theme_manager_config";
-    pub fn new(jokolay_dir: Arc<Dir>, egui_context: Arc<egui::Context>) -> Result<Self> {
+    pub fn new(jokolay_dir: Arc<Dir>, egui_context: egui::Context) -> Result<Self> {
         jokolay_dir
             .create_dir_all(Self::THEME_MANAGER_DIR_NAME)
             .into_diagnostic()
@@ -228,7 +228,7 @@ impl UIPanel for ThemeManager {
             error!(%self.config.default_theme, "failed to find the default theme in the loaded themes :(");
         }
     }
-    fn gui(&mut self, is_open: &mut bool, _area_id: &str) {
+    fn gui(&mut self, is_open: &mut bool, _area_id: &str, _latest_time: f64) {
         let egui_context = &mut self.egui_context;
         egui::Window::new("Theme Manager")
             .open(is_open)

@@ -26,6 +26,8 @@ use joko_component_models::ComponentResult;
 use joko_link_models::MumbleLinkResult;
 use joko_link_models::UIState;
 use joko_render_models::messages::MessageToRenderer;
+use joko_ui_models::UIArea;
+use joko_ui_models::UIPanel;
 use three_d::prelude::*;
 
 use joko_render_models::{marker::MarkerObject, trail::TrailObject};
@@ -41,11 +43,13 @@ pub struct JokoRenderer {
     pub viewport: Viewport,
     pub has_link: bool,
     pub is_map_open: bool,
+    nb_swap: u128,
     pub billboard_renderer: BillBoardRenderer,
     glfw_backend: Arc<RwLock<GlfwBackend>>,
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
     pub gl: egui_render_three_d::ThreeDBackend,
     channels: Option<JokoRendererChannels>,
+    link: MumbleLinkResult,
 }
 
 /// Necessary lies for GlfwBackend, which despite not moved (Arc + Mutex) shall prevent compilation
@@ -53,12 +57,7 @@ unsafe impl Send for JokoRenderer {}
 unsafe impl Sync for JokoRenderer {}
 
 impl JokoRenderer {
-    pub fn new(glfw_backend: Arc<RwLock<GlfwBackend>>, egui_context: Arc<egui::Context>) -> Self {
-        /*
-        FIXME: Box + JokoRenderer => segfault when panic
-            Arc vs Box: no change
-        */
-        //let glfw = glfw_backend.glfw.clone();
+    pub fn new(glfw_backend: Arc<RwLock<GlfwBackend>>, egui_context: egui::Context) -> Self {
         let framebuffer_size_physical = glfw_backend.read().unwrap().framebuffer_size_physical;
         let backend = ThreeDBackend::new(
             ThreeDConfig {
@@ -91,12 +90,14 @@ impl JokoRenderer {
             ),
             has_link: false,
             is_map_open: false,
+            nb_swap: 0,
             gl: backend,
             egui_context,
             billboard_renderer,
             glfw_backend,
             cam_pos: Default::default(),
             channels: None,
+            link: Default::default(),
         }
     }
 
@@ -142,7 +143,15 @@ impl JokoRenderer {
     pub fn get_z_far() -> f32 {
         1000.0
     }
+
+    pub fn begin(&mut self) {
+        self.billboard_renderer.begin();
+    }
+    pub fn flush(&mut self) {
+        self.billboard_renderer.flush();
+    }
     pub fn swap(&mut self) {
+        self.nb_swap += 1;
         self.billboard_renderer.swap();
     }
     /*
@@ -164,33 +173,44 @@ impl JokoRenderer {
         match msg {
             MessageToRenderer::BulkMarkerObject(marker_objects) => {
                 tracing::debug!(
-                    "Handling of UIToUIMessage::BulkMarkerObject {}",
+                    "Handling of MessageToRenderer::BulkMarkerObject {}",
                     marker_objects.len()
                 );
                 self.extend_markers(marker_objects);
             }
             MessageToRenderer::BulkTrailObject(trail_objects) => {
                 tracing::debug!(
-                    "Handling of UIToUIMessage::BulkTrailObject {}",
+                    "Handling of MessageToRenderer::BulkTrailObject {}",
                     trail_objects.len()
                 );
                 self.extend_trails(trail_objects);
             }
             MessageToRenderer::MarkerObject(mo) => {
-                tracing::trace!("Handling of UIToUIMessage::MarkerObject");
+                tracing::trace!("Handling of MessageToRenderer::MarkerObject");
                 self.add_billboard(*mo);
             }
             MessageToRenderer::TrailObject(to) => {
-                tracing::trace!("Handling of UIToUIMessage::TrailObject");
+                tracing::trace!("Handling of MessageToRenderer::TrailObject");
                 self.add_trail(*to);
             }
+            MessageToRenderer::RenderBegin => {
+                tracing::trace!("Handling of MessageToRenderer::RenderBegin");
+                self.begin();
+            }
+            MessageToRenderer::RenderFlush => {
+                tracing::trace!("Handling of MessageToRenderer::RenderFlush");
+                self.flush();
+            }
             MessageToRenderer::RenderSwapChain => {
-                tracing::debug!("Handling of UIToUIMessage::RenderSwapChain");
+                tracing::trace!(
+                    "Handling of MessageToRenderer::RenderSwapChain {}",
+                    self.nb_swap
+                );
                 self.swap();
             }
             #[allow(unreachable_patterns)]
             _ => {
-                unimplemented!("Handling UIToUIMessage has not been implemented yet");
+                unimplemented!("Handling MessageToRenderer has not been implemented yet");
             }
         }
     }
@@ -320,17 +340,33 @@ impl Component for JokoRenderer {
     fn requirements(&self) -> Vec<&str> {
         vec!["ui:mumble_link"]
     }
-    fn tick(&mut self, latest_time: f64) -> ComponentResult {
+    fn tick(&mut self, _latest_time: f64) -> ComponentResult {
         assert!(
             self.channels.is_some(),
             "channels must be initialized before interacting with component."
         );
 
-        self._window_tick();
         let channels = self.channels.as_mut().unwrap();
         let raw_link = channels.subscription_mumble_link.blocking_recv().unwrap();
         let link: MumbleLinkResult = from_broadcast(&raw_link);
-        if let Some(link) = link.link {
+        self.link = link;
+        default_component_result()
+    }
+}
+
+impl UIPanel for JokoRenderer {
+    fn init(&mut self) {}
+    fn areas(&self) -> Vec<UIArea> {
+        vec![UIArea {
+            id: "overlay".to_string(),
+            name: String::new(),
+            is_open: true, // N/A
+        }]
+    }
+
+    fn gui(&mut self, _is_open: &mut bool, _area_id: &str, latest_time: f64) {
+        self._window_tick();
+        if let Some(link) = &self.link.link {
             //trace!("JokoRenderer {:?} {:?}", link.player_pos, link.cam_pos);
             //x positive => east
             //y positive => ascention
@@ -408,6 +444,8 @@ impl Component for JokoRenderer {
         } else {
             self.has_link = false;
         }
+
+        self.egui_context.request_repaint();
         let egui::FullOutput {
             platform_output,
             textures_delta,
@@ -439,6 +477,5 @@ impl Component for JokoRenderer {
         self.render_egui(meshes, textures_delta, window_size_logical, latest_time);
         self.present();
         self.glfw_backend.write().unwrap().window.swap_buffers();
-        default_component_result()
     }
 }

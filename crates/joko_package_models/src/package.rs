@@ -161,7 +161,7 @@ pub struct PackCore {
     pub categories: OrderedHashMap<Uuid, Category>,
     pub all_categories: HashMap<String, Uuid>,
     pub entities_parents: HashMap<Uuid, Uuid>,
-    pub active_source_files: BTreeMap<Uuid, bool>, //TODO: have a reference containing pack name and maybe even path inside the package
+    pub active_source_files: BTreeMap<Uuid, bool>,
     pub maps: HashMap<u32, MapData>,
     pub report: PackageImportReport,
 }
@@ -276,7 +276,7 @@ impl PackCore {
         if let Some(category_uuid) = self.all_categories.get(full_category_name) {
             *category_uuid
         } else {
-            //TODO: if import is "dirty", create missing category
+            // If imported package is "dirty", create missing category
             //TODO: default import mode is "strict" (get inspiration from HTML modes)
             debug!("There is no defined category for {}", full_category_name);
 
@@ -363,7 +363,7 @@ impl PackCore {
             self.report.number_of.entities += 1;
             Ok(uuid_to_insert)
         } else {
-            //FIXME: this means a broken package, we could fix it by making usage of the relative category the node is in.
+            // Dirty package ! We could fix it by making usage of the relative category the node is in.
             Err(format!(
                 "Can't register world entity {} {}, no associated category found.",
                 full_category_name, uuid

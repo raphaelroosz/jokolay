@@ -32,12 +32,14 @@ struct ComponentHandle {
     component: Arc<RwLock<dyn Component>>,
     channels: ComponentChannels,
     relations_to_ids: HashMap<String, usize>,
+    nb_call: u128,
+    execution_time: std::time::Duration,
 }
 
 pub struct ComponentExecutor {
     world: String,
     broadcasters: HashMap<String, tokio::sync::broadcast::Sender<ComponentResult>>,
-    components: Vec<ComponentHandle>, //FIXME: how to type erase result ?
+    components: Vec<ComponentHandle>,
     has_been_initialized: bool,
 }
 
@@ -159,6 +161,8 @@ impl ComponentManager {
             component,
             channels: ComponentChannels::default(),
             relations_to_ids,
+            nb_call: 0,
+            execution_time: Default::default(),
         };
         self.known_components
             .insert(component_name.to_string(), handle);
@@ -168,7 +172,6 @@ impl ComponentManager {
 
     pub fn executor(&mut self, world: &str) -> ComponentExecutor {
         /*
-        TODO:
             extract the list of components of this world
             bind them
             insert them into the executor
@@ -224,7 +227,7 @@ impl ComponentManager {
             let node_id = depgraph.add_node(component_name.clone());
             known_services.insert(component_name.clone(), node_id);
             if component.accept_notifications() {
-                let (sender, receiver) = tokio::sync::mpsc::channel(1000);
+                let (sender, receiver) = tokio::sync::mpsc::channel(10000);
                 handle.channels.input_notification = Some(receiver);
                 notifications.insert(component_name.clone(), sender);
             }
@@ -359,10 +362,6 @@ impl ComponentManager {
             invocation order
         */
 
-        //TODO: channels are part of each component handle, all that remains is insert them
-        /*for (node_id, _) in translation.iter() {
-            peers_channels.insert(node_id.clone(), tokio::sync::mpsc::channel(1000));
-        }*/
         for node_id in depgraph.node_indices() {
             let notify_rel = depgraph
                 .edges(node_id)
@@ -397,8 +396,8 @@ impl ComponentManager {
                 // we shall overwrite the channels, but this is ok since we are not using them yet.
                 // TODO: if in the future there is dynamic loading, there shall be a need to dynamically rebuilt and thus get and reuse the existing channels.
                 let (local, remote) = {
-                    let (sender_1, receiver_1) = tokio::sync::mpsc::channel(1000);
-                    let (sender_2, receiver_2) = tokio::sync::mpsc::channel(1000);
+                    let (sender_1, receiver_1) = tokio::sync::mpsc::channel(10000);
+                    let (sender_2, receiver_2) = tokio::sync::mpsc::channel(10000);
                     ((sender_1, receiver_2), (sender_2, receiver_1))
                 };
                 let src_node_id = rel.source();
@@ -493,8 +492,11 @@ impl ComponentExecutor {
             self.components.len()
         );
         for handle in self.components.iter_mut() {
+            let start = std::time::SystemTime::now();
             let mut component = handle.component.write().unwrap();
             component.init();
+            handle.nb_call += 1;
+            handle.execution_time += start.elapsed().unwrap();
         }
         self.has_been_initialized = true;
         //unimplemented!("The component executor init is not implemented");
@@ -504,6 +506,7 @@ impl ComponentExecutor {
         //trace!("start {}", latest_time);
         for handle in self.components.iter_mut() {
             let mut component = handle.component.write().unwrap();
+            let start = std::time::SystemTime::now();
             //trace!("flush_all_messages of {}", handle.name);
             component.flush_all_messages();
 
@@ -513,6 +516,9 @@ impl ComponentExecutor {
             //trace!("broadcast result for {}", handle.name);
             let b = self.broadcasters.get_mut(&handle.name).unwrap();
             //trace!("broadcast size for {} before {}, {}", handle.name, b.len(), b.receiver_count());
+            handle.nb_call += 1;
+            handle.execution_time += start.elapsed().unwrap();
+            //println!("component execution statistics for {}: {} {}", handle.name, handle.execution_time.as_millis() / handle.nb_call, handle.execution_time.as_millis());
             let _ = b.send(res);
             //trace!("broadcast size for {} after {}", handle.name, b.len());
         }

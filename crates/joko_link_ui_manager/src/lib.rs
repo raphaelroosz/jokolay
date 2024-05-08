@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, sync::Arc};
+use std::borrow::BorrowMut;
 
 use egui::DragValue;
 use joko_component_models::{
@@ -13,14 +13,14 @@ struct MumbleUIManagerChannels {
 }
 
 pub struct MumbleUIManager {
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
     editable_mumble: bool,
     last_known_link: MumbleLink,
     channels: Option<MumbleUIManagerChannels>,
 }
 
 impl MumbleUIManager {
-    pub fn new(egui_context: Arc<egui::Context>) -> Self {
+    pub fn new(egui_context: egui::Context) -> Self {
         Self {
             egui_context,
             editable_mumble: false,
@@ -328,11 +328,9 @@ impl UIPanel for MumbleUIManager {
         }]
     }
     fn init(&mut self) {}
-    fn gui(&mut self, is_open: &mut bool, _area_id: &str) {
-        //FIXME: cannot edit anymore => why ?
-        //UI seems laggy when clicking
+    fn gui(&mut self, is_open: &mut bool, _area_id: &str, _latest_time: f64) {
         let channels = self.channels.as_mut().unwrap();
-        let u2mb_sender = channels.back_end_notifier.borrow_mut();
+        let back_end_notifier = channels.back_end_notifier.borrow_mut();
         let egui_context = &self.egui_context;
 
         egui::Window::new("Mumble Manager")
@@ -341,16 +339,16 @@ impl UIPanel for MumbleUIManager {
                 ui.horizontal(|ui| {
                     if ui.selectable_label(!self.editable_mumble, "live").clicked() {
                         self.editable_mumble = false;
-                        let _ =
-                            u2mb_sender.blocking_send(to_data(MessageToMumbleLinkBack::Autonomous));
+                        let _ = back_end_notifier
+                            .blocking_send(to_data(MessageToMumbleLinkBack::Autonomous));
                     }
                     if ui
                         .selectable_label(self.editable_mumble, "editable")
                         .clicked()
                     {
                         self.editable_mumble = true;
-                        let _ =
-                            u2mb_sender.blocking_send(to_data(MessageToMumbleLinkBack::BindedOnUI));
+                        let _ = back_end_notifier
+                            .blocking_send(to_data(MessageToMumbleLinkBack::BindedOnUI));
                     }
                 });
                 if self.editable_mumble {

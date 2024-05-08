@@ -11,11 +11,10 @@ use tracing::info;
 use super::window::{MINIMAL_WINDOW_HEIGHT, MINIMAL_WINDOW_WIDTH};
 
 struct MenuPanel {
-    //TODO: area => so we can have a single element producing multiple windows. It'll have to be registered for each area
-    //Or, register the functions that handle the areas.
-    //rename gui() into area()
     panel: Arc<RwLock<dyn UIPanel>>,
     areas: Vec<UIArea>,
+    nb_draw: u128,
+    draw_time: std::time::Duration,
 }
 
 struct MenuPanelManagerChannels {
@@ -63,14 +62,12 @@ struct MenuPanelManagerChannels {
 /// Finally, just multiply the width 288 or height 27 with these three values.
 /// eg: menu width = 288 * uisz_ratio * dpi_scaling_ratio * aspect_ratio_scaling;
 /// do the same with 288 replaced by 27 for height.
-
 pub struct MenuPanelManager {
-    //TODO: turn the MenuPanel into a component which depends on MumbleLink manager
     pub pos: egui::Pos2,
     pub ui_scaling_factor: f32,
     pub show_tracing_window: bool,
     glfw_backend: Arc<RwLock<GlfwBackend>>,
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
     menus: Vec<MenuPanel>,
     channels: Option<MenuPanelManagerChannels>,
 }
@@ -82,7 +79,7 @@ impl MenuPanelManager {
     pub const WIDTH: f32 = 288.0;
     pub const HEIGHT: f32 = 27.0;
 
-    pub fn new(glfw_backend: Arc<RwLock<GlfwBackend>>, egui_context: Arc<egui::Context>) -> Self {
+    pub fn new(glfw_backend: Arc<RwLock<GlfwBackend>>, egui_context: egui::Context) -> Self {
         Self {
             glfw_backend,
             egui_context,
@@ -98,10 +95,12 @@ impl MenuPanelManager {
         self.menus.push(MenuPanel {
             panel: component.clone(),
             areas: component.read().unwrap().areas(),
+            nb_draw: 0,
+            draw_time: Default::default(),
         })
     }
 
-    pub fn gui(&mut self) {
+    pub fn gui(&mut self, latest_time: f64) {
         //let mut glfw_backend = self.glfw_backend.();
         // do the gui stuff now
         egui::Area::new("menu panel")
@@ -111,7 +110,6 @@ impl MenuPanelManager {
             .show(&self.egui_context, |ui| {
                 ui.style_mut().visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                 ui.horizontal(|ui| {
-                    //TODO: if any displayed, show an additional "hide all"
                     ui.menu_button(
                         egui::RichText::new("JKL")
                             .size((MenuPanelManager::HEIGHT - 2.0) * self.ui_scaling_factor)
@@ -120,6 +118,9 @@ impl MenuPanelManager {
                             let mut any_open = false;
                             for panel in self.menus.iter_mut() {
                                 for area in panel.areas.iter_mut() {
+                                    if area.name.is_empty() {
+                                        continue;
+                                    }
                                     ui.checkbox(&mut area.is_open, &area.name);
                                     any_open = any_open || area.is_open;
                                 }
@@ -150,9 +151,12 @@ impl MenuPanelManager {
             });
         for panel in self.menus.iter_mut() {
             let handle = &mut panel.panel.write().unwrap();
+            let start = std::time::SystemTime::now();
             for area in panel.areas.iter_mut() {
-                handle.gui(&mut area.is_open, &area.id);
+                handle.gui(&mut area.is_open, &area.id, latest_time);
             }
+            panel.nb_draw += 1;
+            panel.draw_time += start.elapsed().unwrap();
         }
     }
 }

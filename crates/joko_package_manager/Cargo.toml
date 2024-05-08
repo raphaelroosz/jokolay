@@ -9,7 +9,6 @@ edition = "2021"
 # for marker packs 
 base64 = "0.21.2"
 bytemuck = { workspace = true }
-cap-std = { workspace = true }
 cxx = { version = "1.0", features = ["std"] } # for rapid xml bindings
 data-encoding = "2.4.0"
 egui = { workspace = true }

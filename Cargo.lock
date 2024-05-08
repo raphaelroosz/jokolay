@@ -1399,9 +1399,9 @@ dependencies = [
 
 [[package]]
 name = "io-extras"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c301e73fb90e8a29e600a9f402d095765f74310d582916a952f618836a1bd1ed"
+checksum = "c9f046b9af244f13b3bd939f55d16830ac3a201e8a9ba9661bfcb03e2be72b9b"
 dependencies = [
  "io-lifetimes",
  "windows-sys 0.52.0",
@@ -1544,7 +1544,6 @@ version = "0.2.1"
 dependencies = [
  "base64",
  "bytemuck",
- "cap-std",
  "cxx",
  "cxx-build",
  "data-encoding",
@@ -1633,6 +1632,7 @@ dependencies = [
  "joko_component_models",
  "joko_link_models",
  "joko_render_models",
+ "joko_ui_models",
  "tokio",
  "tracing",
 ]

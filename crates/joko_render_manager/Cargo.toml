@@ -19,6 +19,7 @@ tokio = { workspace = true }
 
 
 joko_component_models = { path = "../joko_component_models" }
+joko_ui_models = { path = "../joko_ui_models" }
 joko_link_models = { path = "../joko_link_models" }
 joko_render_models = { path = "../joko_render_models" }
 

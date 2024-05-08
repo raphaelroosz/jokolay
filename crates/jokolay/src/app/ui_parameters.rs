@@ -23,11 +23,10 @@ pub enum MessageToApplicationBack {
 #[derive(Serialize, Deserialize)]
 pub struct JokolayUIParameters {
     pub visible_borders: bool,
-    pub animate: bool,
+    pub animate: bool, //FIXME: not linked to animation anymore
     pub editable_path: String,
     pub root_path: String,
-    //TODO: folder path for custom work directory
-    //save configuration into a file + make backups of configuration
+    //TODO: save configuration into a file + make backups of configuration
 }
 
 struct JokolayUIConfigurationChannels {
@@ -44,7 +43,7 @@ pub struct JokolayUIConfiguration {
     pub average_fps: u32,
     pub display_parameters: JokolayUIParameters,
     glfw_backend: Arc<RwLock<GlfwBackend>>,
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
     channels: Option<JokolayUIConfigurationChannels>,
 }
 
@@ -60,7 +59,7 @@ unsafe impl Sync for JokolayUIConfiguration {}
 impl JokolayUIConfiguration {
     pub fn new(
         glfw_backend: Arc<RwLock<GlfwBackend>>,
-        egui_context: Arc<egui::Context>,
+        egui_context: egui::Context,
         editable_path: String,
         root_path: String,
     ) -> Self {
@@ -184,7 +183,7 @@ impl UIPanel for JokolayUIConfiguration {
     }
     fn init(&mut self) {}
 
-    fn gui(&mut self, is_open: &mut bool, _area_id: &str) {
+    fn gui(&mut self, is_open: &mut bool, _area_id: &str, _latest_time: f64) {
         let channels = self.channels.as_mut().unwrap();
         let u2b_sender = &channels.back_end_notifier;
         let glfw_backend = Arc::clone(&self.glfw_backend);

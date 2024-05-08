@@ -65,6 +65,20 @@ impl BillBoardRenderer {
         }
     }
 
+    pub fn begin(&mut self) {
+        trace!("Begin with a fresh list of markers and trails");
+        self.markers_wip.clear();
+        self.trails_wip.clear();
+    }
+    pub fn flush(&mut self) {
+        trace!(
+            "Flush UI to display {} markers, {} trails",
+            self.markers_wip.len(),
+            self.trails_wip.len()
+        );
+        self.markers = self.markers_wip.clone();
+        self.trails = self.trails_wip.clone();
+    }
     pub fn swap(&mut self) {
         trace!(
             "swap UI to display {} markers, {} trails",

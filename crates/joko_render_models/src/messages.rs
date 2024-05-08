@@ -8,6 +8,8 @@ pub enum MessageToRenderer {
     BulkTrailObject(Vec<TrailObject>),
     //Present,// a render loop is finished and we can present it
     MarkerObject(Box<MarkerObject>),
-    RenderSwapChain, // The list of elements to display was changed
+    RenderBegin,     // There is a change in what to display, reset current build
+    RenderSwapChain, // The list of elements to display was changed. Or camera or position was changed.
+    RenderFlush,     // Force whatever is being constructed to be kept and be what to display
     TrailObject(Box<TrailObject>),
 }

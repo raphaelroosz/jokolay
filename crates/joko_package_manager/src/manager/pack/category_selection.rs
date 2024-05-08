@@ -213,14 +213,14 @@ impl CategorySelection {
     }
 
     fn context_menu(
-        u2b_sender: &tokio::sync::mpsc::Sender<ComponentMessage>,
+        back_end_notifier: &tokio::sync::mpsc::Sender<ComponentMessage>,
         cs: &mut CategorySelection,
         ui: &mut egui::Ui,
     ) {
         if ui.button("Activate branch").clicked() {
             cs.is_selected = true;
             CategorySelection::recursive_set_all(&mut cs.children, true);
-            let _ = u2b_sender.blocking_send(to_data(
+            let _ = back_end_notifier.blocking_send(to_data(
                 MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, true),
             ));
             ui.close_menu();
@@ -228,7 +228,7 @@ impl CategorySelection {
         if ui.button("Deactivate branch").clicked() {
             CategorySelection::recursive_set_all(&mut cs.children, false);
             cs.is_selected = false;
-            let _ = u2b_sender.blocking_send(to_data(
+            let _ = back_end_notifier.blocking_send(to_data(
                 MessageToPackageBack::CategoryActivationBranchStatusChange(cs.uuid, false),
             ));
             ui.close_menu();

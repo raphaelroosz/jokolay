@@ -1,0 +1,45 @@
+SequenceDiagram {
+    actor user
+    lifeline package_data
+    control choice_of_category_changed
+    lifeline package_ui
+    control list_of_textures_changed
+    collection categories
+    collection currently_used_files
+    collection active_markers
+    lifeline renderer
+    
+    user -a-> package_data "CategorySetAll"
+    package_data --> choice_of_category_changed "activate"
+    activate choice_of_category_changed
+    choice_of_category_changed --> package_data "trigger update"
+
+    
+    activate package_data
+    package_data -a-> package_ui "TextureBegin"
+    package_ui --> active_markers "clear"
+    package_data -a-> package_ui "per package per marker: MarkerTexture"
+    package_data -a-> package_ui "per package per trail: TrailTexture"
+    package_data -a-> package_ui "per package: PackageActiveElements"
+    package_data -a-> package_ui "CurrentlyUsedFiles"
+    package_ui --> currently_used_files "replace"
+    package_data -a-> package_ui "ActiveElements"
+    package_ui --> categories "update each package"
+    package_data -a-> package_ui "TextureSwapChain"
+    package_ui --> list_of_textures_changed "activate"
+    activate list_of_textures_changed
+    package_data --> choice_of_category_changed "deactivate"
+    deactivate choice_of_category_changed
+    deactivate package_data
+
+    activate package_ui
+    package_ui --> active_markers "insert"
+    list_of_textures_changed --> package_ui "trigger update"
+    package_ui -a-> renderer "RenderBegin"
+    package_ui -a-> renderer "per package: BulkMarkerObject"
+    package_ui -a-> renderer "per package: BulkTrailObject"
+    package_ui -a-> renderer "RenderSwapChain"
+    package_ui --> list_of_textures_changed "deactivate"
+    deactivate list_of_textures_changed
+    deactivate package_ui
+}

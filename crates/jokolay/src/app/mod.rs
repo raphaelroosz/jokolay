@@ -1,5 +1,4 @@
 use std::{
-    borrow::BorrowMut,
     sync::{Arc, RwLock},
     thread,
 };
@@ -27,12 +26,12 @@ use self::{menu::MenuPanelManager, window::WindowManager};
 
 struct JokolayGui {
     menu_panel: Arc<RwLock<MenuPanelManager>>,
-    egui_context: Arc<egui::Context>,
+    egui_context: egui::Context,
     glfw_backend: Arc<RwLock<GlfwBackend>>,
 }
 #[allow(unused)]
 pub struct Jokolay {
-    gui: Box<JokolayGui>,
+    gui: JokolayGui,
     app: ComponentManager,
 }
 
@@ -60,8 +59,8 @@ impl Jokolay {
                     .wrap_err("failed to create mumble manager")?,
             )),
         );
-        let egui_context = Arc::new(egui::Context::default());
-        let mumble_ui = Arc::new(RwLock::new(MumbleUIManager::new(Arc::clone(&egui_context))));
+        let egui_context = egui::Context::default();
+        let mumble_ui = Arc::new(RwLock::new(MumbleUIManager::new(egui_context.clone())));
 
         let _ = component_manager.register("ui:mumbe_ui", mumble_ui.clone());
 
@@ -87,13 +86,12 @@ impl Jokolay {
         let _ = component_manager.register(
             "back:jokolay_package_manager",
             Arc::new(RwLock::new(PackageDataManager::new(
-                Arc::clone(&root_dir), //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
                 &root_path, //TODO: when given to a plugin, root MUST be unique to the plugin and cannot be global to jokolay
             )?)),
         );
 
         let theme_manager = Arc::new(RwLock::new(
-            ThemeManager::new(Arc::clone(&root_dir), Arc::clone(&egui_context))
+            ThemeManager::new(Arc::clone(&root_dir), egui_context.clone())
                 .wrap_err("failed to create theme manager")?,
         ));
 
@@ -121,19 +119,17 @@ impl Jokolay {
         );
 
         let package_manager_ui = Arc::new(RwLock::new(PackageUIManager::new(
-            Arc::clone(&egui_context),
+            egui_context.clone(),
             JokoRenderer::get_z_near(),
         )));
         let _ =
             component_manager.register("ui:jokolay_package_manager", package_manager_ui.clone());
 
-        let _ = component_manager.register(
-            "ui:jokolay_renderer",
-            Arc::new(RwLock::new(JokoRenderer::new(
-                Arc::clone(&glfw_backend),
-                Arc::clone(&egui_context),
-            ))),
-        );
+        let renderer_ui = Arc::new(RwLock::new(JokoRenderer::new(
+            Arc::clone(&glfw_backend),
+            egui_context.clone(),
+        )));
+        let _ = component_manager.register("ui:jokolay_renderer", renderer_ui.clone());
 
         let editable_path = jokolay_to_editable_path(&root_path)
             .to_str()
@@ -142,7 +138,7 @@ impl Jokolay {
 
         let configuration_ui = Arc::new(RwLock::new(ui_parameters::JokolayUIConfiguration::new(
             Arc::clone(&glfw_backend),
-            Arc::clone(&egui_context),
+            egui_context.clone(),
             editable_path.clone(),
             root_path.to_str().unwrap().to_owned(),
         )));
@@ -157,7 +153,7 @@ impl Jokolay {
 
         let menu_panel = Arc::new(RwLock::new(MenuPanelManager::new(
             Arc::clone(&glfw_backend),
-            Arc::clone(&egui_context),
+            egui_context.clone(),
         )));
 
         let _ = component_manager.register("ui:menu_panel", menu_panel.clone());
@@ -184,6 +180,7 @@ impl Jokolay {
             menu_panel.register(theme_manager);
             menu_panel.register(mumble_ui);
             menu_panel.register(package_manager_ui);
+            menu_panel.register(renderer_ui);
         }
 
         let gui = JokolayGui {
@@ -193,7 +190,7 @@ impl Jokolay {
         };
         //let gui = Mutex::new(gui);
         //let gui = Arc::new(gui);
-        let gui = Box::new(gui);
+        //let gui = Box::new(gui);
         Ok(Self {
             gui,
             app: component_manager,
@@ -218,7 +215,7 @@ impl Jokolay {
             let latest_time = start.elapsed().into_diagnostic()?.as_secs_f64();
             executor.tick(latest_time);
 
-            thread::sleep(std::time::Duration::from_millis(100));
+            thread::sleep(std::time::Duration::from_millis(10));
             loop_index += 1;
         }
         #[allow(unreachable_code)]
@@ -239,14 +236,11 @@ impl Jokolay {
         ui_executor.init();
 
         loop {
-            //TODO: one could wrap the egui_context into a plugin result so that it can be used from other plugins
-            //TODO: same for the UI as a notified element.
-
             let JokolayGui {
                 menu_panel,
                 egui_context,
                 glfw_backend,
-            } = &mut self.gui.borrow_mut();
+            } = &mut self.gui;
 
             let latest_time = {
                 let mut glfw_backend = glfw_backend.write().unwrap();
@@ -268,9 +262,8 @@ impl Jokolay {
             ui_executor.tick(latest_time);
 
             if let Ok(mut menu_panel) = menu_panel.write() {
-                menu_panel.gui();
+                menu_panel.gui(latest_time);
                 JokolayTracingLayer::gui(egui_context, &mut menu_panel.show_tracing_window);
-            //TODO: make it depend on window manager or menu_panel ?
             } else {
                 println!("cannot update GUI due to lock issues");
             }
@@ -278,7 +271,7 @@ impl Jokolay {
             JokolayTracingLayer::show_notifications(egui_context);
 
             // end gui stuff
-            egui_context.request_repaint();
+            //egui_context.request_repaint();
 
             /*
             let animation_time = if ui_configuration.display_parameters.animate {
