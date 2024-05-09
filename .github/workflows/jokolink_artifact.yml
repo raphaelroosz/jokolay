@@ -1,7 +1,7 @@
 on:
   push:
     paths:
-    - 'crates/jokolink/**'
+    - 'crates/joko_link_manager/**'
 
 name: Jokolink DLL
 env:
@@ -18,9 +18,9 @@ jobs:
         uses: Swatinem/rust-cache@v1
 
       - name: Build Jokolink DLL
-        run: cargo build --release -p jokolink
+        run: cargo build --release -p joko_link_manager
 
       - uses: actions/upload-artifact@v3
         with:
-          name: jokolink.dll
-          path: "./target/release/jokolink.dll"
+          name: joko_link_manager.dll
+          path: "./target/release/joko_link_manager.dll"
