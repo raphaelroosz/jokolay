@@ -8,7 +8,6 @@ use std::{
 use joko_component_models::{Component, ComponentChannels, ComponentMessage, ComponentResult};
 use petgraph::{
     csr::IndexType,
-    dot::Dot,
     graph::NodeIndex,
     stable_graph::{EdgeReference, StableDiGraph},
     visit::{EdgeRef, IntoNodeIdentifiers},
@@ -319,8 +318,8 @@ impl ComponentManager {
         }
         //If we reached here, it means all peers agree.
 
-        //println!("{}", Dot::with_config(&depgraph, &[Config::EdgeNoLabel]));
-        println!("{}", Dot::with_config(&depgraph, &[]));
+        //TODO: create a text graph file grouping nodes per world
+        //println!("{}", Dot::with_config(&depgraph, &[]));
 
         //Is there a difference between keys of known_services vs hosted_services.
         let hosted_keys: HashSet<String> = self.known_components.keys().cloned().collect();
