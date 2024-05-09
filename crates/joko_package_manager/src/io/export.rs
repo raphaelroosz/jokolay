@@ -9,7 +9,6 @@ use joko_package_models::{
     route::Route, trail::Trail,
 };
 use miette::{Context, IntoDiagnostic, Result};
-use ordered_hash_map::OrderedHashMap;
 use std::io::Write;
 use tracing::info;
 use uuid::Uuid;
@@ -176,7 +175,7 @@ pub(crate) fn save_pack_texture_to_dir(
 fn recursive_cat_serializer(
     tree: &mut Xot,
     names: &XotAttributeNameIDs,
-    cats: &OrderedHashMap<Uuid, Category>,
+    cats: &IndexMap<Uuid, Category>,
     parent: Node,
 ) -> Result<()> {
     for (_, cat) in cats {

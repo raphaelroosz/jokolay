@@ -1,10 +1,10 @@
+use indexmap::IndexMap;
 use joko_component_models::{to_data, ComponentMessage};
 use joko_package_models::{
     attributes::CommonAttributes,
     category::Category,
     package::{PackCore, PackageImportReport},
 };
-use ordered_hash_map::OrderedHashMap;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -22,16 +22,16 @@ pub struct CategorySelection {
     pub is_active: bool,   //currently being displayed (i.e.: active)
     pub separator: bool,
     pub display_name: String,
-    pub children: OrderedHashMap<String, CategorySelection>,
+    pub children: IndexMap<String, CategorySelection>,
 }
 
 pub struct SelectedCategoryManager {
-    data: OrderedHashMap<Uuid, CommonAttributes>,
+    data: IndexMap<Uuid, CommonAttributes>,
 }
 impl<'a> SelectedCategoryManager {
     pub fn new(
-        selected_categories: &OrderedHashMap<String, CategorySelection>,
-        categories: &OrderedHashMap<Uuid, Category>,
+        selected_categories: &IndexMap<String, CategorySelection>,
+        categories: &IndexMap<Uuid, Category>,
     ) -> Self {
         let mut list_of_enabled_categories = Default::default();
         CategorySelection::get_list_of_enabled_categories(
@@ -46,7 +46,7 @@ impl<'a> SelectedCategoryManager {
         }
     }
     #[allow(dead_code)]
-    pub fn cloned_data(&self) -> OrderedHashMap<Uuid, CommonAttributes> {
+    pub fn cloned_data(&self) -> IndexMap<Uuid, CommonAttributes> {
         self.data.clone()
     }
     pub fn is_selected(&self, category: &Uuid) -> bool {
@@ -59,21 +59,21 @@ impl<'a> SelectedCategoryManager {
     pub fn len(&self) -> usize {
         self.data.len()
     }
-    pub fn keys(&'a self) -> ordered_hash_map::ordered_map::Keys<'a, Uuid, CommonAttributes> {
+    pub fn keys(&'a self) -> indexmap::map::Keys<'a, Uuid, CommonAttributes> {
         self.data.keys()
     }
 }
 
 impl CategorySelection {
-    pub fn default_from_pack_core(pack: &PackCore) -> OrderedHashMap<String, CategorySelection> {
-        let mut selectable_categories = OrderedHashMap::new();
+    pub fn default_from_pack_core(pack: &PackCore) -> IndexMap<String, CategorySelection> {
+        let mut selectable_categories = IndexMap::new();
         Self::recursive_create_selectable_categories(&mut selectable_categories, &pack.categories);
         selectable_categories
     }
     fn get_list_of_enabled_categories(
-        selection: &OrderedHashMap<String, CategorySelection>,
-        categories: &OrderedHashMap<Uuid, Category>,
-        list_of_enabled_categories: &mut OrderedHashMap<Uuid, CommonAttributes>,
+        selection: &IndexMap<String, CategorySelection>,
+        categories: &IndexMap<Uuid, Category>,
+        list_of_enabled_categories: &mut IndexMap<Uuid, CommonAttributes>,
         parent_common_attributes: &CommonAttributes,
     ) {
         for (_, cat) in categories {
@@ -94,7 +94,7 @@ impl CategorySelection {
         }
     }
     pub fn get(
-        selection: &mut OrderedHashMap<String, CategorySelection>,
+        selection: &mut IndexMap<String, CategorySelection>,
         uuid: Uuid,
     ) -> Option<&mut CategorySelection> {
         if selection.is_empty() {
@@ -113,7 +113,7 @@ impl CategorySelection {
     }
     #[allow(dead_code)]
     pub fn recursive_populate_guids(
-        selection: &mut OrderedHashMap<String, CategorySelection>,
+        selection: &mut IndexMap<String, CategorySelection>,
         entities_parents: &mut HashMap<Uuid, Uuid>,
         parent_uuid: Option<Uuid>,
     ) {
@@ -130,8 +130,8 @@ impl CategorySelection {
         }
     }
     fn recursive_create_selectable_categories(
-        selectable_categories: &mut OrderedHashMap<String, CategorySelection>,
-        cats: &OrderedHashMap<Uuid, Category>,
+        selectable_categories: &mut IndexMap<String, CategorySelection>,
+        cats: &IndexMap<Uuid, Category>,
     ) {
         for (_, cat) in cats.iter() {
             if !selectable_categories.contains_key(&cat.relative_category_name) {
@@ -155,7 +155,7 @@ impl CategorySelection {
     }
 
     pub fn recursive_set(
-        selection: &mut OrderedHashMap<String, CategorySelection>,
+        selection: &mut IndexMap<String, CategorySelection>,
         uuid: Uuid,
         status: bool,
     ) -> bool {
@@ -177,10 +177,7 @@ impl CategorySelection {
             false
         }
     }
-    pub fn recursive_set_all(
-        selection: &mut OrderedHashMap<String, CategorySelection>,
-        status: bool,
-    ) {
+    pub fn recursive_set_all(selection: &mut IndexMap<String, CategorySelection>, status: bool) {
         if selection.is_empty() {
             return;
         }
@@ -194,7 +191,7 @@ impl CategorySelection {
     }
 
     pub fn recursive_update_active_categories(
-        selection: &mut OrderedHashMap<String, CategorySelection>,
+        selection: &mut IndexMap<String, CategorySelection>,
         active_elements: &HashSet<Uuid>,
     ) -> bool {
         let mut is_active = false;
@@ -237,7 +234,7 @@ impl CategorySelection {
 
     pub fn recursive_selection_ui(
         back_end_notifier: &tokio::sync::mpsc::Sender<ComponentMessage>,
-        selection: &mut OrderedHashMap<String, CategorySelection>,
+        selection: &mut IndexMap<String, CategorySelection>,
         ui: &mut egui::Ui,
         is_dirty: &mut bool,
         show_only_active: bool,

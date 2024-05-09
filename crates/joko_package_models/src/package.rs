@@ -4,8 +4,8 @@ use crate::marker::Marker;
 use crate::route::{route_to_tbin, route_to_trail, Route};
 use crate::trail::{TBin, Trail};
 use base64::Engine;
+use indexmap::IndexMap;
 use joko_core::RelativePath;
-use ordered_hash_map::OrderedHashMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tracing::{debug, trace};
@@ -138,7 +138,7 @@ pub struct PackageImportReport {
     pub uuid: Uuid,
     pub number_of: PackageImportStatistics, // count everything we can think of
     pub telemetry: PackageImportTelemetry,  // all the time spent in which step
-    late_discovered_categories: OrderedHashMap<Uuid, String>, //categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
+    late_discovered_categories: IndexMap<Uuid, String>, //categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
     missing_categories: Vec<PackageCategorySource>, //categories that are defined only from a marker point of view. It needs to be saved in some way or it's lost at next start.
     #[serde(skip)]
     _missing_categories_tracker: HashSet<String>, // for tracking purpose to avoid duplicate
@@ -158,7 +158,7 @@ pub struct PackCore {
     pub uuid: Uuid,
     pub textures: HashMap<RelativePath, Vec<u8>>,
     pub tbins: HashMap<RelativePath, TBin>,
-    pub categories: OrderedHashMap<Uuid, Category>,
+    pub categories: IndexMap<Uuid, Category>,
     pub all_categories: HashMap<String, Uuid>,
     pub entities_parents: HashMap<Uuid, Uuid>,
     pub active_source_files: BTreeMap<Uuid, bool>,
@@ -452,7 +452,7 @@ impl PackCore {
     }
     fn recursive_register_categories(
         entities_parents: &mut HashMap<Uuid, Uuid>,
-        categories: &OrderedHashMap<Uuid, Category>,
+        categories: &IndexMap<Uuid, Category>,
         all_categories: &mut HashMap<String, Uuid>,
     ) {
         for (_, cat) in categories.iter() {

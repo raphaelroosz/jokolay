@@ -34,7 +34,6 @@ glam = { version = "*", features = ["fast-math"] }
 indexmap = { version = "2" }
 itertools = { version = "*" }
 miette = { version = "*", features = ["fancy"] }
-ordered_hash_map = { version = "*", features= ["serde"] }
 paste = { version = "*" }
 once = "0.3.4"
 rayon = { version = "*" }

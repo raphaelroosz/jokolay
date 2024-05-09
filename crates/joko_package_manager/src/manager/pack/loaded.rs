@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use indexmap::IndexMap;
 use joko_component_models::{to_data, ComponentMessage};
 use joko_package_models::{
     attributes::{Behavior, CommonAttributes},
@@ -12,7 +13,6 @@ use joko_package_models::{
     package::{PackCore, PackageImportReport},
     trail::TBin,
 };
-use ordered_hash_map::OrderedHashMap;
 
 use egui::{ColorImage, TextureHandle};
 use image::EncodableLayout;
@@ -69,7 +69,7 @@ pub struct LoadedPackData {
     pub path: PathBuf,
     /// The actual xml pack.
     //pub core: PackCore,
-    pub categories: OrderedHashMap<Uuid, Category>,
+    pub categories: IndexMap<Uuid, Category>,
     pub all_categories: HashMap<String, Uuid>,
     pub source_files: BTreeMap<Uuid, bool>, //TODO: have a reference containing pack name and maybe even path inside the package
     pub maps: HashMap<u32, MapData>,
@@ -77,7 +77,7 @@ pub struct LoadedPackData {
     _is_dirty: bool, //there was an edition in the package itself
 
     // loca copy in the data side of what is exposed in UI
-    selectable_categories: OrderedHashMap<String, CategorySelection>,
+    selectable_categories: IndexMap<String, CategorySelection>,
     pub entities_parents: HashMap<Uuid, Uuid>,
     activation_data: ActivationData,
     active_elements: HashSet<Uuid>, //keep track of which elements are active
@@ -99,7 +99,7 @@ pub struct LoadedPackTexture {
     pub textures: HashMap<RelativePath, Vec<u8>>,
 
     /// The selection of categories which are "enabled" and markers belonging to these may be rendered
-    selectable_categories: OrderedHashMap<String, CategorySelection>,
+    selectable_categories: IndexMap<String, CategorySelection>,
     #[serde(skip)]
     current_map_data: CurrentMapData,
     activation_data: ActivationData,
@@ -253,7 +253,7 @@ impl LoadedPackData {
     fn load_selectable_categories(
         path: &Path,
         pack: &PackCore,
-    ) -> OrderedHashMap<String, CategorySelection> {
+    ) -> IndexMap<String, CategorySelection> {
         //FIXME: we need to patch those categories from the one in the files
         let target = path.join(Self::CATEGORY_SELECTION_FILE_NAME);
         trace!("load_selectable_categories open {:?}", target);

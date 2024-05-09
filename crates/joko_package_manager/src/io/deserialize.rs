@@ -1,5 +1,6 @@
 use crate::BASE64_ENGINE;
 use base64::Engine;
+use indexmap::IndexMap;
 use joko_core::{serde_glam::Vec3, RelativePath};
 use joko_package_models::{
     attributes::{CommonAttributes, XotAttributeNameIDs},
@@ -9,7 +10,6 @@ use joko_package_models::{
     route::Route,
     trail::{TBin, TBinStatus, Trail},
 };
-use ordered_hash_map::OrderedHashMap;
 use std::{
     collections::VecDeque,
     io::{Cursor, Read},
@@ -273,7 +273,7 @@ fn parse_categories(
     pack: &mut PackCore,
     tree: &Xot,
     tags: impl Iterator<Item = Node>,
-    first_pass_categories: &mut OrderedHashMap<String, RawCategory>,
+    first_pass_categories: &mut IndexMap<String, RawCategory>,
     names: &XotAttributeNameIDs,
     source_file_uuid: &Uuid,
 ) {
@@ -294,7 +294,7 @@ fn parse_categories_recursive(
     pack: &mut PackCore,
     tree: &Xot,
     tags: impl Iterator<Item = Node>,
-    first_pass_categories: &mut OrderedHashMap<String, RawCategory>,
+    first_pass_categories: &mut IndexMap<String, RawCategory>,
     names: &XotAttributeNameIDs,
     parent_name: Option<String>,
     source_file_uuid: &Uuid,
@@ -346,7 +346,7 @@ fn parse_categories_recursive(
             parent_name
         );
         if !first_pass_categories.contains_key(&full_category_name) {
-            let mut sources: OrderedHashMap<Uuid, Uuid> = OrderedHashMap::new();
+            let mut sources: IndexMap<Uuid, Uuid> = IndexMap::new();
             if let Some(icon_file) = common_attributes.get_icon_file() {
                 if !pack.textures.contains_key(icon_file) {
                     debug!(%icon_file, "failed to find this texture in this pack");
@@ -398,7 +398,7 @@ fn parse_categories_from_normalized_file(
     let overlay_data_node = tree.document_element(root_node).or(Err("no doc element"))?;
 
     if let Some(od) = tree.element(overlay_data_node) {
-        let mut categories: OrderedHashMap<Uuid, Category> = Default::default();
+        let mut categories: IndexMap<Uuid, Category> = Default::default();
         if od.name() == xot_names.overlay_data {
             parse_category_categories_xml_recursive(
                 file_name,
@@ -618,7 +618,7 @@ fn parse_category_categories_xml_recursive(
     _file_name: &String, //meant for future implementation of source file definition for categories
     tree: &Xot,
     tags: impl Iterator<Item = Node>,
-    cats: &mut OrderedHashMap<Uuid, Category>,
+    cats: &mut IndexMap<Uuid, Category>,
     names: &XotAttributeNameIDs,
     parent_uuid: Option<Uuid>,
     parent_name: Option<String>,
@@ -707,7 +707,7 @@ fn parse_category_categories_xml_recursive(
                         children: Default::default(),
                     };
                     cats.insert(guid, c);
-                    cats.back_mut().unwrap()
+                    cats.last_mut().unwrap().1
                 };
                 parse_category_categories_xml_recursive(
                     _file_name,
@@ -888,7 +888,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
     //first pass: categories only
     let span_guard_first_pass =
         info_span!("deserialize xml first pass: load MarkerCategory").entered();
-    let mut first_pass_categories: OrderedHashMap<String, RawCategory> = Default::default();
+    let mut first_pass_categories: IndexMap<String, RawCategory> = Default::default();
     for source_file_name in xmls.iter() {
         let source_file_name = source_file_name.to_string();
         let span_guard =
@@ -1019,7 +1019,7 @@ fn _get_pack_from_taco_folder(package_path: &std::path::PathBuf) -> Result<PackC
                 && !first_pass_categories.contains_key(&full_category_name)
             {
                 let category_uuid = Uuid::new_v4();
-                let mut sources: OrderedHashMap<Uuid, Uuid> = OrderedHashMap::new();
+                let mut sources: IndexMap<Uuid, Uuid> = IndexMap::new();
                 sources.insert(guid, source_file_uuid);
                 first_pass_categories.insert(
                     full_category_name.clone(),

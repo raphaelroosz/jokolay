@@ -1,4 +1,5 @@
 use std::{
+    path::PathBuf,
     sync::{Arc, RwLock},
     thread,
 };
@@ -6,6 +7,7 @@ use std::{
 use cap_std::fs_utf8::Dir;
 use egui_window_glfw_passthrough::{GlfwBackend, GlfwConfig};
 use joko_link_ui_manager::MumbleUIManager;
+use joko_plugin_manager::JokolayPluginManager;
 mod init;
 mod menu;
 mod ui_parameters;
@@ -84,6 +86,18 @@ impl Jokolay {
                     plugin2
                     ...
         */
+
+        let plugin_manager = Arc::new(RwLock::new(JokolayPluginManager::new(PathBuf::from(
+            "plugins",
+        ))));
+        let dummy_plugin = Arc::new(RwLock::new(
+            plugin_manager
+                .as_ref()
+                .write()
+                .unwrap()
+                .create("dummy plugin".to_string()),
+        ));
+        let _ = component_manager.register("dummy plugin", dummy_plugin);
 
         let _ = component_manager.register(
             "back:jokolay_package_manager",

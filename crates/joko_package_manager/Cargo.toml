@@ -26,7 +26,6 @@ jokoapi = { path = "../jokoapi" }
 joko_link_models = { path = "../joko_link_models" }
 miette = { workspace = true }
 once = {workspace = true}
-ordered_hash_map = { workspace = true }
 paste = { workspace = true }
 phf = { version = "*", features = ["macros"] }
 rayon = { workspace = true }

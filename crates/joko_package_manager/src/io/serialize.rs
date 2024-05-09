@@ -4,11 +4,11 @@ use crate::{
 };
 use base64::Engine;
 use glam::Vec3;
+use indexmap::IndexMap;
 use joko_package_models::{
     attributes::XotAttributeNameIDs, category::Category, marker::Marker, route::Route, trail::Trail,
 };
 use miette::Result;
-use ordered_hash_map::OrderedHashMap;
 use std::{io::Write, path::Path};
 use tracing::info;
 use uuid::Uuid;
@@ -168,7 +168,7 @@ pub(crate) fn save_pack_texture_to_dir(
 fn recursive_cat_serializer(
     tree: &mut Xot,
     names: &XotAttributeNameIDs,
-    cats: &OrderedHashMap<Uuid, Category>,
+    cats: &IndexMap<Uuid, Category>,
     parent: Node,
 ) -> Result<(), String> {
     for (_, cat) in cats {

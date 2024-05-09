@@ -1,6 +1,5 @@
 use joko_package_models::attributes::CommonAttributes;
 use jokoapi::end_point::mounts::Mount;
-use ordered_hash_map::OrderedHashMap;
 
 use egui::TextureHandle;
 use indexmap::IndexMap;
@@ -291,7 +290,7 @@ pub(crate) struct CurrentMapData {
     //pub map_id: u32,
     //pub active_elements: HashSet<Uuid>,
     /// The textures that are being used by the markers, so must be kept alive by this hashmap
-    pub active_textures: OrderedHashMap<RelativePath, TextureHandle>,
+    pub active_textures: IndexMap<RelativePath, TextureHandle>,
     /// The key is the index of the marker in the map markers
     /// Their position in the map markers serves as their "id" as uuids can be duplicates.
     pub active_markers: IndexMap<Uuid, ActiveMarker>,

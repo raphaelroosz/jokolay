@@ -1,5 +1,5 @@
 use crate::{attributes::CommonAttributes, package::PackageImportReport};
-use ordered_hash_map::OrderedHashMap;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 use uuid::Uuid;
@@ -14,7 +14,7 @@ pub struct RawCategory {
     pub separator: bool,
     pub default_enabled: bool,
     pub props: CommonAttributes,
-    pub sources: OrderedHashMap<Uuid, Uuid>,
+    pub sources: IndexMap<Uuid, Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ pub struct Category {
     pub separator: bool,
     pub default_enabled: bool,
     pub props: CommonAttributes,
-    pub children: OrderedHashMap<Uuid, Category>, //TODO: make a branch to test if having an Vec<Uuid> associated with global list of categories is faster.
+    pub children: IndexMap<Uuid, Category>, //TODO: make a branch to test if having an Vec<Uuid> associated with global list of categories is faster.
 }
 
 pub fn nth_chunk(s: &str, pat: char, n: usize) -> String {
@@ -76,7 +76,7 @@ impl Category {
         }
     }
     fn per_route<'a>(
-        categories: &'a mut OrderedHashMap<Uuid, Category>,
+        categories: &'a mut IndexMap<Uuid, Category>,
         route: &[&str],
     ) -> Option<&'a mut Category> {
         let mut route = route.to_owned();
@@ -84,7 +84,7 @@ impl Category {
         Category::_per_route(categories, &mut route)
     }
     fn _per_route<'a>(
-        categories: &'a mut OrderedHashMap<Uuid, Category>,
+        categories: &'a mut IndexMap<Uuid, Category>,
         route: &mut Vec<&str>,
     ) -> Option<&'a mut Category> {
         if let Some(relative_category_name) = route.pop() {
@@ -102,7 +102,7 @@ impl Category {
     }
     #[allow(dead_code)]
     fn per_uuid<'a>(
-        categories: &'a mut OrderedHashMap<Uuid, Category>,
+        categories: &'a mut IndexMap<Uuid, Category>,
         uuid: &Uuid,
     ) -> Option<&'a mut Category> {
         /*
@@ -122,17 +122,17 @@ impl Category {
         None
     }
     pub fn reassemble(
-        input_first_pass_categories: &OrderedHashMap<String, RawCategory>,
+        input_first_pass_categories: &IndexMap<String, RawCategory>,
         report: &mut PackageImportReport,
-    ) -> OrderedHashMap<Uuid, Category> {
+    ) -> IndexMap<Uuid, Category> {
         let start_initialize = std::time::SystemTime::now();
         let mut first_pass_categories = input_first_pass_categories.clone();
-        let mut second_pass_categories: OrderedHashMap<String, RawCategory> = Default::default();
+        let mut second_pass_categories: IndexMap<String, RawCategory> = Default::default();
         let mut need_a_pass: bool = true;
 
-        let mut third_pass_categories: OrderedHashMap<Uuid, Category> = Default::default();
+        let mut third_pass_categories: IndexMap<Uuid, Category> = Default::default();
         let mut third_pass_categories_ref: Vec<Uuid> = Default::default();
-        let mut root: OrderedHashMap<Uuid, Category> = Default::default();
+        let mut root: IndexMap<Uuid, Category> = Default::default();
 
         let elaspsed_initialize = start_initialize.elapsed().unwrap_or_default();
         report.telemetry.categories_reassemble.initialize = elaspsed_initialize.as_millis();
@@ -168,7 +168,7 @@ impl Category {
                             let relative_category_name =
                                 nth_chunk(&value.relative_category_name, '.', n);
                             debug!("reassemble_categories Partial create missing parent category: {} {} {} {}", parent_name, relative_category_name, n, new_uuid);
-                            let sources: OrderedHashMap<Uuid, Uuid> = OrderedHashMap::new();
+                            let sources: IndexMap<Uuid, Uuid> = IndexMap::new();
                             let to_insert = RawCategory {
                                 default_enabled: value.default_enabled,
                                 guid: new_uuid,
@@ -263,7 +263,7 @@ impl Category {
         debug!("third_pass_categories_ref");
         let start_tree_insertion = std::time::SystemTime::now();
         for full_category_uuid in third_pass_categories_ref {
-            if let Some(cat) = third_pass_categories.remove(&full_category_uuid) {
+            if let Some(cat) = third_pass_categories.shift_remove(&full_category_uuid) {
                 let mut route = Vec::from_iter(cat.full_category_name.split('.'));
                 route.pop(); //it is now the parent route
                 if let Some(parent) = cat.parent {
