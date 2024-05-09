@@ -3,6 +3,8 @@ use std::str::FromStr;
 use enumflags2::{bitflags, BitFlags};
 use itertools::Itertools;
 use joko_core::serde_glam::Vec3;
+use jokoapi::end_point::professions::Profession;
+use jokoapi::end_point::specializations::Specialization;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use xot::{Element, NameId, Xot};
@@ -1077,63 +1079,6 @@ impl FromStr for Behavior {
     }
 }
 
-/// Filter which professions the marker should be active for. if its null, its available for all professions
-#[bitflags]
-#[repr(u16)]
-#[derive(Debug, Clone, Copy)]
-pub enum Profession {
-    Elementalist = 1 << 0,
-    Engineer = 1 << 1,
-    Guardian = 1 << 2,
-    Mesmer = 1 << 3,
-    Necromancer = 1 << 4,
-    Ranger = 1 << 5,
-    Revenant = 1 << 6,
-    Thief = 1 << 7,
-    Warrior = 1 << 8,
-}
-
-impl FromStr for Profession {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "guardian" => Profession::Guardian,
-            "warrior" => Profession::Warrior,
-            "engineer" => Profession::Engineer,
-            "ranger" => Profession::Ranger,
-            "thief" => Profession::Thief,
-            "elementalist" => Profession::Elementalist,
-            "mesmer" => Profession::Mesmer,
-            "necromancer" => Profession::Necromancer,
-            "revenant" => Profession::Revenant,
-            _ => return Err("invalid profession"),
-        })
-    }
-}
-
-impl AsRef<str> for Profession {
-    fn as_ref(&self) -> &str {
-        match self {
-            Profession::Guardian => "guardian",
-            Profession::Warrior => "warrior",
-            Profession::Engineer => "engineer",
-            Profession::Ranger => "ranger",
-            Profession::Thief => "thief",
-            Profession::Elementalist => "elementalist",
-            Profession::Mesmer => "mesmer",
-            Profession::Necromancer => "necromancer",
-            Profession::Revenant => "revenant",
-        }
-    }
-}
-
-impl ToString for Profession {
-    fn to_string(&self) -> String {
-        self.as_ref().to_string()
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum Cull {
     #[default]
@@ -1167,9 +1112,9 @@ impl AsRef<str> for Cull {
     }
 }
 
-impl ToString for Cull {
-    fn to_string(&self) -> String {
-        self.as_ref().to_string()
+impl std::fmt::Display for Cull {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
     }
 }
 
@@ -1216,254 +1161,9 @@ impl AsRef<str> for Festival {
     }
 }
 
-impl ToString for Festival {
-    fn to_string(&self) -> String {
-        self.as_ref().to_string()
-    }
-}
-
-/// Filter for which specializations (the third traitline) will the marker be active for
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum Specialization {
-    Dueling = 0,
-    DeathMagic = 1,
-    Invocation = 2,
-    Strength = 3,
-    Druid = 4,
-    Explosives = 5,
-    Daredevil = 6,
-    Marksmanship = 7,
-    Retribution = 8,
-    Domination = 9,
-    Tactics = 10,
-    Salvation = 11,
-    Valor = 12,
-    Corruption = 13,
-    Devastation = 14,
-    Radiance = 15,
-    Water = 16,
-    Berserker = 17,
-    BloodMagic = 18,
-    ShadowArts = 19,
-    Tools = 20,
-    Defense = 21,
-    Inspiration = 22,
-    Illusions = 23,
-    NatureMagic = 24,
-    Earth = 25,
-    Dragonhunter = 26,
-    DeadlyArts = 27,
-    Alchemy = 28,
-    Skirmishing = 29,
-    Fire = 30,
-    BeastMastery = 31,
-    WildernessSurvival = 32,
-    Reaper = 33,
-    CriticalStrikes = 34,
-    Arms = 35,
-    Arcane = 36,
-    Firearms = 37,
-    Curses = 38,
-    Chronomancer = 39,
-    Air = 40,
-    Zeal = 41,
-    Scrapper = 42,
-    Trickery = 43,
-    Chaos = 44,
-    Virtues = 45,
-    Inventions = 46,
-    Tempest = 47,
-    Honor = 48,
-    SoulReaping = 49,
-    Discipline = 50,
-    Herald = 51,
-    Spite = 52,
-    Acrobatics = 53,
-    Soulbeast = 54,
-    Weaver = 55,
-    Holosmith = 56,
-    Deadeye = 57,
-    Mirage = 58,
-    Scourge = 59,
-    Spellbreaker = 60,
-    Firebrand = 61,
-    Renegade = 62,
-    Harbinger = 63,
-    Willbender = 64,
-    Virtuoso = 65,
-    Catalyst = 66,
-    Bladesworn = 67,
-    Vindicator = 68,
-    Mechanist = 69,
-    Specter = 70,
-    Untamed = 71,
-}
-
-impl FromStr for Specialization {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "dueling" => Self::Dueling,
-            "deathmagic" => Self::DeathMagic,
-            "invocation" => Self::Invocation,
-            "strength" => Self::Strength,
-            "druid" => Self::Druid,
-            "explosives" => Self::Explosives,
-            "daredevil" => Self::Daredevil,
-            "marksmanship" => Self::Marksmanship,
-            "retribution" => Self::Retribution,
-            "domination" => Self::Domination,
-            "tactics" => Self::Tactics,
-            "salvation" => Self::Salvation,
-            "valor" => Self::Valor,
-            "corruption" => Self::Corruption,
-            "devastation" => Self::Devastation,
-            "radiance" => Self::Radiance,
-            "water" => Self::Water,
-            "berserker" => Self::Berserker,
-            "bloodmagic" => Self::BloodMagic,
-            "shadowarts" => Self::ShadowArts,
-            "tools" => Self::Tools,
-            "defense" => Self::Defense,
-            "inspiration" => Self::Inspiration,
-            "illusions" => Self::Illusions,
-            "naturemagic" => Self::NatureMagic,
-            "earth" => Self::Earth,
-            "dragonhunter" => Self::Dragonhunter,
-            "deadlyarts" => Self::DeadlyArts,
-            "alchemy" => Self::Alchemy,
-            "skirmishing" => Self::Skirmishing,
-            "fire" => Self::Fire,
-            "beastmastery" => Self::BeastMastery,
-            "wildernesssurvival" => Self::WildernessSurvival,
-            "reaper" => Self::Reaper,
-            "criticalstrikes" => Self::CriticalStrikes,
-            "arms" => Self::Arms,
-            "arcane" => Self::Arcane,
-            "firearms" => Self::Firearms,
-            "curses" => Self::Curses,
-            "chronomancer" => Self::Chronomancer,
-            "air" => Self::Air,
-            "zeal" => Self::Zeal,
-            "scrapper" => Self::Scrapper,
-            "trickery" => Self::Trickery,
-            "chaos" => Self::Chaos,
-            "virtues" => Self::Virtues,
-            "inventions" => Self::Inventions,
-            "tempest" => Self::Tempest,
-            "honor" => Self::Honor,
-            "soulreaping" => Self::SoulReaping,
-            "discipline" => Self::Discipline,
-            "herald" => Self::Herald,
-            "spite" => Self::Spite,
-            "acrobatics" => Self::Acrobatics,
-            "soulbeast" => Self::Soulbeast,
-            "weaver" => Self::Weaver,
-            "holosmith" => Self::Holosmith,
-            "deadeye" => Self::Deadeye,
-            "mirage" => Self::Mirage,
-            "scourge" => Self::Scourge,
-            "spellbreaker" => Self::Spellbreaker,
-            "firebrand" => Self::Firebrand,
-            "renegade" => Self::Renegade,
-            "harbinger" => Self::Harbinger,
-            "willbender" => Self::Willbender,
-            "virtuoso" => Self::Virtuoso,
-            "catalyst" => Self::Catalyst,
-            "bladesworn" => Self::Bladesworn,
-            "vindicator" => Self::Vindicator,
-            "mechanist" => Self::Mechanist,
-            "specter" => Self::Specter,
-            "untamed" => Self::Untamed,
-            _ => return Err("invalid specialization"),
-        })
-    }
-}
-
-impl AsRef<str> for Specialization {
-    fn as_ref(&self) -> &str {
-        match self {
-            Self::Dueling => "dueling",
-            Self::DeathMagic => "deathmagic",
-            Self::Invocation => "invocation",
-            Self::Strength => "strength",
-            Self::Druid => "druid",
-            Self::Explosives => "explosives",
-            Self::Daredevil => "daredevil",
-            Self::Marksmanship => "marksmanship",
-            Self::Retribution => "retribution",
-            Self::Domination => "domination",
-            Self::Tactics => "tactics",
-            Self::Salvation => "salvation",
-            Self::Valor => "valor",
-            Self::Corruption => "corruption",
-            Self::Devastation => "devastation",
-            Self::Radiance => "radiance",
-            Self::Water => "water",
-            Self::Berserker => "berserker",
-            Self::BloodMagic => "bloodmagic",
-            Self::ShadowArts => "shadowarts",
-            Self::Tools => "tools",
-            Self::Defense => "defense",
-            Self::Inspiration => "inspiration",
-            Self::Illusions => "illusions",
-            Self::NatureMagic => "naturemagic",
-            Self::Earth => "earth",
-            Self::Dragonhunter => "dragonhunter",
-            Self::DeadlyArts => "deadlyarts",
-            Self::Alchemy => "alchemy",
-            Self::Skirmishing => "skirmishing",
-            Self::Fire => "fire",
-            Self::BeastMastery => "beastmastery",
-            Self::WildernessSurvival => "wildernesssurvival",
-            Self::Reaper => "reaper",
-            Self::CriticalStrikes => "criticalstrikes",
-            Self::Arms => "arms",
-            Self::Arcane => "arcane",
-            Self::Firearms => "firearms",
-            Self::Curses => "curses",
-            Self::Chronomancer => "chronomancer",
-            Self::Air => "air",
-            Self::Zeal => "zeal",
-            Self::Scrapper => "scrapper",
-            Self::Trickery => "trickery",
-            Self::Chaos => "chaos",
-            Self::Virtues => "virtues",
-            Self::Inventions => "inventions",
-            Self::Tempest => "tempest",
-            Self::Honor => "honor",
-            Self::SoulReaping => "soulreaping",
-            Self::Discipline => "discipline",
-            Self::Herald => "herald",
-            Self::Spite => "spite",
-            Self::Acrobatics => "acrobatics",
-            Self::Soulbeast => "soulbeast",
-            Self::Weaver => "weaver",
-            Self::Holosmith => "holosmith",
-            Self::Deadeye => "deadeye",
-            Self::Mirage => "mirage",
-            Self::Scourge => "scourge",
-            Self::Spellbreaker => "spellbreaker",
-            Self::Firebrand => "firebrand",
-            Self::Renegade => "renegade",
-            Self::Harbinger => "harbinger",
-            Self::Willbender => "willbender",
-            Self::Virtuoso => "virtuoso",
-            Self::Catalyst => "catalyst",
-            Self::Bladesworn => "bladesworn",
-            Self::Vindicator => "vindicator",
-            Self::Mechanist => "mechanist",
-            Self::Specter => "specter",
-            Self::Untamed => "untamed",
-        }
-    }
-}
-
-impl ToString for Specialization {
-    fn to_string(&self) -> String {
-        self.as_ref().to_string()
+impl std::fmt::Display for Festival {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
     }
 }
 
@@ -1525,9 +1225,9 @@ impl AsRef<str> for MapType {
     }
 }
 
-impl ToString for MapType {
-    fn to_string(&self) -> String {
-        self.as_ref().to_string()
+impl std::fmt::Display for MapType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
     }
 }
 

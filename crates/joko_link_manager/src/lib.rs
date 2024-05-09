@@ -12,16 +12,15 @@ use std::vec;
 
 use enumflags2::BitFlags;
 use joko_component_models::{
-    from_data, to_broadcast, Component, ComponentChannels, ComponentMessage, ComponentResult,
+    from_data, to_broadcast, to_data, Component, ComponentChannels, ComponentMessage,
+    ComponentResult,
 };
 use joko_core::serde_glam::{IVec2, UVec2, Vec3};
-use joko_link_models::{
-    ctypes, MessageToMumbleLinkBack, MumbleChanges, MumbleLink, MumbleLinkResult,
-};
+use joko_link_models::{ctypes, MessageToMumbleLink, MumbleChanges, MumbleLink};
 //use jokoapi::end_point::{mounts::Mount, races::Race};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use serde_json::from_str;
-use tracing::error;
+use tracing::{error, trace};
 
 /// The default mumble link name. can only be changed by passing the `-mumble` options to gw2 for multiboxing
 pub const DEFAULT_MUMBLELINK_NAME: &str = "MumbleLink";
@@ -37,6 +36,7 @@ use win::MumbleWinImpl as MumblePlatformImpl;
 
 struct MumbleChannels {
     notification_receiver: tokio::sync::mpsc::Receiver<ComponentMessage>,
+    front_end_notifier: Option<tokio::sync::mpsc::Sender<ComponentMessage>>,
 }
 // Useful link size is only [ctypes::USEFUL_C_MUMBLE_LINK_SIZE] . And we add 100 more bytes so that jokolink can put some extra stuff in there
 // pub(crate) const JOKOLINK_MUMBLE_BUFFER_SIZE: usize = ctypes::USEFUL_C_MUMBLE_LINK_SIZE + 100;
@@ -51,11 +51,11 @@ pub struct MumbleManager {
     /// we use this to get the latest mumble link and latest window dimensions of the current mumble link
     backend: MumblePlatformImpl,
     is_ui: bool,
+    repeat_last_value: bool,
     /// latest mumble link
-    link: MumbleLink,
+    link: Option<MumbleLink>,
 
     channels: Option<MumbleChannels>,
-    state: MumbleLinkResult,
 }
 
 impl MumbleManager {
@@ -66,38 +66,53 @@ impl MumbleManager {
             link: Default::default(),
             channels: None,
             is_ui,
-            state: MumbleLinkResult {
-                read_ui_link: false,
-                link: None,
-                ui_link: None,
-            },
+            repeat_last_value: false,
         })
     }
     pub fn is_alive(&self) -> bool {
         self.backend.is_alive()
     }
-    fn handle_message(&mut self, msg: MessageToMumbleLinkBack) {
-        //let (b2u_sender, _) = package_manager.channels();
+    fn handle_message(&mut self, msg: MessageToMumbleLink) {
         match msg {
-            MessageToMumbleLinkBack::Autonomous => {
-                tracing::trace!("Handling of UIToBackMessage::MumbleLinkAutonomous");
-                self.state.read_ui_link = false;
+            MessageToMumbleLink::Autonomous => {
+                trace!("Handling of MessageToMumbleLink::Autonomous {}", self.is_ui);
+                self.repeat_last_value = false;
+                if !self.is_ui {
+                    let channels = self.channels.as_ref().unwrap();
+                    let front_end_notifier = channels.front_end_notifier.as_ref().unwrap();
+                    let _ =
+                        front_end_notifier.blocking_send(to_data(MessageToMumbleLink::Autonomous));
+                }
             }
-            MessageToMumbleLinkBack::BindedOnUI => {
-                tracing::trace!("Handling of UIToBackMessage::MumbleLinkBindedOnUI");
-                self.state.read_ui_link = true;
+            MessageToMumbleLink::BindedOnUI => {
+                trace!("Handling of MessageToMumbleLink::BindedOnUI {}", self.is_ui);
+                self.repeat_last_value = true;
+                if !self.is_ui {
+                    let channels = self.channels.as_ref().unwrap();
+                    let front_end_notifier = channels.front_end_notifier.as_ref().unwrap();
+                    let _ =
+                        front_end_notifier.blocking_send(to_data(MessageToMumbleLink::BindedOnUI));
+                }
             }
-            MessageToMumbleLinkBack::Value(link) => {
-                tracing::trace!("Handling of UIToBackMessage::MumbleLink");
-                self.state.ui_link = link;
+            MessageToMumbleLink::Value(mut link) => {
+                trace!("Handling of MessageToMumbleLink::Value {}", self.is_ui);
+                link.changes = BitFlags::all();
+                self.link = Some(link);
+                if !self.is_ui {
+                    let channels = self.channels.as_ref().unwrap();
+                    let front_end_notifier = channels.front_end_notifier.as_ref().unwrap();
+                    let _ = front_end_notifier.blocking_send(to_data(MessageToMumbleLink::Value(
+                        self.link.clone().unwrap(),
+                    )));
+                }
             }
             #[allow(unreachable_patterns)]
             _ => {
-                unimplemented!("Handling MessageToPackageBack has not been implemented yet");
+                unimplemented!("Handling MessageToMumbleLink has not been implemented yet");
             }
         }
     }
-    fn _tick(&mut self) -> Result<Option<&MumbleLink>> {
+    fn _tick(&mut self) -> Result<Option<MumbleLink>> {
         if let Err(e) = self.backend.tick() {
             error!(?e, "mumble backend tick error");
             return Ok(None);
@@ -105,17 +120,19 @@ impl MumbleManager {
 
         //println!("mumble_link {} map found {}", self.is_ui, self.link.map_id);
         if !self.backend.is_alive() {
-            self.link.client_size.0.x = 0;
-            self.link.client_size.0.y = 0;
-            self.link.changes = BitFlags::all();
-            return Ok(Some(&self.link));
+            if let Some(link) = self.link.as_mut() {
+                link.client_size.0.x = 0;
+                link.client_size.0.y = 0;
+                link.changes = BitFlags::all();
+            }
+            return Ok(self.link.clone());
         }
         // backend is alive and tick is successful. time to get link
         let cml: ctypes::CMumbleLink = self.backend.get_cmumble_link();
-        let mut new_link = if cml.ui_tick == 0 && self.link.ui_tick != 0 {
+        let mut new_link = if cml.ui_tick == 0 && self.link.is_some() {
             Default::default()
         } else {
-            self.link.clone()
+            self.link.clone().unwrap_or_default()
         };
 
         if cml.ui_tick == 0 || cml.context.client_pos == [0; 2] {
@@ -214,13 +231,9 @@ impl MumbleManager {
             mount: cml.context.mount_index,
             race: identity.race,
         };
-        self.link = new_link;
+        self.link = Some(new_link);
 
-        Ok(if self.link.ui_tick == 0 {
-            None
-        } else {
-            Some(&self.link)
-        })
+        Ok(self.link.clone())
     }
 }
 
@@ -229,7 +242,7 @@ impl Component for MumbleManager {
 
     fn accept_notifications(&self) -> bool {
         // we may want to receive data from a manually edited form
-        !self.is_ui
+        true
     }
 
     fn flush_all_messages(&mut self) {
@@ -252,22 +265,23 @@ impl Component for MumbleManager {
             self.channels.is_some(),
             "channels must be initialized before interacting with component."
         );
-        let link = self._tick().unwrap_or(None);
-        self.state.link = link.cloned();
-        //println!("mumble_link result {} has link: {}", self.is_ui, self.state.link.is_some());
-        to_broadcast(self.state.clone())
+        if self.repeat_last_value {
+            to_broadcast(self.link.clone())
+        } else {
+            let link = self._tick().unwrap_or(None);
+            to_broadcast(link)
+        }
     }
     fn bind(&mut self, mut channels: ComponentChannels) {
-        let (_, notification_receiver) = channels.peers.remove(&0).unwrap();
         let channels = MumbleChannels {
-            notification_receiver,
+            notification_receiver: channels.input_notification.unwrap(),
+            front_end_notifier: channels.notify.remove(&0),
         };
         self.channels = Some(channels);
     }
-    //default is enough
-    fn peers(&self) -> Vec<&str> {
+    fn notify(&self) -> Vec<&str> {
         if self.is_ui {
-            vec!["back:mumble_link"]
+            vec![]
         } else {
             vec!["ui:mumble_link"]
         }

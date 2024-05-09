@@ -1,0 +1,39 @@
+SequenceDiagram {
+    actor user
+    lifeline ui_interface
+    control ui_editable_mumble
+    lifeline mumble_back
+    control back_repeat_last_value
+    lifeline mumble_ui
+    control ui_repeat_last_value
+
+    user -a-> ui_interface "select editable"
+    ui_interface --> ui_editable_mumble "activate"
+    activate ui_editable_mumble
+
+    ui_interface -a-> mumble_back "BindedOnUI"
+    mumble_back --> back_repeat_last_value "activate"
+    activate back_repeat_last_value
+    back_repeat_last_value --> mumble_back "trigger last value repetition"
+
+    mumble_back -a-> mumble_ui "BindedOnUI"
+    mumble_ui --> ui_repeat_last_value "activate"
+    activate ui_repeat_last_value
+    ui_repeat_last_value --> mumble_ui "trigger last value repetition"
+
+    ui_editable_mumble --> ui_interface "trigger last value propagation (from form)"
+    ui_interface -a-> mumble_back "Value"
+
+    user -a-> ui_interface "select live"
+    ui_interface --> ui_editable_mumble "deactivate"
+    deactivate ui_editable_mumble
+    ui_interface -a-> mumble_back "Autonomous"
+    mumble_back --> back_repeat_last_value "deactivate"
+    deactivate back_repeat_last_value
+
+    mumble_back -a-> mumble_ui "Autonomous"
+    mumble_ui --> ui_repeat_last_value "deactivate"
+    deactivate ui_repeat_last_value
+
+
+}

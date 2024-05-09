@@ -13,11 +13,3 @@ mod mumble;
 
 pub use messages::*;
 pub use mumble::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Serialize, Deserialize, Default)]
-pub struct MumbleLinkResult {
-    pub read_ui_link: bool,
-    pub link: Option<MumbleLink>,
-    pub ui_link: Option<MumbleLink>,
-}

@@ -246,7 +246,7 @@ impl PackCore {
     pub fn partial(all_categories: &HashMap<String, Uuid>) -> Self {
         // When loading extra data, one MUST know ALL the already existing categories. None MUST be missing.
         let mut res: Self = Self::new();
-        res.all_categories = all_categories.clone();
+        res.all_categories.clone_from(all_categories);
         res
     }
 

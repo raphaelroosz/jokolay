@@ -2,10 +2,9 @@ use std::sync::{Arc, RwLock};
 
 use egui_window_glfw_passthrough::GlfwBackend;
 use joko_component_models::{
-    default_component_result, from_broadcast, to_data, Component, ComponentChannels,
-    ComponentMessage, ComponentResult,
+    default_component_result, from_broadcast, Component, ComponentChannels, ComponentResult,
 };
-use joko_link_models::{MessageToMumbleLinkBack, MumbleChanges, MumbleLink, MumbleLinkResult};
+use joko_link_models::{MumbleChanges, MumbleLink};
 
 pub(crate) const MINIMAL_WINDOW_WIDTH: u32 = 640;
 pub(crate) const MINIMAL_WINDOW_HEIGHT: u32 = 480;
@@ -14,14 +13,12 @@ pub(crate) const MINIMAL_WINDOW_POSITION_Y: i32 = 0;
 
 struct WindowManagerChannels {
     subscription_mumblelink: tokio::sync::broadcast::Receiver<ComponentResult>,
-    mumble_link_back_notifier: tokio::sync::mpsc::Sender<ComponentMessage>,
 }
 pub(crate) struct WindowManager {
     glfw_backend: Arc<RwLock<GlfwBackend>>,
     window_changed: bool,
     maximal_window_width: u32,
     maximal_window_height: u32,
-    editable_mumble: bool,
     last_known_link: Option<MumbleLink>,
     channels: Option<WindowManagerChannels>,
 }
@@ -51,7 +48,6 @@ impl WindowManager {
             window_changed: true,
             maximal_window_width,
             maximal_window_height,
-            editable_mumble: false,
             last_known_link: None,
             channels: None,
         }
@@ -69,22 +65,14 @@ impl Component for WindowManager {
     fn bind(&mut self, mut channels: ComponentChannels) {
         let channels = WindowManagerChannels {
             subscription_mumblelink: channels.requirements.remove(&0).unwrap(),
-            mumble_link_back_notifier: channels.notify.remove(&1).unwrap(),
         };
 
         self.channels = Some(channels);
     }
-    fn flush_all_messages(&mut self) {
-        //unimplemented!()
-    }
-    fn init(&mut self) {
-        //unimplemented!()
-    }
+    fn flush_all_messages(&mut self) {}
+    fn init(&mut self) {}
     fn requirements(&self) -> Vec<&str> {
         vec!["ui:mumble_link"] // is it ?
-    }
-    fn notify(&self) -> Vec<&str> {
-        vec!["back:mumble_link"]
     }
     fn tick(&mut self, _latest_time: f64) -> ComponentResult {
         assert!(
@@ -92,17 +80,9 @@ impl Component for WindowManager {
             "channels must be initialized before interacting with component."
         );
         let channels = self.channels.as_mut().unwrap();
-        if self.editable_mumble {
-            if let Some(last_known_link) = &mut self.last_known_link {
-                self.window_changed = true;
-                last_known_link.changes = enumflags2::BitFlags::all();
-                let _ = channels.mumble_link_back_notifier.blocking_send(to_data(
-                    MessageToMumbleLinkBack::Value(Some(last_known_link.clone())),
-                ));
-            }
-        } else if let Ok(data) = channels.subscription_mumblelink.try_recv() {
-            let res: MumbleLinkResult = from_broadcast(&data);
-            match res.link {
+        if let Ok(data) = channels.subscription_mumblelink.try_recv() {
+            let link: Option<MumbleLink> = from_broadcast(&data);
+            match link {
                 Some(link) => {
                     if link.changes.contains(MumbleChanges::WindowPosition)
                         || link.changes.contains(MumbleChanges::WindowSize)

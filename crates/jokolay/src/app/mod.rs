@@ -62,7 +62,9 @@ impl Jokolay {
         let egui_context = egui::Context::default();
         let mumble_ui = Arc::new(RwLock::new(MumbleUIManager::new(egui_context.clone())));
 
-        let _ = component_manager.register("ui:mumbe_ui", mumble_ui.clone());
+        component_manager
+            .register("ui:mumble_ui", mumble_ui.clone())
+            .unwrap();
 
         /*
         components can be migrated to plugins

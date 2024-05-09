@@ -4,6 +4,7 @@ use joko_component_models::{
     default_component_result, from_broadcast, from_data, to_data, Component, ComponentChannels,
     ComponentMessage, ComponentResult,
 };
+use joko_link_models::MumbleLink;
 use joko_package_models::package::PackageImportReport;
 
 use tracing::{error, info, info_span, trace};
@@ -13,7 +14,6 @@ use crate::{
     jokolay_to_extract_path,
     message::{MessageToPackageBack, MessageToPackageUI},
 };
-use joko_link_models::MumbleLinkResult;
 use miette::{IntoDiagnostic, Result};
 use uuid::Uuid;
 
@@ -334,13 +334,7 @@ impl PackageDataManager {
         }
     }
 
-    pub fn _tick(&mut self, mumble_link_result: &MumbleLinkResult) {
-        let link = if mumble_link_result.read_ui_link {
-            mumble_link_result.ui_link.as_ref()
-        } else {
-            mumble_link_result.link.as_ref()
-        };
-
+    pub fn _tick(&mut self, link: &Option<MumbleLink>) {
         if let Some(link) = link {
             //TODO: how to save/load the active files ?
             let mut have_used_files_list_changed = false;
@@ -548,7 +542,7 @@ impl Component for PackageDataManager {
         let channels = self.channels.as_mut().unwrap();
         //trace!("blocking waiting for subscription_mumblelink {}", channels.subscription_mumblelink.len());
         let raw_mlr = channels.subscription_mumblelink.try_recv().unwrap();
-        let mumble_link_result: MumbleLinkResult = from_broadcast(&raw_mlr);
+        let mumble_link_result: Option<MumbleLink> = from_broadcast(&raw_mlr);
         //trace!("subscription_mumblelink provided data");
         self._tick(&mumble_link_result);
         default_component_result()

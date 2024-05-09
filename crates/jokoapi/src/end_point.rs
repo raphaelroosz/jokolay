@@ -14,7 +14,9 @@ pub use serde::{Deserialize, Serialize};
 // pub mod quaggans;
 // pub mod races;
 pub mod mounts;
+pub mod professions;
 pub mod races;
+pub mod specializations;
 pub mod worlds;
 const AUTHORIZATION_HEADER_NAME: &str = "Authorization";
 

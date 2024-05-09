@@ -4,7 +4,7 @@ use egui_window_glfw_passthrough::GlfwBackend;
 use joko_component_models::{
     default_component_result, from_broadcast, Component, ComponentChannels, ComponentResult,
 };
-use joko_link_models::{MumbleLinkResult, UISize};
+use joko_link_models::{MumbleLink, UISize};
 use joko_ui_models::{UIArea, UIPanel};
 use tracing::info;
 
@@ -259,10 +259,10 @@ impl Component for MenuPanelManager {
             let channels = self.channels.as_mut().unwrap();
             channels.subscription_mumblelink.try_recv().unwrap()
         };
-        let link_result: MumbleLinkResult = from_broadcast(&raw_link);
+        let link: Option<MumbleLink> = from_broadcast(&raw_link);
 
         let mut ui_scaling_factor = 1.0;
-        if let Some(link) = link_result.link.as_ref() {
+        if let Some(link) = link.as_ref() {
             let gw2_scale: f32 = if link.dpi_scaling == 1 || link.dpi_scaling == -1 {
                 (if link.dpi == 0 { 96.0 } else { link.dpi as f32 }) / 96.0
             } else {

@@ -23,7 +23,7 @@ use joko_component_models::Component;
 use joko_component_models::ComponentChannels;
 use joko_component_models::ComponentMessage;
 use joko_component_models::ComponentResult;
-use joko_link_models::MumbleLinkResult;
+use joko_link_models::MumbleLink;
 use joko_link_models::UIState;
 use joko_render_models::messages::MessageToRenderer;
 use joko_ui_models::UIArea;
@@ -49,7 +49,7 @@ pub struct JokoRenderer {
     egui_context: egui::Context,
     pub gl: egui_render_three_d::ThreeDBackend,
     channels: Option<JokoRendererChannels>,
-    link: MumbleLinkResult,
+    link: Option<MumbleLink>,
 }
 
 /// Necessary lies for GlfwBackend, which despite not moved (Arc + Mutex) shall prevent compilation
@@ -348,7 +348,7 @@ impl Component for JokoRenderer {
 
         let channels = self.channels.as_mut().unwrap();
         let raw_link = channels.subscription_mumble_link.blocking_recv().unwrap();
-        let link: MumbleLinkResult = from_broadcast(&raw_link);
+        let link: Option<MumbleLink> = from_broadcast(&raw_link);
         self.link = link;
         default_component_result()
     }
@@ -366,7 +366,7 @@ impl UIPanel for JokoRenderer {
 
     fn gui(&mut self, _is_open: &mut bool, _area_id: &str, latest_time: f64) {
         self._window_tick();
-        if let Some(link) = &self.link.link {
+        if let Some(link) = &self.link {
             //trace!("JokoRenderer {:?} {:?}", link.player_pos, link.cam_pos);
             //x positive => east
             //y positive => ascention

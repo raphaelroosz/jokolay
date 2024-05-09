@@ -198,7 +198,9 @@ impl Category {
                     report.found_category_late(&value.full_category_name, value.guid);
                     to_insert.relative_category_name =
                         nth_chunk(&value.relative_category_name, '.', n);
-                    to_insert.display_name = to_insert.relative_category_name.clone();
+                    to_insert
+                        .display_name
+                        .clone_from(&to_insert.relative_category_name);
                     debug!(
                         "parent_name: {:?}, new name: {}, old name: {}",
                         last_name, to_insert.relative_category_name, &value.relative_category_name

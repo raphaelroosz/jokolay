@@ -408,7 +408,7 @@ impl LoadedPackData {
         let _ = front_end_notifier.blocking_send(to_data(
             MessageToPackageUI::PackageActiveElements(self.uuid, active_elements.clone()),
         ));
-        self.active_elements = active_elements.clone();
+        self.active_elements.clone_from(&active_elements);
         next_loaded.extend(active_elements);
     }
 

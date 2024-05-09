@@ -312,7 +312,7 @@ impl UIPanel for ThemeManager {
                                                     .clicked()
                                                     && !checked
                                                 {
-                                                    self.config.default_theme = theme_name.clone();
+                                                    self.config.default_theme.clone_from(theme_name);
                                                 }
                                             }
                                         });

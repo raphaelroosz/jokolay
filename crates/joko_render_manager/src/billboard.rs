@@ -76,8 +76,8 @@ impl BillBoardRenderer {
             self.markers_wip.len(),
             self.trails_wip.len()
         );
-        self.markers = self.markers_wip.clone();
-        self.trails = self.trails_wip.clone();
+        self.markers.clone_from(&self.markers_wip);
+        self.trails.clone_from(&self.trails_wip);
     }
     pub fn swap(&mut self) {
         trace!(

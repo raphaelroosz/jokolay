@@ -4,7 +4,7 @@ use egui::DragValue;
 use joko_component_models::{
     default_component_result, from_broadcast, to_data, Component, ComponentMessage, ComponentResult,
 };
-use joko_link_models::{MessageToMumbleLinkBack, MumbleLink, MumbleLinkResult};
+use joko_link_models::{MessageToMumbleLink, MumbleLink};
 use joko_ui_models::{UIArea, UIPanel};
 
 struct MumbleUIManagerChannels {
@@ -291,7 +291,12 @@ impl Component for MumbleUIManager {
         };
         self.channels = Some(channels);
     }
-    fn flush_all_messages(&mut self) {}
+    fn flush_all_messages(&mut self) {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
+    }
     fn accept_notifications(&self) -> bool {
         false
     }
@@ -306,12 +311,16 @@ impl Component for MumbleUIManager {
         vec![]
     }
     fn tick(&mut self, _latest_time: f64) -> joko_component_models::ComponentResult {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let channels = self.channels.as_mut().unwrap();
 
         if let Ok(link) = channels.subscription_mumble_link.try_recv() {
-            let data: MumbleLinkResult = from_broadcast(&link);
-            if data.read_ui_link || self.editable_mumble {
-            } else if let Some(link) = data.link {
+            let link: Option<MumbleLink> = from_broadcast(&link);
+            if self.editable_mumble {
+            } else if let Some(link) = link {
                 self.last_known_link = link;
             }
         }
@@ -329,6 +338,10 @@ impl UIPanel for MumbleUIManager {
     }
     fn init(&mut self) {}
     fn gui(&mut self, is_open: &mut bool, _area_id: &str, _latest_time: f64) {
+        assert!(
+            self.channels.is_some(),
+            "channels must be initialized before interacting with component."
+        );
         let channels = self.channels.as_mut().unwrap();
         let back_end_notifier = channels.back_end_notifier.borrow_mut();
         let egui_context = &self.egui_context;
@@ -340,7 +353,7 @@ impl UIPanel for MumbleUIManager {
                     if ui.selectable_label(!self.editable_mumble, "live").clicked() {
                         self.editable_mumble = false;
                         let _ = back_end_notifier
-                            .blocking_send(to_data(MessageToMumbleLinkBack::Autonomous));
+                            .blocking_send(to_data(MessageToMumbleLink::Autonomous));
                     }
                     if ui
                         .selectable_label(self.editable_mumble, "editable")
@@ -348,7 +361,7 @@ impl UIPanel for MumbleUIManager {
                     {
                         self.editable_mumble = true;
                         let _ = back_end_notifier
-                            .blocking_send(to_data(MessageToMumbleLinkBack::BindedOnUI));
+                            .blocking_send(to_data(MessageToMumbleLink::BindedOnUI));
                     }
                 });
                 if self.editable_mumble {
@@ -358,11 +371,17 @@ impl UIPanel for MumbleUIManager {
                         )
                         .color(egui::Color32::RED),
                     );
+                    //TODO: how to detect there was a change in value, to only propagate changed values ?
                     Self::editable_mumble_ui(ui, &mut self.last_known_link);
                 } else {
                     let link: MumbleLink = self.last_known_link.clone();
                     Self::live_mumble_ui(ui, link);
                 }
             });
+        if self.editable_mumble {
+            let _ = back_end_notifier.blocking_send(to_data(MessageToMumbleLink::Value(
+                self.last_known_link.clone(),
+            )));
+        }
     }
 }

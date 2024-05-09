@@ -1,0 +1,22 @@
+digraph {
+    0 [ label = "back:mumble_link" ]
+    1 [ label = "back:jokolay_package_manager" ]
+    2 [ label = "ui:window_manager" ]
+    3 [ label = "ui:configuration" ]
+    4 [ label = "ui:mumble_link" ]
+    5 [ label = "ui:jokolay_renderer" ]
+    6 [ label = "back:configuration" ]
+    7 [ label = "ui:jokolay_package_manager" ]
+    8 [ label = "ui:menu_panel" ]
+    1 -> 7 [ label = "Peer" ]
+    7 -> 1 [ label = "Peer" ]
+    1 -> 0 [ label = "Requires" ]
+    2 -> 4 [ label = "Requires" ]
+    3 -> 6 [ label = "Notify" ]
+    4 -> 0 [ label = "Notify" ]
+    5 -> 4 [ label = "Requires" ]
+    7 -> 4 [ label = "Requires" ]
+    7 -> 5 [ label = "Notify" ]
+    8 -> 4 [ label = "Requires" ]
+}
+

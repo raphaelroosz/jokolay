@@ -19,7 +19,7 @@ use joko_component_models::{
     ComponentMessage, ComponentResult,
 };
 use joko_core::{serde_glam::Vec3, RelativePath};
-use joko_link_models::{MumbleChanges, MumbleLink, MumbleLinkResult};
+use joko_link_models::{MumbleChanges, MumbleLink};
 use miette::Result;
 use uuid::Uuid;
 
@@ -683,7 +683,7 @@ impl Component for PackageUIManager {
             //trace!("blocking waiting for subscription_mumblelink {}", channels.subscription_mumblelink.len());
             channels.subscription_mumblelink.try_recv().unwrap()
         };
-        let link_result: MumbleLinkResult = from_broadcast(&raw_link);
+        let link: Option<MumbleLink> = from_broadcast(&raw_link);
         //trace!("subscription_mumblelink provided data");
 
         for (pack_uuid, tex_path, marker_uuid, position, common_attributes) in
@@ -713,7 +713,7 @@ impl Component for PackageUIManager {
         //let channels = self.channels.as_mut().unwrap();
         //let raw_z_near = channels.subscription_near_scene.blocking_recv().unwrap();
         //let z_near: f32 = from_data(raw_z_near);
-        if let Some(link) = link_result.link.as_ref() {
+        if let Some(link) = link.as_ref() {
             let _ = self._tick(timestamp, link, self.z_near);
         }
         to_broadcast(self.state.clone())
